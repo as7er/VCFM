@@ -510,7 +510,8 @@ export function playerHasAvatarAsset(player, avatarManifest, opts) {
 }
 
 /**
- * 运行时球衣主色着色（canvas）。仅改下半身织物区，保留脸/发/线稿。
+ * 运行时球衣主色着色（canvas）。
+ * 新风格肖像肩线更高：从约 48% 高度起处理球衣区；保留脸/发/线稿/白底。
  * @returns {Promise<string|null>} data URL
  */
 export async function recolorAvatarKit(srcUrl, targetHex, opts = {}) {
@@ -533,6 +534,8 @@ export async function recolorAvatarKit(srcUrl, targetHex, opts = {}) {
   const tr = target.r;
   const tg = target.g;
   const tb = target.b;
+  // 目标色亮度，用于把不同原画球衣压到更接近的队色观感
+  const tLum = 0.299 * tr + 0.587 * tg + 0.114 * tb;
 
   for (let y = 0; y < outSize; y++) {
     for (let x = 0; x < outSize; x++) {
@@ -542,27 +545,53 @@ export async function recolorAvatarKit(srcUrl, targetHex, opts = {}) {
       const b = d[i + 2];
       const a = d[i + 3];
       if (a < 8) continue;
+
       const maxc = Math.max(r, g, b);
       const minc = Math.min(r, g, b);
       const lum = 0.299 * r + 0.587 * g + 0.114 * b;
       const sat = maxc === 0 ? 0 : (maxc - minc) / maxc;
-      const inLower = y > outSize * 0.62;
-      const isBg = sat < 0.12 && lum > 170;
-      const isLine = lum < 42;
+      const nx = x / outSize;
+      const ny = y / outSize;
+
+      // 白底 / 近白背景
+      if (sat < 0.14 && lum > 210) continue;
+      // 线稿 / 深描边
+      if (lum < 36 && sat < 0.35) continue;
+
+      // 脸部保护区（上半中部）
+      const inFaceBand = ny < 0.58 && nx > 0.22 && nx < 0.78;
       const isSkinish =
-        y < outSize * 0.72 &&
-        r > 90 &&
-        g > 50 &&
-        b > 40 &&
+        inFaceBand &&
+        r > 85 &&
+        g > 45 &&
+        b > 30 &&
+        r >= g - 8 &&
         r > b &&
-        r > g - 10 &&
-        sat > 0.12 &&
-        sat < 0.65 &&
-        lum > 70 &&
-        lum < 220;
-      if (!inLower || isBg || isLine || isSkinish) continue;
-      if (sat < 0.08 && lum > 140) continue;
-      const shade = Math.max(0.35, Math.min(1.55, lum / 110));
+        sat > 0.08 &&
+        sat < 0.72 &&
+        lum > 55 &&
+        lum < 230;
+      if (isSkinish) continue;
+
+      // 头发/头饰保护区：顶部且非球衣带
+      if (ny < 0.34 && !(ny > 0.28 && sat > 0.18 && lum < 190)) continue;
+
+      // 球衣主区：肩线以下；中间更宽，两侧略收
+      const kitStart = 0.46;
+      if (ny < kitStart) continue;
+      const sideMargin = 0.08 + Math.max(0, (0.72 - ny) * 0.12);
+      if (nx < sideMargin || nx > 1 - sideMargin) continue;
+
+      // 近白领口/高光可保留一点，但低饱和浅色球衣也要上色
+      const isNearWhiteFabric = sat < 0.06 && lum > 225;
+      if (isNearWhiteFabric && ny < 0.56) continue;
+
+      // 把原像素亮度映射到目标色，并略向队色亮度靠拢，减少“同队深浅乱跳”
+      let shade = lum / Math.max(40, tLum);
+      shade = Math.max(0.42, Math.min(1.35, shade));
+      // 下半身更实色一点
+      if (ny > 0.7) shade = Math.max(0.5, Math.min(1.25, shade * 0.98 + 0.06));
+
       d[i] = Math.max(0, Math.min(255, Math.round(tr * shade)));
       d[i + 1] = Math.max(0, Math.min(255, Math.round(tg * shade)));
       d[i + 2] = Math.max(0, Math.min(255, Math.round(tb * shade)));
