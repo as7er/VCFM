@@ -168,7 +168,7 @@ export const APPEARANCE_HAIR_COLORS = Object.freeze([
   "black", "dkbrown", "brown", "ltbrown", "blond", "red", "grey", "white",
 ]);
 /** 0 flat 1 pompadour 2 spiky 3 buzz 4 sidepart 5 bowl 6 afro 7 curl 8 fade 9 long */
-export const APPEARANCE_HAIR_STYLE_IDS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+export const APPEARANCE_HAIR_STYLE_IDS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
 export const APPEARANCE_HAIR_STYLE_NAMES = Object.freeze({
   0: "flat",
   1: "pompadour",
@@ -180,6 +180,10 @@ export const APPEARANCE_HAIR_STYLE_NAMES = Object.freeze({
   7: "curl",
   8: "fade",
   9: "long",
+  10: "mohawk",
+  11: "mullet",
+  12: "headband",
+  13: "topknot",
 });
 
 const APPEARANCE_STYLE_DEFAULT = [
@@ -299,12 +303,12 @@ function normalizeHairStyleId(v) {
   if (v == null || v === "") return null;
   if (typeof v === "number" && Number.isFinite(v)) {
     const n = Math.round(v);
-    return n >= 0 && n <= 9 ? n : null;
+    return n >= 0 && n <= 13 ? n : null;
   }
   const s = String(v).toLowerCase();
   if (/^\d+$/.test(s)) {
     const n = Number(s);
-    return n >= 0 && n <= 9 ? n : null;
+    return n >= 0 && n <= 13 ? n : null;
   }
   const byName = {
     flat: 0, flat_top: 0, flattop: 0, kunio: 0,
@@ -317,6 +321,10 @@ function normalizeHairStyleId(v) {
     curl: 7, curly: 7,
     fade: 8, bald_fade: 8,
     long: 9, longhair: 9,
+    mohawk: 10, punk: 10,
+    mullet: 11,
+    headband: 12, band: 12,
+    topknot: 13, bun: 13, knot: 13,
   };
   if (byName[s] != null) return byName[s];
   return null;

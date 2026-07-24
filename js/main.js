@@ -216,7 +216,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=135";
+} from "./avatar.js?v=136";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;

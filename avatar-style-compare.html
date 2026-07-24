@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VCFM 热血程序脸 2.0</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; padding:24px; font-family:system-ui,sans-serif; background:#0b1220; color:#e2e8f0; }
+    h1{font-size:1.2rem;margin:0 0 .4rem}
+    .note{color:#94a3b8;font-size:.9rem;margin-bottom:1rem}
+    .row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin:.6rem 0 1rem}
+    .cell{text-align:center}
+    .lb{font-size:11px;color:#8a97ad;margin-top:5px}
+    .card{background:#121a2b;border:1px solid #243047;border-radius:12px;padding:14px;margin-bottom:12px}
+    code{color:#93c5fd}
+  </style>
+</head>
+<body>
+  <h1>全场景统一：热血程序脸 2.0</h1>
+  <p class="note">名单 / 资料卡 / 战术板 / 职员 全部使用 <code>js/avatar.js</code> 程序脸。无正式肖像分支。</p>
+  <div class="card">
+    <h3 style="margin:.2rem 0 .5rem">多国籍样本</h3>
+    <div class="row" id="samples"></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:.2rem 0 .5rem">同队同衣（sunset）</h3>
+    <div class="row" id="same"></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:.2rem 0 .5rem">状态</h3>
+    <div class="row" id="moods"></div>
+  </div>
+  <script type="module">
+    import { playerAvatarHtml, avatarHtml } from './js/avatar.js?v=136';
+    import { ensurePlayerAppearance } from './js/models.js';
+    const club = { id:'sunset', kit:{ primary:'#f97316', secondary:'#5b21b6' } };
+    const nations = ['JPN','NGA','SWE','BRA','ENG','SEN','ITA','CHN','IRL','MAR'];
+    const samples = nations.map((n,i)=>ensurePlayerAppearance({
+      id:'u2-'+n, name:n, age:18+i, nationality:n, pos:['GK','DEF','MID','ATT'][i%4]
+    }));
+    document.getElementById('samples').innerHTML = samples.map(p=>
+      `<div class="cell">${playerAvatarHtml(p, club, 56)}<div class="lb">${p.nationality}<br/>style ${p.hairStyle}</div></div>`
+    ).join('');
+    document.getElementById('same').innerHTML = samples.slice(0,6).map(p=>
+      `<div class="cell">${playerAvatarHtml(p, club, 52)}<div class="lb">${p.nationality}</div></div>`
+    ).join('');
+    const base = ensurePlayerAppearance({id:'mood', name:'Mood', age:26, nationality:'GER', pos:'MID'});
+    const moods = [
+      ['neutral', {}],
+      ['injured', {injured:3}],
+      ['happy', {morale:90}],
+      ['sad', {morale:30}],
+      ['tired', {fitness:40}],
+    ];
+    document.getElementById('moods').innerHTML = moods.map(([label, patch])=>
+      `<div class="cell">${playerAvatarHtml({...base, ...patch, name:label}, club, 52)}<div class="lb">${label}</div></div>`
+    ).join('');
+  </script>
+</body>
+</html>

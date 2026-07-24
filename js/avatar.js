@@ -1,15 +1,8 @@
 /**
- * 热血像素头像（Kunio-style procedural）
- * 球员/职员均走程序生成；球衣色由俱乐部 kit 直接绘制，保证同队同款同色。
+ * 热血像素头像 2.0（Kunio-style procedural）
+ * 全场景统一：名单 / 资料卡 / 战术板 / 职员 都走本文件程序生成。
+ * 同队球衣由 kit 主副色直接绘制，天然同款同色。
  */
-
-// 后台刷新磁盘 manifest（失败则保留内置副本）
-if (typeof fetch === "function") {
-  try {
-  } catch {
-    /* ignore */
-  }
-}
 
 /** @typedef {'neutral'|'happy'|'injured'|'sad'|'tired'} AvatarMood */
 
@@ -132,18 +125,21 @@ const HAIR_COLORS = {
 };
 
 /**
- * 发型 id：
- * 0 平顶(国夫头) 1 飞机头(リーゼント) 2 刺猬 3 寸头 4 侧分
- * 5 锅盖 6 爆炸头 7 短卷 8 光头渐层 9 长发(90s 后蓄)
+ * 发型 id（2.0）：
+ * 0 平顶 1 飞机头 2 刺猬 3 寸头 4 侧分
+ * 5 锅盖 6 爆炸头 7 短卷 8 光头渐层 9 长发
+ * 10 莫霍克 11 鲻鱼头 12 头带短发 13 顶髻/束发
  */
 const STYLE_DEFAULT = [
-  [2, 16], [4, 16], [3, 14], [0, 12], [7, 10], [1, 10], [9, 8], [5, 6], [8, 6], [6, 2],
+  [2, 14], [4, 14], [3, 12], [0, 11], [7, 9], [1, 9],
+  [9, 7], [5, 6], [12, 6], [10, 5], [11, 4], [8, 4], [13, 3], [6, 2],
 ];
 const STYLE_EASIA = [
-  [5, 20], [4, 18], [2, 18], [1, 14], [3, 12], [0, 10], [9, 5], [7, 3],
+  [5, 16], [4, 15], [2, 14], [1, 12], [3, 11], [0, 9],
+  [13, 7], [12, 6], [9, 5], [7, 4], [10, 2],
 ];
 const STYLE_AFRO = [
-  [3, 26], [7, 24], [6, 16], [8, 16], [0, 10], [2, 8],
+  [3, 20], [7, 18], [6, 14], [8, 14], [0, 10], [2, 8], [12, 8], [10, 5], [13, 3],
 ];
 
 /** 地区画像：skin/hair 为加权表；style 缺省用 STYLE_DEFAULT */
@@ -259,7 +255,7 @@ function lookFor(h, nation, age = 25, persisted = null) {
   let styleId = Number.isFinite(Number(persisted?.hairStyle))
     ? Math.round(Number(persisted.hairStyle))
     : wpick(h, 14, styleW);
-  if (!(styleId >= 0 && styleId <= 9)) styleId = wpick(h, 14, styleW);
+  if (!(styleId >= 0 && styleId <= 13)) styleId = wpick(h, 14, styleW);
   const face = {
     eyeStyle: (h >>> 3) % 4,
     browStyle: (h >>> 8) % 4,
@@ -267,7 +263,14 @@ function lookFor(h, nation, age = 25, persisted = null) {
     noseStyle: (h >>> 18) % 3,
     gaze: ((h >>> 21) % 3) - 1,
   };
-  return { skin, skinShade, hairHex, styleId, darkSkin, face, skinKey, hairKey };
+  // 2.0 小特征：稳定但不喧宾夺主
+  const accessories = {
+    stubble: age >= 23 && ((h >>> 9) % 7) === 0,
+    scar: ((h >>> 11) % 11) === 0,
+    headband: styleId === 12 || ((h >>> 15) % 17) === 0,
+    freckles: !darkSkin && ((h >>> 17) % 13) === 0,
+  };
+  return { skin, skinShade, hairHex, styleId, darkSkin, face, skinKey, hairKey, accessories };
 }
 
 // ============================================================
@@ -408,6 +411,32 @@ function hairCells(styleId, H, Hh, S) {
         P(4, 18, OUT), P(5, 19, OUT), P(26, 19, OUT), P(27, 18, OUT),
         R(9, 15, 2, Hh), R(8, 12, 3, Hh),
       ];
+    case 10: // 莫霍克
+      return [
+        R(14, 17, 0, OUT), R(13, 18, 1, OUT),
+        Box(14, 17, 1, 7, H), R(13, 18, 2, H), R(14, 17, 7, Hd),
+        P(15, 2, Hh), P(16, 3, Hh), P(15, 5, Hh),
+        R(8, 11, 7, Hd), R(20, 23, 7, Hd),
+      ];
+    case 11: // 鲻鱼头（短顶长后）
+      return [
+        R(8, 23, 0, OUT), P(7, 1, OUT), P(24, 1, OUT),
+        Box(8, 23, 1, 6, H), R(8, 23, 6, Hd),
+        C(5, 7, 18, H), C(6, 8, 19, Hd), C(25, 8, 19, Hd), C(26, 7, 18, H),
+        R(10, 15, 2, Hh), R(9, 13, 3, Hh),
+      ];
+    case 12: // 头带短发
+      return [
+        R(8, 23, 3, OUT), Box(8, 23, 4, 7, H), R(8, 23, 7, Hd),
+        R(7, 24, 8, "#e11d48"), R(8, 23, 9, "#be123c"),
+        P(10, 5, Hh), P(15, 5, Hh), P(20, 5, Hh),
+      ];
+    case 13: // 顶髻 / 束发
+      return [
+        R(9, 22, 3, OUT), Box(8, 23, 4, 7, H), R(8, 23, 7, Hd),
+        Box(13, 18, 0, 3, H), R(14, 17, 1, Hh), P(12, 2, OUT), P(19, 2, OUT),
+        R(8, 11, 8, H), R(20, 23, 8, H),
+      ];
     default:
       return [Box(6, 25, 4, 5, "#26221f")];
   }
@@ -528,6 +557,22 @@ function faceCells(mood, look, styleId) {
   if (mood === "injured") {
     parts.push(R(8, 23, 5, "#e8e4da"), R(10, 21, 6, "#d4cfc2"));
     parts.push(P(7, 6, "#e8e4da"), P(24, 5, "#d4cfc2"));
+  }
+
+  // —— 2.0 小特征（与状态叠加，但不盖过情绪）——
+  const acc = look.accessories || {};
+  if (acc.freckles) {
+    parts.push(P(11, 14, cheek), P(12, 15, cheek), P(20, 14, cheek), P(19, 15, cheek));
+  }
+  if (acc.scar && mood !== "injured") {
+    parts.push(P(20, 10, "#a15b50"), P(21, 11, "#8f4a48"), P(22, 12, "#a15b50"));
+  }
+  if (acc.stubble && mood !== "happy") {
+    const stub = mixHex(look.skinShade, look.hairHex, 0.35);
+    parts.push(R(12, 19, 18, stub), P(11, 17, stub), P(20, 17, stub));
+  }
+  if (acc.headband && styleId !== 12) {
+    parts.push(R(8, 23, 7, "#e11d48"), R(9, 22, 8, "#be123c"));
   }
   return parts;
 }
@@ -804,7 +849,7 @@ export function avatarHtml(person, opts = {}) {
     size,
     mood,
   };
-  // 程序生成图：正式资产加载失败时的 fallback；无资产时也是主路径
+  // 全场景统一：热血程序脸 2.0
   const pngUri = renderAvatarPngUri(renderOpts);
   const svgFallback = () => renderAvatarSvg(renderOpts);
 
@@ -832,7 +877,7 @@ export function avatarHtml(person, opts = {}) {
   )}" role="img" aria-label="${escapeAttr(label)}">${inner}${moodOverlayHtml(mood)}</span>`;
 }
 
-/** Formal portrait mood badge: keep base art neutral, overlay status. */
+/** 状态角标（伤/佳/低/疲） */
 function moodOverlayHtml(mood) {
   if (!mood || mood === "neutral") return "";
   const label =
@@ -860,15 +905,8 @@ const AVATAR_KIT_THEME = {
   mill: { primary: "#166534", secondary: "#eab308" },
 };
 
-/**
- * 插入 DOM 后调用：对带 data-kit-recolor 的正式肖像做球衣主色对齐。
- * 可重复调用；已处理过的图会打 data-kit-done。
- * @param {ParentNode} [root]
- */
-export function hydrateAvatarKitRecolor(root) {
-  // 已回归程序像素脸；无需正式肖像球衣合成/重上色
-  return;
-}
+/** 兼容旧调用：程序脸无需异步着色 */
+export function hydrateAvatarKitRecolor() {}
 
 export function playerAvatarHtml(player, club, size = 36) {
   const theme = club?.id ? AVATAR_KIT_THEME[club.id] : null;
