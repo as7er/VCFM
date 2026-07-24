@@ -1,36 +1,11 @@
 /**
- * 程序生成像素头像（球员 / 职员 / 经理）——90 年代热血系列（くにおくん）画风
- *
- * v5 全面重绘：SD 大头、粗黑描边、方块发型（飞机头/平头/刺猬/锅盖/爆炸头等）、
- * 热血式怒眉。肤色/发色/发型按球员国籍的地区画像加权分配（稳定哈希种子）；
- * 心情系统保留：neutral 怒眉、happy 咧嘴、injured 绷带X眼、tired 汗滴、sad 垂眉。
- *
- * v5.1 起浏览器端把像素画到 canvas（每格整数设备像素）导出 PNG <img>，
- * 避免 SVG 在模态动画/系统缩放下出现不可控合成；SVG 路径保留作无 DOM 兜底。
- *
- * v5.4 自然表情：状态表情与天生五官分离；同为 neutral 的球员也会按稳定种子生成
- * 不同眉形、眼型、目光、鼻型与嘴型，默认观感由怒眉坏笑改为平静 / 专注 / 友善。
- *
- * v5.5 正式肖像资产：当 player.avatarAssetId（等）命中本地 manifest 时，渲染 WebP/PNG
- * 文件（不重新绘制人物）；失败 onerror 回退本文件的程序生成图。映射见 avatar-assets.js。
- *
- * 对外 API 与 v4 完全兼容：moodFromPlayer / renderAvatarSvg / avatarHtml /
- * playerAvatarHtml / staffAvatarHtml；并 re-export resolvePlayerAvatar。
+ * 热血像素头像（Kunio-style procedural）
+ * 球员/职员均走程序生成；球衣色由俱乐部 kit 直接绘制，保证同队同款同色。
  */
-
-import {
-  resolvePlayerAvatar,
-  loadAvatarManifest,
-  getAvatarManifest,
-  playerAppearanceKey,
-  getKitRecoloredSrc,
-  colorDistance,
-} from "./avatar-assets.js";
 
 // 后台刷新磁盘 manifest（失败则保留内置副本）
 if (typeof fetch === "function") {
   try {
-    loadAvatarManifest();
   } catch {
     /* ignore */
   }
@@ -51,6 +26,16 @@ function hashStr(s) {
   }
   return h >>> 0;
 }
+
+/** 稳定外貌身份键：appearanceSeed → id → name */
+export function playerAppearanceKey(player) {
+  if (!player || typeof player !== "object") return "anon";
+  if (player.appearanceSeed != null && player.appearanceSeed !== "") return String(player.appearanceSeed);
+  if (player.id != null && player.id !== "") return String(player.id);
+  if (player.name != null && player.name !== "") return String(player.name);
+  return "anon";
+}
+
 
 function initials(name) {
   if (!name) return "?";
@@ -824,47 +809,7 @@ export function avatarHtml(person, opts = {}) {
   const svgFallback = () => renderAvatarSvg(renderOpts);
 
   let inner;
-  // 仅球员角色尝试正式肖像（职员/经理仍走像素）
-  const tryArt =
-    role === "player" && opts.forceProcedural !== true
-      ? resolvePlayerAvatar(person, getAvatarManifest(), {
-          size,
-          kitPrimary,
-          kitSecondary,
-          skinTone: person.skinTone || null,
-          hairColor: person.hairColor || null,
-          hairStyle: person.hairStyle,
-        })
-      : null;
-
-  if (tryArt && tryArt.kind === "asset" && tryArt.src) {
-    // 贴头必须用高清 portrait，不能用列表 thumbnail（小图再裁头会糊/裁坏）
-    const composeSrcRaw = tryArt.srcPortrait || tryArt.src;
-    const artSrc = escapeAttr(composeSrcRaw);
-    const alt = escapeAttr(person.name || "player");
-    // onerror → 程序生成 data-URI；再失败则去掉图（外层 title 仍在）
-    const fb = pngUri ? escapeAttr(pngUri) : "";
-    const onerr = fb
-      ? `this.onerror=null;this.src="${fb}";this.classList.remove("avatar-art");this.classList.add("avatar-px");this.removeAttribute("data-kit-compose");this.removeAttribute("data-kit-recolor");`
-      : `this.onerror=null;this.remove();`;
-    // 同队同款：正式头像只取头部，贴到标准队服（不再重上色原画球衣）
-    const needKit = !!kitPrimary;
-    const kitAttr = needKit
-      ? ` data-kit-compose="1" data-kit-primary="${escapeAttr(kitPrimary)}" data-kit-secondary="${escapeAttr(kitSecondary || "")}" data-kit-pos="${escapeAttr(person.pos || "")}" data-art-src="${artSrc}"`
-      : "";
-    const bodyPlaceholder = needKit
-      ? renderStandardKitBodyUri({
-          size,
-          kitPrimary,
-          kitSecondary,
-          pos: person.pos || "",
-        })
-      : null;
-    const initialSrc = escapeAttr(bodyPlaceholder || tryArt.src);
-    inner = `<img class="avatar-art" src="${initialSrc}" width="${size}" height="${size}" alt="${alt}" draggable="false" loading="lazy" decoding="async" data-avatar-id="${escapeAttr(
-      tryArt.id || ""
-    )}"${kitAttr} onerror="${onerr}">`;
-  } else if (pngUri) {
+  if (pngUri) {
     inner = `<img class="avatar-px" src="${pngUri}" width="${size}" height="${size}" alt="" draggable="false">`;
   } else {
     inner = svgFallback();
@@ -881,25 +826,11 @@ export function avatarHtml(person, opts = {}) {
             ? " · 疲惫"
             : "";
   const label = (person.name || "") + moodTip;
-  const artCls =
-    tryArt && tryArt.kind === "asset" ? " avatar-has-art" : "";
-  const cls = `avatar mood-${mood}${artCls}${opts.className ? " " + opts.className : ""}`;
+  const cls = `avatar mood-${mood}${opts.className ? " " + opts.className : ""}`;
   return `<span class="${cls}" style="width:${size}px;height:${size}px" title="${escapeAttr(
     label
   )}" role="img" aria-label="${escapeAttr(label)}">${inner}${moodOverlayHtml(mood)}</span>`;
 }
-
-// 资产管线公开 re-export（调用方无需改 import 路径也可测）
-export {
-  resolvePlayerAvatar,
-  loadAvatarManifest,
-  getAvatarManifest,
-  playerAppearanceKey,
-  getKitRecoloredSrc,
-  buildAvatarQuery,
-  scoreAvatarEntry,
-  isMatchableEntry,
-} from "./avatar-assets.js";
 
 /** Formal portrait mood badge: keep base art neutral, overlay status. */
 function moodOverlayHtml(mood) {
@@ -921,155 +852,6 @@ function escapeAttr(s) {
 }
 
 
-/** 标准队服躯干 PNG（与程序脸同一套 jerseyCells，保证同队同款） */
-function renderStandardKitBodyUri(opts = {}) {
-  if (typeof document === "undefined") return null;
-  const size = opts.size || 36;
-  const dpr = Math.max(1, Math.min(3, (typeof window !== "undefined" && window.devicePixelRatio) || 1));
-  const kitP = kitDisplayColor(opts.kitPrimary || "#3d8bfd", 0.12);
-  let kitS = opts.kitSecondary || shiftHex(kitP, -42);
-  {
-    const pr = parseInt(kitP.slice(1, 3), 16) || 0;
-    const pg = parseInt(kitP.slice(3, 5), 16) || 0;
-    const pb = parseInt(kitP.slice(5, 7), 16) || 0;
-    const sr = parseInt(String(kitS).slice(1, 3), 16) || 0;
-    const sg = parseInt(String(kitS).slice(3, 5), 16) || 0;
-    const sb = parseInt(String(kitS).slice(5, 7), 16) || 0;
-    if (Math.hypot(pr - sr, pg - sg, pb - sb) < 70) {
-      const lum = 0.299 * pr + 0.587 * pg + 0.114 * pb;
-      kitS = lum > 140 ? mixHex(kitP, "#0f172a", 0.55) : mixHex(kitP, "#f8fafc", 0.45);
-    }
-  }
-  const pos = opts.pos || "";
-  const neckSkin = "#e6b98e";
-  const key = ["kitbody", kitP, kitS, pos, size, dpr].join("|");
-  const hit = pngCache.get(key);
-  if (hit) return hit;
-  const k = Math.max(2, Math.ceil((size * dpr) / GRID));
-  const px = GRID * k;
-  const canvas = document.createElement("canvas");
-  canvas.width = px;
-  canvas.height = px;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  ctx.fillStyle = "#f4f7fb";
-  ctx.fillRect(0, 0, px, px);
-  for (const r of jerseyCells(kitP, kitS, pos, neckSkin)) {
-    ctx.fillStyle = r.c;
-    ctx.fillRect(r.x * k, r.y * k, r.w * k, r.h * k);
-  }
-  const uri = canvas.toDataURL("image/png");
-  if (pngCache.size >= PNG_CACHE_MAX) pngCache.clear();
-  pngCache.set(key, uri);
-  return uri;
-}
-
-const headKitCache = new Map();
-const HEAD_KIT_CACHE_MAX = 240;
-
-/**
- * 正式肖像只取头部，贴到标准队服上。
- * 同队球衣款式完全一致（不再依赖原画球衣重上色）。
- */
-async function getHeadOnKitSrc(srcUrl, opts = {}) {
-  if (typeof document === "undefined" || !srcUrl) return srcUrl;
-  // 列表小头像也按更高像素合成再缩小，避免 30px 直接硬裁
-  const size = Math.max(96, Math.min(256, Number(opts.size) || 128));
-  const kitPrimary = opts.kitPrimary || "#3d8bfd";
-  const kitSecondary = opts.kitSecondary || "";
-  const pos = opts.pos || "";
-  const key = ["v3", srcUrl, kitPrimary, kitSecondary, pos, size].join("|");
-  if (headKitCache.has(key)) return headKitCache.get(key);
-
-  const bodyUri = renderStandardKitBodyUri({
-    size,
-    kitPrimary,
-    kitSecondary: kitSecondary || null,
-    pos,
-  });
-  if (!bodyUri) return srcUrl;
-
-  const load = (url) =>
-    new Promise((resolve) => {
-      const img = new Image();
-      img.decoding = "async";
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      // portrait path may be relative; fine for same-origin
-      img.src = url;
-    });
-
-  const [bodyImg, faceImg] = await Promise.all([load(bodyUri), load(srcUrl)]);
-  if (!bodyImg || !faceImg) return srcUrl;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return srcUrl;
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-
-  // base kit body
-  ctx.drawImage(bodyImg, 0, 0, size, size);
-
-  const fw = faceImg.naturalWidth || faceImg.width;
-  const fh = faceImg.naturalHeight || faceImg.height;
-
-  // Head+upper hair crop from formal bust (avoid shoulders/jersey of source art)
-  const sx = Math.floor(fw * 0.14);
-  const sy = Math.floor(fh * 0.02);
-  const sw = Math.floor(fw * 0.72);
-  const sh = Math.floor(fh * 0.48);
-
-  // Place head higher and a bit smaller so jersey band is clearly visible (~ bottom 38%)
-  const dw = size * 0.78;
-  const dh = size * 0.56;
-  const dx = (size - dw) / 2;
-  const dy = size * -0.02;
-
-  // Soft circular head matte (less boxy than previous)
-  ctx.save();
-  ctx.beginPath();
-  const cx = size / 2;
-  const cy = size * 0.28;
-  const rx = size * 0.36;
-  const ry = size * 0.33;
-  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-  ctx.closePath();
-  ctx.clip();
-  ctx.drawImage(faceImg, sx, sy, sw, sh, dx, dy, dw, dh);
-  ctx.restore();
-
-  // Always redraw full jersey block under chin (from neck line)
-  // grid y=20 is jersey start; keep a little neck (y=19)
-  const jerseyY = Math.floor(size * (19 / 32));
-  ctx.drawImage(
-    bodyImg,
-    0,
-    jerseyY,
-    size,
-    size - jerseyY,
-    0,
-    jerseyY,
-    size,
-    size - jerseyY
-  );
-
-  let out;
-  try {
-    out = canvas.toDataURL("image/webp", 0.92);
-  } catch {
-    out = canvas.toDataURL("image/png");
-  }
-  if (headKitCache.size >= HEAD_KIT_CACHE_MAX) {
-    const first = headKitCache.keys().next().value;
-    if (first != null) headKitCache.delete(first);
-  }
-  headKitCache.set(key, out);
-  return out;
-}
-
 /** 主题队固定配色（与 models.ensureKit 同步；avatar 不 import models 以免环依赖） */
 const AVATAR_KIT_THEME = {
   sunset: { primary: "#f97316", secondary: "#5b21b6" },
@@ -1084,66 +866,8 @@ const AVATAR_KIT_THEME = {
  * @param {ParentNode} [root]
  */
 export function hydrateAvatarKitRecolor(root) {
-  if (typeof document === "undefined") return;
-  const scope = root || document;
-
-  // 新路径：头 + 标准队服合成
-  const composeNodes = scope.querySelectorAll?.(
-    "img.avatar-art[data-kit-compose]:not([data-kit-done])"
-  );
-  if (composeNodes && composeNodes.length) {
-    composeNodes.forEach((img) => {
-      const src = img.getAttribute("data-art-src") || img.getAttribute("src");
-      const kitPrimary = img.getAttribute("data-kit-primary");
-      if (!src || !kitPrimary) {
-        img.setAttribute("data-kit-done", "1");
-        return;
-      }
-      const kitSecondary = img.getAttribute("data-kit-secondary") || "";
-      const pos = img.getAttribute("data-kit-pos") || "";
-      const w = Number(img.getAttribute("width")) || img.width || 128;
-      getHeadOnKitSrc(src, {
-        kitPrimary,
-        kitSecondary,
-        pos,
-        size: Math.max(96, Math.min(256, Math.max(w * 3, 128))),
-      })
-        .then((out) => {
-          if (out && img.isConnected) {
-            img.src = out;
-            img.setAttribute("data-kit-done", "1");
-          }
-        })
-        .catch(() => {
-          img.setAttribute("data-kit-done", "1");
-        });
-    });
-  }
-
-  // 兼容旧 data-kit-recolor
-  const nodes = scope.querySelectorAll?.(
-    "img.avatar-art[data-kit-recolor]:not([data-kit-done])"
-  );
-  if (!nodes || !nodes.length) return;
-  nodes.forEach((img) => {
-    const kit = img.getAttribute("data-kit-recolor");
-    const src = img.getAttribute("data-art-src") || img.getAttribute("src");
-    if (!kit || !src) {
-      img.setAttribute("data-kit-done", "1");
-      return;
-    }
-    const w = Number(img.getAttribute("width")) || img.width || 128;
-    getKitRecoloredSrc(src, kit, Math.max(64, Math.min(256, w * 2)))
-      .then((out) => {
-        if (out && img.isConnected) {
-          img.src = out;
-          img.setAttribute("data-kit-done", "1");
-        }
-      })
-      .catch(() => {
-        img.setAttribute("data-kit-done", "1");
-      });
-  });
+  // 已回归程序像素脸；无需正式肖像球衣合成/重上色
+  return;
 }
 
 export function playerAvatarHtml(player, club, size = 36) {

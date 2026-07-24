@@ -215,12 +215,8 @@ import {
   playerAvatarHtml,
   staffAvatarHtml,
   avatarHtml,
-  loadAvatarManifest,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=134";
-
-// 本地球员肖像 manifest（失败则 avatar-assets 内置副本）
-loadAvatarManifest();
+} from "./avatar.js?v=135";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;

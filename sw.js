@@ -1,7 +1,7 @@
-/* VCFM offline cache (GitHub Pages friendly)
+﻿/* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v123";
+const CACHE = "vcfm-v135";
 const ASSETS = [
   "./",
   "./index.html",
@@ -13,7 +13,6 @@ const ASSETS = [
   "./js/models.js",
   "./js/clubs.js",
   "./js/avatar.js",
-  "./js/avatar-assets.js",
   "./js/i18n.js",
   "./js/save.js",
   "./js/data.js",
@@ -43,8 +42,6 @@ const ASSETS = [
   "./js/branding.js",
   "./js/save-worker.js",
   // 球员正式肖像资产池（manifest + 缩略图；大图按需缓存）
-  "./assets/player-avatars/manifest.json",
-  "./assets/player-avatars/thumbnails/avatar-0001.webp",
   "./manifest.webmanifest",
   "./icons/icon.svg",
 ];
