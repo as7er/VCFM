@@ -19,160 +19,20 @@ const MANIFEST_REL = "assets/player-avatars/manifest.json";
 
 /** @type {import('./avatar-assets-types').AvatarManifest} */
 const BUILTIN_MANIFEST = {
-  "version": 3,
-  "assignment": "explicit",
+  "version": 7,
+  "assignment": "match",
   "minDisplayPx": 64,
   "minMatchScore": 0,
-  "poolPolicy": "explicit-until-diverse-pool",
+  "poolPolicy": "face-centric-new-style-0005-0027",
+  "notes": "New-style masters 0005-0027 face-centric normalized (eye-line/face-width/headroom). Old 0001-0004 removed.",
+  "minAutoPool": 6,
   "avatars": [
     {
-      "id": "avatar-0001",
-      "portrait": "portraits/avatar-0001.webp",
-      "portraitPng": "portraits/avatar-0001.png",
-      "thumbnail": "thumbnails/avatar-0001.webp",
-      "master": "portraits/avatar-0001.png",
-      "width": 512,
-      "height": 512,
-      "masterWidth": 1024,
-      "masterHeight": 1024,
-      "ageMin": 20,
-      "ageMax": 28,
-      "ageBand": "young_adult",
-      "skinTone": "fair",
-      "hairColor": "brown",
-      "hairStyle": "spiky",
-      "regions": [
-        "weur",
-        "brit",
-        "seur",
-        "fra",
-        "usa",
-        "aus"
-      ],
-      "kitPrimary": "#1e3a5f",
-      "kitSecondary": "#0f172a",
-      "notes": "master pilot navy jersey",
-      "source": "master",
-      "matchable": true
-    },
-    {
-      "id": "avatar-0002",
-      "portrait": "portraits/avatar-0002.webp",
-      "portraitPng": "portraits/avatar-0002.png",
-      "thumbnail": "thumbnails/avatar-0002.webp",
-      "master": "portraits/avatar-0002.png",
-      "width": 512,
-      "height": 512,
-      "masterWidth": 1024,
-      "masterHeight": 1024,
-      "ageMin": 17,
-      "ageMax": 22,
-      "ageBand": "youth",
-      "skinTone": "light",
-      "hairColor": "black",
-      "hairStyle": "bowl",
-      "regions": [
-        "easia"
-      ],
-      "kitPrimary": "#38bdf8",
-      "kitSecondary": "#f8fafc",
-      "notes": "easia youth sky blue",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
-    },
-    {
-      "id": "avatar-0003",
-      "portrait": "portraits/avatar-0003.webp",
-      "portraitPng": "portraits/avatar-0003.png",
-      "thumbnail": "thumbnails/avatar-0003.webp",
-      "master": "portraits/avatar-0003.png",
-      "width": 512,
-      "height": 512,
-      "masterWidth": 1024,
-      "masterHeight": 1024,
-      "ageMin": 21,
-      "ageMax": 28,
-      "ageBand": "young_adult",
-      "skinTone": "deep",
-      "hairColor": "black",
-      "hairStyle": "fade",
-      "regions": [
-        "wafr",
-        "usa",
-        "fra"
-      ],
-      "kitPrimary": "#f97316",
-      "kitSecondary": "#5b21b6",
-      "notes": "deep skin sunset orange",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
-    },
-    {
-      "id": "avatar-0004",
-      "portrait": "portraits/avatar-0004.webp",
-      "portraitPng": "portraits/avatar-0004.png",
-      "thumbnail": "thumbnails/avatar-0004.webp",
-      "master": "portraits/avatar-0004.png",
-      "width": 512,
-      "height": 512,
-      "masterWidth": 1024,
-      "masterHeight": 1024,
-      "ageMin": 24,
-      "ageMax": 32,
-      "ageBand": "prime",
-      "skinTone": "pale",
-      "hairColor": "blond",
-      "hairStyle": "messy",
-      "regions": [
-        "nordic",
-        "brit",
-        "weur",
-        "aus"
-      ],
-      "kitPrimary": "#166534",
-      "kitSecondary": "#eab308",
-      "notes": "nordic blond mill green",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
-    },
-    {
       "id": "avatar-0005",
-      "portrait": "portraits/avatar-0005.webp",
+      "portrait": "portraits/avatar-0005.png",
       "portraitPng": "portraits/avatar-0005.png",
-      "thumbnail": "thumbnails/avatar-0005.webp",
+      "thumbnail": "thumbnails/avatar-0005.png",
       "master": "portraits/avatar-0005.png",
-      "width": 512,
-      "height": 512,
-      "masterWidth": 1024,
-      "masterHeight": 1024,
-      "ageMin": 28,
-      "ageMax": 34,
-      "ageBand": "prime",
-      "skinTone": "olive",
-      "hairColor": "black",
-      "hairStyle": "sidepart",
-      "regions": [
-        "seur",
-        "tur",
-        "nafr",
-        "latE"
-      ],
-      "kitPrimary": "#dc2626",
-      "kitSecondary": "#f8fafc",
-      "notes": "olive sidepart crimson",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
-    },
-    {
-      "id": "avatar-0006",
-      "portrait": "portraits/avatar-0006.webp",
-      "portraitPng": "portraits/avatar-0006.png",
-      "thumbnail": "thumbnails/avatar-0006.webp",
-      "master": "portraits/avatar-0006.png",
       "width": 512,
       "height": 512,
       "masterWidth": 1024,
@@ -180,195 +40,652 @@ const BUILTIN_MANIFEST = {
       "ageMin": 20,
       "ageMax": 27,
       "ageBand": "young_adult",
-      "skinTone": "tan",
-      "hairColor": "black",
-      "hairStyle": "short",
+      "skinTone": "olive",
+      "hairColor": "ltbrown",
+      "hairStyle": "fade",
       "regions": [
-        "latM",
-        "mex"
+        "seur",
+        "tur",
+        "nafr",
+        "latM"
       ],
-      "kitPrimary": "#f8fafc",
-      "kitSecondary": "#0ea5e9",
-      "notes": "latam tan white kit",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
+      "kitPrimary": "#345151",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0006",
+      "portrait": "portraits/avatar-0006.png",
+      "portraitPng": "portraits/avatar-0006.png",
+      "thumbnail": "thumbnails/avatar-0006.png",
+      "master": "portraits/avatar-0006.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 25,
+      "ageMax": 33,
+      "ageBand": "prime",
+      "skinTone": "pale",
+      "hairColor": "ltbrown",
+      "hairStyle": "bowl",
+      "regions": [
+        "nordic",
+        "brit",
+        "eeur",
+        "weur"
+      ],
+      "kitPrimary": "#AA96AB",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
     },
     {
       "id": "avatar-0007",
-      "portrait": "portraits/avatar-0007.webp",
+      "portrait": "portraits/avatar-0007.png",
       "portraitPng": "portraits/avatar-0007.png",
-      "thumbnail": "thumbnails/avatar-0007.webp",
+      "thumbnail": "thumbnails/avatar-0007.png",
       "master": "portraits/avatar-0007.png",
       "width": 512,
       "height": 512,
       "masterWidth": 1024,
       "masterHeight": 1024,
-      "ageMin": 34,
+      "ageMin": 32,
       "ageMax": 40,
       "ageBand": "veteran",
-      "skinTone": "fair",
+      "skinTone": "light",
       "hairColor": "grey",
-      "hairStyle": "short",
+      "hairStyle": "sidepart",
       "regions": [
-        "brit",
+        "easia",
         "weur",
-        "usa",
-        "aus",
-        "eeur"
+        "fra",
+        "seur",
+        "usa"
       ],
-      "kitPrimary": "#64748b",
-      "kitSecondary": "#dc2626",
-      "notes": "veteran grey steel",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
+      "kitPrimary": "#558D64",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
     },
     {
       "id": "avatar-0008",
-      "portrait": "portraits/avatar-0008.webp",
+      "portrait": "portraits/avatar-0008.png",
       "portraitPng": "portraits/avatar-0008.png",
-      "thumbnail": "thumbnails/avatar-0008.webp",
+      "thumbnail": "thumbnails/avatar-0008.png",
       "master": "portraits/avatar-0008.png",
       "width": 512,
       "height": 512,
       "masterWidth": 1024,
       "masterHeight": 1024,
-      "ageMin": 22,
-      "ageMax": 29,
-      "ageBand": "young_adult",
-      "skinTone": "brown",
-      "hairColor": "black",
-      "hairStyle": "curl",
+      "ageMin": 17,
+      "ageMax": 21,
+      "ageBand": "youth",
+      "skinTone": "fair",
+      "hairColor": "red",
+      "hairStyle": "flat",
       "regions": [
-        "wafr",
-        "usa",
+        "brit",
+        "weur",
         "fra",
-        "latM"
+        "usa",
+        "aus"
       ],
-      "kitPrimary": "#5b21b6",
-      "kitSecondary": "#f97316",
-      "notes": "brown skin purple kit",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
+      "kitPrimary": "#4E88BF",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
     },
     {
       "id": "avatar-0009",
-      "portrait": "portraits/avatar-0009.webp",
+      "portrait": "portraits/avatar-0009.png",
       "portraitPng": "portraits/avatar-0009.png",
-      "thumbnail": "thumbnails/avatar-0009.webp",
+      "thumbnail": "thumbnails/avatar-0009.png",
       "master": "portraits/avatar-0009.png",
       "width": 512,
       "height": 512,
       "masterWidth": 1024,
       "masterHeight": 1024,
-      "ageMin": 18,
-      "ageMax": 24,
-      "ageBand": "youth",
+      "ageMin": 20,
+      "ageMax": 27,
+      "ageBand": "young_adult",
       "skinTone": "light",
-      "hairColor": "dkbrown",
-      "hairStyle": "spiky",
+      "hairColor": "ltbrown",
+      "hairStyle": "messy",
       "regions": [
         "easia",
-        "usa",
-        "weur"
+        "weur",
+        "fra",
+        "seur",
+        "usa"
       ],
-      "kitPrimary": "#0ea5e9",
-      "kitSecondary": "#f8fafc",
-      "notes": "youth harbor blue",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
+      "kitPrimary": "#CA6C65",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
     },
     {
       "id": "avatar-0010",
-      "portrait": "portraits/avatar-0010.webp",
+      "portrait": "portraits/avatar-0010.png",
       "portraitPng": "portraits/avatar-0010.png",
-      "thumbnail": "thumbnails/avatar-0010.webp",
+      "thumbnail": "thumbnails/avatar-0010.png",
       "master": "portraits/avatar-0010.png",
       "width": 512,
       "height": 512,
       "masterWidth": 1024,
       "masterHeight": 1024,
-      "ageMin": 23,
-      "ageMax": 30,
+      "ageMin": 25,
+      "ageMax": 33,
       "ageBand": "prime",
-      "skinTone": "pale",
-      "hairColor": "red",
-      "hairStyle": "messy",
+      "skinTone": "fair",
+      "hairColor": "ltbrown",
+      "hairStyle": "spiky",
       "regions": [
         "brit",
-        "nordic",
-        "weur"
+        "weur",
+        "fra",
+        "usa",
+        "aus"
       ],
-      "kitPrimary": "#f97316",
-      "kitSecondary": "#5b21b6",
-      "notes": "redhead sunset",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
+      "kitPrimary": "#30AE92",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
     },
     {
       "id": "avatar-0011",
-      "portrait": "portraits/avatar-0011.webp",
+      "portrait": "portraits/avatar-0011.png",
       "portraitPng": "portraits/avatar-0011.png",
-      "thumbnail": "thumbnails/avatar-0011.webp",
+      "thumbnail": "thumbnails/avatar-0011.png",
       "master": "portraits/avatar-0011.png",
       "width": 512,
       "height": 512,
       "masterWidth": 1024,
       "masterHeight": 1024,
-      "ageMin": 29,
-      "ageMax": 36,
-      "ageBand": "prime",
-      "skinTone": "brown",
+      "ageMin": 32,
+      "ageMax": 40,
+      "ageBand": "veteran",
+      "skinTone": "pale",
       "hairColor": "black",
-      "hairStyle": "short",
+      "hairStyle": "pompadour",
       "regions": [
-        "nafr",
-        "tur",
-        "latM",
-        "mex"
+        "nordic",
+        "brit",
+        "eeur",
+        "weur"
       ],
-      "kitPrimary": "#1e3a5f",
-      "kitSecondary": "#94a3b8",
-      "notes": "brown mid navy",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
+      "kitPrimary": "#3A80CB",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
     },
     {
       "id": "avatar-0012",
-      "portrait": "portraits/avatar-0012.webp",
+      "portrait": "portraits/avatar-0012.png",
       "portraitPng": "portraits/avatar-0012.png",
-      "thumbnail": "thumbnails/avatar-0012.webp",
+      "thumbnail": "thumbnails/avatar-0012.png",
       "master": "portraits/avatar-0012.png",
       "width": 512,
       "height": 512,
       "masterWidth": 1024,
       "masterHeight": 1024,
-      "ageMin": 33,
-      "ageMax": 40,
-      "ageBand": "veteran",
-      "skinTone": "dark",
-      "hairColor": "grey",
-      "hairStyle": "fade",
+      "ageMin": 17,
+      "ageMax": 21,
+      "ageBand": "youth",
+      "skinTone": "brown",
+      "hairColor": "white",
+      "hairStyle": "buzz",
       "regions": [
+        "latM",
         "wafr",
         "usa",
-        "fra"
+        "fra",
+        "nafr"
       ],
-      "kitPrimary": "#166534",
-      "kitSecondary": "#eab308",
-      "notes": "dark veteran mill",
-      "source": "variant-recolor",
-      "matchable": false,
-      "autoAssign": false
+      "kitPrimary": "#827357",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0013",
+      "portrait": "portraits/avatar-0013.png",
+      "portraitPng": "portraits/avatar-0013.png",
+      "thumbnail": "thumbnails/avatar-0013.png",
+      "master": "portraits/avatar-0013.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 20,
+      "ageMax": 27,
+      "ageBand": "young_adult",
+      "skinTone": "pale",
+      "hairColor": "brown",
+      "hairStyle": "sidepart",
+      "regions": [
+        "nordic",
+        "brit",
+        "eeur",
+        "weur"
+      ],
+      "kitPrimary": "#9F9E5C",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0014",
+      "portrait": "portraits/avatar-0014.png",
+      "portraitPng": "portraits/avatar-0014.png",
+      "thumbnail": "thumbnails/avatar-0014.png",
+      "master": "portraits/avatar-0014.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 25,
+      "ageMax": 33,
+      "ageBand": "prime",
+      "skinTone": "fair",
+      "hairColor": "red",
+      "hairStyle": "pompadour",
+      "regions": [
+        "brit",
+        "weur",
+        "fra",
+        "usa",
+        "aus"
+      ],
+      "kitPrimary": "#CB3B38",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0015",
+      "portrait": "portraits/avatar-0015.png",
+      "portraitPng": "portraits/avatar-0015.png",
+      "thumbnail": "thumbnails/avatar-0015.png",
+      "master": "portraits/avatar-0015.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 32,
+      "ageMax": 40,
+      "ageBand": "veteran",
+      "skinTone": "pale",
+      "hairColor": "white",
+      "hairStyle": "messy",
+      "regions": [
+        "nordic",
+        "brit",
+        "eeur",
+        "weur"
+      ],
+      "kitPrimary": "#69B7EC",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0016",
+      "portrait": "portraits/avatar-0016.png",
+      "portraitPng": "portraits/avatar-0016.png",
+      "thumbnail": "thumbnails/avatar-0016.png",
+      "master": "portraits/avatar-0016.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 17,
+      "ageMax": 21,
+      "ageBand": "youth",
+      "skinTone": "fair",
+      "hairColor": "red",
+      "hairStyle": "curl",
+      "regions": [
+        "brit",
+        "weur",
+        "fra",
+        "usa",
+        "aus"
+      ],
+      "kitPrimary": "#7244B3",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0017",
+      "portrait": "portraits/avatar-0017.png",
+      "portraitPng": "portraits/avatar-0017.png",
+      "thumbnail": "thumbnails/avatar-0017.png",
+      "master": "portraits/avatar-0017.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 20,
+      "ageMax": 27,
+      "ageBand": "young_adult",
+      "skinTone": "pale",
+      "hairColor": "white",
+      "hairStyle": "pompadour",
+      "regions": [
+        "nordic",
+        "brit",
+        "eeur",
+        "weur"
+      ],
+      "kitPrimary": "#9CB4C9",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0018",
+      "portrait": "portraits/avatar-0018.png",
+      "portraitPng": "portraits/avatar-0018.png",
+      "thumbnail": "thumbnails/avatar-0018.png",
+      "master": "portraits/avatar-0018.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 25,
+      "ageMax": 33,
+      "ageBand": "prime",
+      "skinTone": "pale",
+      "hairColor": "grey",
+      "hairStyle": "bowl",
+      "regions": [
+        "nordic",
+        "brit",
+        "eeur",
+        "weur"
+      ],
+      "kitPrimary": "#2A9AC4",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0019",
+      "portrait": "portraits/avatar-0019.png",
+      "portraitPng": "portraits/avatar-0019.png",
+      "thumbnail": "thumbnails/avatar-0019.png",
+      "master": "portraits/avatar-0019.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 32,
+      "ageMax": 40,
+      "ageBand": "veteran",
+      "skinTone": "olive",
+      "hairColor": "grey",
+      "hairStyle": "messy",
+      "regions": [
+        "seur",
+        "tur",
+        "nafr",
+        "latM"
+      ],
+      "kitPrimary": "#E7AB7C",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0020",
+      "portrait": "portraits/avatar-0020.png",
+      "portraitPng": "portraits/avatar-0020.png",
+      "thumbnail": "thumbnails/avatar-0020.png",
+      "master": "portraits/avatar-0020.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 17,
+      "ageMax": 21,
+      "ageBand": "youth",
+      "skinTone": "brown",
+      "hairColor": "dkbrown",
+      "hairStyle": "spiky",
+      "regions": [
+        "latM",
+        "wafr",
+        "usa",
+        "fra",
+        "nafr"
+      ],
+      "kitPrimary": "#745AA1",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0021",
+      "portrait": "portraits/avatar-0021.png",
+      "portraitPng": "portraits/avatar-0021.png",
+      "thumbnail": "thumbnails/avatar-0021.png",
+      "master": "portraits/avatar-0021.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 20,
+      "ageMax": 27,
+      "ageBand": "young_adult",
+      "skinTone": "fair",
+      "hairColor": "white",
+      "hairStyle": "sidepart",
+      "regions": [
+        "brit",
+        "weur",
+        "fra",
+        "usa",
+        "aus"
+      ],
+      "kitPrimary": "#EABDB0",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0022",
+      "portrait": "portraits/avatar-0022.png",
+      "portraitPng": "portraits/avatar-0022.png",
+      "thumbnail": "thumbnails/avatar-0022.png",
+      "master": "portraits/avatar-0022.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 25,
+      "ageMax": 33,
+      "ageBand": "prime",
+      "skinTone": "olive",
+      "hairColor": "white",
+      "hairStyle": "buzz",
+      "regions": [
+        "seur",
+        "tur",
+        "nafr",
+        "latM"
+      ],
+      "kitPrimary": "#D7D6B7",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0023",
+      "portrait": "portraits/avatar-0023.png",
+      "portraitPng": "portraits/avatar-0023.png",
+      "thumbnail": "thumbnails/avatar-0023.png",
+      "master": "portraits/avatar-0023.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 32,
+      "ageMax": 40,
+      "ageBand": "veteran",
+      "skinTone": "fair",
+      "hairColor": "white",
+      "hairStyle": "bowl",
+      "regions": [
+        "brit",
+        "weur",
+        "fra",
+        "usa",
+        "aus"
+      ],
+      "kitPrimary": "#41937A",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0024",
+      "portrait": "portraits/avatar-0024.png",
+      "portraitPng": "portraits/avatar-0024.png",
+      "thumbnail": "thumbnails/avatar-0024.png",
+      "master": "portraits/avatar-0024.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 17,
+      "ageMax": 21,
+      "ageBand": "youth",
+      "skinTone": "fair",
+      "hairColor": "ltbrown",
+      "hairStyle": "pompadour",
+      "regions": [
+        "brit",
+        "weur",
+        "fra",
+        "usa",
+        "aus"
+      ],
+      "kitPrimary": "#1B9580",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0025",
+      "portrait": "portraits/avatar-0025.png",
+      "portraitPng": "portraits/avatar-0025.png",
+      "thumbnail": "thumbnails/avatar-0025.png",
+      "master": "portraits/avatar-0025.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 20,
+      "ageMax": 27,
+      "ageBand": "young_adult",
+      "skinTone": "fair",
+      "hairColor": "white",
+      "hairStyle": "fade",
+      "regions": [
+        "brit",
+        "weur",
+        "fra",
+        "usa",
+        "aus"
+      ],
+      "kitPrimary": "#D77B45",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0026",
+      "portrait": "portraits/avatar-0026.png",
+      "portraitPng": "portraits/avatar-0026.png",
+      "thumbnail": "thumbnails/avatar-0026.png",
+      "master": "portraits/avatar-0026.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 25,
+      "ageMax": 33,
+      "ageBand": "prime",
+      "skinTone": "brown",
+      "hairColor": "black",
+      "hairStyle": "curl",
+      "regions": [
+        "latM",
+        "wafr",
+        "usa",
+        "fra",
+        "nafr"
+      ],
+      "kitPrimary": "#276EC3",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
+    },
+    {
+      "id": "avatar-0027",
+      "portrait": "portraits/avatar-0027.png",
+      "portraitPng": "portraits/avatar-0027.png",
+      "thumbnail": "thumbnails/avatar-0027.png",
+      "master": "portraits/avatar-0027.png",
+      "width": 512,
+      "height": 512,
+      "masterWidth": 1024,
+      "masterHeight": 1024,
+      "ageMin": 32,
+      "ageMax": 40,
+      "ageBand": "veteran",
+      "skinTone": "brown",
+      "hairColor": "grey",
+      "hairStyle": "long",
+      "regions": [
+        "latM",
+        "wafr",
+        "usa",
+        "fra",
+        "nafr"
+      ],
+      "kitPrimary": "#E0C174",
+      "kitSecondary": "#0f172a",
+      "notes": "face-centric normalize v1; eye-line + face-width; keep hair character",
+      "source": "master",
+      "matchable": true
     }
-  ],
-  "notes": "variant-recolor clones disabled for auto-assign; use procedural faces until distinct portraits exist",
-  "minAutoPool": 6
+  ]
 };
 
 /** 国籍 → 地区（与 avatar.js REGION_OF 对齐） */
@@ -577,6 +894,57 @@ function skinIndex(tone) {
  * 从球员 + 可选球衣色构建匹配查询。
  * 身份键不含 club；kit 色只用于匹配/着色。
  */
+const HAIR_STYLE_NAME_BY_ID = Object.freeze({
+  0: "flat",
+  1: "pompadour",
+  2: "spiky",
+  3: "buzz",
+  4: "sidepart",
+  5: "bowl",
+  6: "afro",
+  7: "curl",
+  8: "fade",
+  9: "long",
+  flat: "flat",
+  pompadour: "pompadour",
+  spiky: "spiky",
+  messy: "spiky",
+  buzz: "buzz",
+  short: "buzz",
+  sidepart: "sidepart",
+  side: "sidepart",
+  bowl: "bowl",
+  afro: "afro",
+  curl: "curl",
+  curly: "curl",
+  fade: "fade",
+  long: "long",
+});
+
+function normalizeQueryHairStyle(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return HAIR_STYLE_NAME_BY_ID[Math.round(v)] || null;
+  }
+  const s = String(v).toLowerCase();
+  if (/^\d+$/.test(s)) return HAIR_STYLE_NAME_BY_ID[Number(s)] || null;
+  return HAIR_STYLE_NAME_BY_ID[s] || s;
+}
+
+function normalizeQueryHairColor(v) {
+  if (v == null || v === "") return null;
+  const s = String(v).toLowerCase();
+  const alias = {
+    darkbrown: "dkbrown",
+    dark_brown: "dkbrown",
+    lightbrown: "ltbrown",
+    light_brown: "ltbrown",
+    blonde: "blond",
+    gray: "grey",
+  };
+  return alias[s] || s;
+}
+
 export function buildAvatarQuery(player, opts = {}) {
   const nation = player?.nationality || player?.nation || opts.nation || null;
   const region = nationRegion(nation) || opts.region || null;
@@ -585,7 +953,19 @@ export function buildAvatarQuery(player, opts = {}) {
   const key = playerAppearanceKey(player);
   const h = stableAvatarHash(`look:${key}`);
   const pref = (region && REGION_SKIN_PREF[region]) || REGION_SKIN_PREF.weur;
-  const skinTone = pref[h % pref.length];
+  // Prefer persisted player traits; hash-derived values only as fallback
+  const skinTone =
+    (player?.skinTone && String(player.skinTone).toLowerCase()) ||
+    (opts.skinTone && String(opts.skinTone).toLowerCase()) ||
+    pref[h % pref.length];
+  const hairColor =
+    normalizeQueryHairColor(player?.hairColor) ||
+    normalizeQueryHairColor(opts.hairColor) ||
+    null;
+  const hairStyle =
+    normalizeQueryHairStyle(player?.hairStyle) ||
+    normalizeQueryHairStyle(opts.hairStyle) ||
+    null;
   const kitPrimary = opts.kitPrimary || opts.kit?.primary || null;
   const kitSecondary = opts.kitSecondary || opts.kit?.secondary || null;
   return {
@@ -595,6 +975,8 @@ export function buildAvatarQuery(player, opts = {}) {
     nation,
     region,
     skinTone,
+    hairColor,
+    hairStyle,
     kitPrimary,
     kitSecondary,
     hash: h,
@@ -632,6 +1014,18 @@ export function scoreAvatarEntry(entry, query) {
   if (entry.skinTone && query.skinTone) {
     const d = Math.abs(skinIndex(entry.skinTone) - skinIndex(query.skinTone));
     score += Math.max(0, 28 - d * 9);
+  }
+
+  if (entry.hairColor && query.hairColor) {
+    const eh = normalizeQueryHairColor(entry.hairColor);
+    const qh = normalizeQueryHairColor(query.hairColor);
+    if (eh && qh) score += eh === qh ? 16 : -4;
+  }
+
+  if (entry.hairStyle && query.hairStyle) {
+    const eh = normalizeQueryHairStyle(entry.hairStyle);
+    const qh = normalizeQueryHairStyle(query.hairStyle);
+    if (eh && qh) score += eh === qh ? 18 : -3;
   }
 
   if (query.kitPrimary && entry.kitPrimary) {
@@ -851,11 +1245,14 @@ const KIT_CACHE_MAX = 200;
 
 export async function getKitRecoloredSrc(srcUrl, kitPrimary, size) {
   if (!srcUrl || !kitPrimary) return srcUrl;
-  const key = `${srcUrl}|${kitPrimary}|${size || 0}`;
+  const key = `${srcUrl}|${String(kitPrimary).toLowerCase()}|${size || 0}`;
   if (kitRecolorCache.has(key)) return kitRecolorCache.get(key);
   const out = await recolorAvatarKit(srcUrl, kitPrimary, { size: size || 128 });
   const finalSrc = out || srcUrl;
-  if (kitRecolorCache.size >= KIT_CACHE_MAX) kitRecolorCache.clear();
+  if (kitRecolorCache.size >= KIT_CACHE_MAX) {
+    const first = kitRecolorCache.keys().next().value;
+    if (first != null) kitRecolorCache.delete(first);
+  }
   kitRecolorCache.set(key, finalSrc);
   return finalSrc;
 }

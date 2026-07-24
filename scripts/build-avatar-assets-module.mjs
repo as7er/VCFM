@@ -240,6 +240,57 @@ function skinIndex(tone) {
  * 从球员 + 可选球衣色构建匹配查询。
  * 身份键不含 club；kit 色只用于匹配/着色。
  */
+const HAIR_STYLE_NAME_BY_ID = Object.freeze({
+  0: "flat",
+  1: "pompadour",
+  2: "spiky",
+  3: "buzz",
+  4: "sidepart",
+  5: "bowl",
+  6: "afro",
+  7: "curl",
+  8: "fade",
+  9: "long",
+  flat: "flat",
+  pompadour: "pompadour",
+  spiky: "spiky",
+  messy: "spiky",
+  buzz: "buzz",
+  short: "buzz",
+  sidepart: "sidepart",
+  side: "sidepart",
+  bowl: "bowl",
+  afro: "afro",
+  curl: "curl",
+  curly: "curl",
+  fade: "fade",
+  long: "long",
+});
+
+function normalizeQueryHairStyle(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return HAIR_STYLE_NAME_BY_ID[Math.round(v)] || null;
+  }
+  const s = String(v).toLowerCase();
+  if (/^\\d+$/.test(s)) return HAIR_STYLE_NAME_BY_ID[Number(s)] || null;
+  return HAIR_STYLE_NAME_BY_ID[s] || s;
+}
+
+function normalizeQueryHairColor(v) {
+  if (v == null || v === "") return null;
+  const s = String(v).toLowerCase();
+  const alias = {
+    darkbrown: "dkbrown",
+    dark_brown: "dkbrown",
+    lightbrown: "ltbrown",
+    light_brown: "ltbrown",
+    blonde: "blond",
+    gray: "grey",
+  };
+  return alias[s] || s;
+}
+
 export function buildAvatarQuery(player, opts = {}) {
   const nation = player?.nationality || player?.nation || opts.nation || null;
   const region = nationRegion(nation) || opts.region || null;
@@ -248,7 +299,19 @@ export function buildAvatarQuery(player, opts = {}) {
   const key = playerAppearanceKey(player);
   const h = stableAvatarHash(\`look:\${key}\`);
   const pref = (region && REGION_SKIN_PREF[region]) || REGION_SKIN_PREF.weur;
-  const skinTone = pref[h % pref.length];
+  // Prefer persisted player traits; hash-derived values only as fallback
+  const skinTone =
+    (player?.skinTone && String(player.skinTone).toLowerCase()) ||
+    (opts.skinTone && String(opts.skinTone).toLowerCase()) ||
+    pref[h % pref.length];
+  const hairColor =
+    normalizeQueryHairColor(player?.hairColor) ||
+    normalizeQueryHairColor(opts.hairColor) ||
+    null;
+  const hairStyle =
+    normalizeQueryHairStyle(player?.hairStyle) ||
+    normalizeQueryHairStyle(opts.hairStyle) ||
+    null;
   const kitPrimary = opts.kitPrimary || opts.kit?.primary || null;
   const kitSecondary = opts.kitSecondary || opts.kit?.secondary || null;
   return {
@@ -258,6 +321,8 @@ export function buildAvatarQuery(player, opts = {}) {
     nation,
     region,
     skinTone,
+    hairColor,
+    hairStyle,
     kitPrimary,
     kitSecondary,
     hash: h,
@@ -295,6 +360,18 @@ export function scoreAvatarEntry(entry, query) {
   if (entry.skinTone && query.skinTone) {
     const d = Math.abs(skinIndex(entry.skinTone) - skinIndex(query.skinTone));
     score += Math.max(0, 28 - d * 9);
+  }
+
+  if (entry.hairColor && query.hairColor) {
+    const eh = normalizeQueryHairColor(entry.hairColor);
+    const qh = normalizeQueryHairColor(query.hairColor);
+    if (eh && qh) score += eh === qh ? 16 : -4;
+  }
+
+  if (entry.hairStyle && query.hairStyle) {
+    const eh = normalizeQueryHairStyle(entry.hairStyle);
+    const qh = normalizeQueryHairStyle(query.hairStyle);
+    if (eh && qh) score += eh === qh ? 18 : -3;
   }
 
   if (query.kitPrimary && entry.kitPrimary) {
@@ -514,11 +591,14 @@ const KIT_CACHE_MAX = 200;
 
 export async function getKitRecoloredSrc(srcUrl, kitPrimary, size) {
   if (!srcUrl || !kitPrimary) return srcUrl;
-  const key = \`\${srcUrl}|\${kitPrimary}|\${size || 0}\`;
+  const key = \`\${srcUrl}|\${String(kitPrimary).toLowerCase()}|\${size || 0}\`;
   if (kitRecolorCache.has(key)) return kitRecolorCache.get(key);
   const out = await recolorAvatarKit(srcUrl, kitPrimary, { size: size || 128 });
   const finalSrc = out || srcUrl;
-  if (kitRecolorCache.size >= KIT_CACHE_MAX) kitRecolorCache.clear();
+  if (kitRecolorCache.size >= KIT_CACHE_MAX) {
+    const first = kitRecolorCache.keys().next().value;
+    if (first != null) kitRecolorCache.delete(first);
+  }
   kitRecolorCache.set(key, finalSrc);
   return finalSrc;
 }

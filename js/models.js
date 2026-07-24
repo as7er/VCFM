@@ -160,7 +160,247 @@ export function formatRating(r) {
 }
 
 /** 兼容旧存档：补齐生涯总计与分赛季历史 */
+/** Appearance traits for avatar pipeline / portrait matching */
+export const APPEARANCE_SKIN_TONES = Object.freeze([
+  "pale", "fair", "light", "tan", "olive", "brown", "deep", "dark",
+]);
+export const APPEARANCE_HAIR_COLORS = Object.freeze([
+  "black", "dkbrown", "brown", "ltbrown", "blond", "red", "grey", "white",
+]);
+/** 0 flat 1 pompadour 2 spiky 3 buzz 4 sidepart 5 bowl 6 afro 7 curl 8 fade 9 long */
+export const APPEARANCE_HAIR_STYLE_IDS = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+export const APPEARANCE_HAIR_STYLE_NAMES = Object.freeze({
+  0: "flat",
+  1: "pompadour",
+  2: "spiky",
+  3: "buzz",
+  4: "sidepart",
+  5: "bowl",
+  6: "afro",
+  7: "curl",
+  8: "fade",
+  9: "long",
+});
+
+const APPEARANCE_STYLE_DEFAULT = [
+  [2, 16], [4, 16], [3, 14], [0, 12], [7, 10], [1, 10], [9, 8], [5, 6], [8, 6], [6, 2],
+];
+const APPEARANCE_STYLE_EASIA = [
+  [5, 20], [4, 18], [2, 18], [1, 14], [3, 12], [0, 10], [9, 5], [7, 3],
+];
+const APPEARANCE_STYLE_AFRO = [
+  [3, 26], [7, 24], [6, 16], [8, 16], [0, 10], [2, 8],
+];
+
+const APPEARANCE_REGION_OF = {
+  ENG: "brit", SCO: "brit", WAL: "brit", IRL: "brit",
+  GER: "weur", NED: "weur", BEL: "weur", AUT: "weur", SUI: "weur",
+  FRA: "fra",
+  ESP: "seur", ITA: "seur", POR: "seur", CRO: "seur", SRB: "seur",
+  POL: "eeur", UKR: "eeur",
+  DEN: "nordic", SWE: "nordic", NOR: "nordic",
+  TUR: "tur",
+  JPN: "easia", KOR: "easia", CHN: "easia",
+  NGA: "wafr", SEN: "wafr", GHA: "wafr", CIV: "wafr",
+  MAR: "nafr",
+  BRA: "latM", COL: "latM",
+  ARG: "latE", URU: "latE",
+  MEX: "mex",
+  USA: "usa",
+  AUS: "aus",
+};
+
+const APPEARANCE_REGION_PROFILES = {
+  nordic: {
+    skin: [["pale", 55], ["fair", 30], ["light", 9], ["brown", 3], ["deep", 3]],
+    hair: [["blond", 38], ["ltbrown", 25], ["brown", 20], ["red", 9], ["black", 8]],
+  },
+  brit: {
+    skin: [["pale", 38], ["fair", 30], ["light", 13], ["tan", 5], ["brown", 8], ["deep", 6]],
+    hair: [["brown", 33], ["dkbrown", 25], ["ltbrown", 14], ["blond", 10], ["red", 12], ["black", 6]],
+  },
+  weur: {
+    skin: [["fair", 36], ["pale", 22], ["light", 17], ["tan", 8], ["brown", 10], ["deep", 7]],
+    hair: [["dkbrown", 30], ["brown", 27], ["black", 15], ["blond", 15], ["ltbrown", 9], ["red", 4]],
+  },
+  fra: {
+    skin: [["fair", 28], ["light", 18], ["tan", 12], ["olive", 8], ["brown", 17], ["deep", 13], ["dark", 4]],
+    hair: [["black", 34], ["dkbrown", 30], ["brown", 21], ["blond", 8], ["ltbrown", 7]],
+  },
+  seur: {
+    skin: [["light", 30], ["fair", 22], ["tan", 25], ["olive", 15], ["brown", 5], ["deep", 3]],
+    hair: [["black", 44], ["dkbrown", 31], ["brown", 18], ["blond", 4], ["ltbrown", 3]],
+  },
+  eeur: {
+    skin: [["pale", 35], ["fair", 35], ["light", 20], ["tan", 6], ["brown", 4]],
+    hair: [["brown", 27], ["dkbrown", 25], ["blond", 20], ["ltbrown", 15], ["black", 11], ["red", 2]],
+  },
+  tur: {
+    skin: [["tan", 32], ["olive", 27], ["light", 22], ["fair", 10], ["brown", 9]],
+    hair: [["black", 62], ["dkbrown", 28], ["brown", 10]],
+  },
+  easia: {
+    skin: [["light", 38], ["fair", 30], ["tan", 22], ["pale", 10]],
+    hair: [["black", 82], ["dkbrown", 15], ["brown", 3]],
+    style: APPEARANCE_STYLE_EASIA,
+  },
+  wafr: {
+    skin: [["deep", 34], ["dark", 30], ["brown", 26], ["tan", 8], ["olive", 2]],
+    hair: [["black", 85], ["dkbrown", 15]],
+    style: APPEARANCE_STYLE_AFRO,
+  },
+  nafr: {
+    skin: [["tan", 30], ["olive", 26], ["light", 20], ["brown", 16], ["deep", 6], ["fair", 2]],
+    hair: [["black", 70], ["dkbrown", 24], ["brown", 6]],
+  },
+  latM: {
+    skin: [["tan", 22], ["light", 20], ["fair", 12], ["olive", 14], ["brown", 16], ["deep", 12], ["dark", 4]],
+    hair: [["black", 50], ["dkbrown", 30], ["brown", 14], ["blond", 4], ["ltbrown", 2]],
+  },
+  latE: {
+    skin: [["fair", 30], ["light", 28], ["tan", 20], ["olive", 10], ["brown", 8], ["deep", 4]],
+    hair: [["dkbrown", 32], ["black", 30], ["brown", 22], ["blond", 10], ["ltbrown", 6]],
+  },
+  mex: {
+    skin: [["tan", 32], ["olive", 24], ["brown", 18], ["light", 16], ["fair", 6], ["deep", 4]],
+    hair: [["black", 68], ["dkbrown", 24], ["brown", 8]],
+  },
+  usa: {
+    skin: [["fair", 26], ["light", 18], ["pale", 12], ["tan", 10], ["brown", 16], ["deep", 14], ["dark", 4]],
+    hair: [["dkbrown", 28], ["brown", 24], ["black", 26], ["blond", 14], ["red", 4], ["ltbrown", 4]],
+  },
+  aus: {
+    skin: [["fair", 34], ["pale", 24], ["light", 18], ["tan", 10], ["brown", 8], ["deep", 6]],
+    hair: [["brown", 30], ["dkbrown", 24], ["blond", 22], ["ltbrown", 12], ["black", 8], ["red", 4]],
+  },
+};
+
+function appearanceHash(s) {
+  let h = 2166136261;
+  const str = String(s || "x");
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function appearanceWpick(h, salt, pairs) {
+  let total = 0;
+  for (const [, w] of pairs) total += w;
+  let r = ((h ^ Math.imul(salt + 1, 2654435761)) >>> 0) % Math.max(1, total);
+  for (const [v, w] of pairs) {
+    if ((r -= w) < 0) return v;
+  }
+  return pairs[0][0];
+}
+
+function normalizeHairStyleId(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number" && Number.isFinite(v)) {
+    const n = Math.round(v);
+    return n >= 0 && n <= 9 ? n : null;
+  }
+  const s = String(v).toLowerCase();
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    return n >= 0 && n <= 9 ? n : null;
+  }
+  const byName = {
+    flat: 0, flat_top: 0, flattop: 0, kunio: 0,
+    pompadour: 1, rizzento: 1,
+    spiky: 2, spike: 2, messy: 2,
+    buzz: 3, short: 3, crop: 3,
+    sidepart: 4, side: 4, part: 4,
+    bowl: 5, bowlcut: 5,
+    afro: 6, explosion: 6,
+    curl: 7, curly: 7,
+    fade: 8, bald_fade: 8,
+    long: 9, longhair: 9,
+  };
+  if (byName[s] != null) return byName[s];
+  return null;
+}
+
+function normalizeSkinTone(v) {
+  if (v == null || v === "") return null;
+  const s = String(v).toLowerCase();
+  return APPEARANCE_SKIN_TONES.includes(s) ? s : null;
+}
+
+function normalizeHairColor(v) {
+  if (v == null || v === "") return null;
+  const s = String(v).toLowerCase();
+  const alias = {
+    darkbrown: "dkbrown",
+    dark_brown: "dkbrown",
+    lightbrown: "ltbrown",
+    light_brown: "ltbrown",
+    blonde: "blond",
+    gray: "grey",
+  };
+  const key = alias[s] || s;
+  return APPEARANCE_HAIR_COLORS.includes(key) ? key : null;
+}
+
+/** Generate stable appearance traits for create/migrate. */
+export function generatePlayerAppearance(player = {}, opts = {}) {
+  const nation = player.nationality || player.nation || opts.nation || "ENG";
+  const age = Number(player.age ?? opts.age ?? 25) || 25;
+  const seedBase =
+    player.appearanceSeed != null && player.appearanceSeed !== ""
+      ? String(player.appearanceSeed)
+      : player.id != null && player.id !== ""
+        ? String(player.id)
+        : player.name != null && player.name !== ""
+          ? String(player.name)
+          : "look:" + nation + ":" + age;
+  const h = appearanceHash("look:" + seedBase);
+  const region = APPEARANCE_REGION_OF[String(nation).toUpperCase()] || "weur";
+  const prof = APPEARANCE_REGION_PROFILES[region] || APPEARANCE_REGION_PROFILES.weur;
+  let skinTone = normalizeSkinTone(player.skinTone) || appearanceWpick(h, 11, prof.skin);
+  const darkSkin = skinTone === "deep" || skinTone === "dark";
+  let hairColor =
+    normalizeHairColor(player.hairColor) ||
+    (darkSkin
+      ? appearanceWpick(h, 12, [["black", 80], ["dkbrown", 20]])
+      : appearanceWpick(h, 12, prof.hair));
+  if (age >= 40) {
+    hairColor = appearanceWpick(h, 13, [["grey", 55], ["white", 25], [hairColor, 20]]);
+  } else if (age >= 34 && (h & 3) === 0 && hairColor !== "grey" && hairColor !== "white") {
+    hairColor = "grey";
+  }
+  const styleW = darkSkin ? APPEARANCE_STYLE_AFRO : prof.style || APPEARANCE_STYLE_DEFAULT;
+  let hairStyle = normalizeHairStyleId(player.hairStyle);
+  if (hairStyle == null) hairStyle = appearanceWpick(h, 14, styleW);
+  return {
+    appearanceSeed: seedBase,
+    skinTone,
+    hairColor,
+    hairStyle,
+    hairStyleName: APPEARANCE_HAIR_STYLE_NAMES[hairStyle] || "spiky",
+    region,
+  };
+}
+
+/** Backfill appearanceSeed / skin / hair for old saves. */
+export function ensurePlayerAppearance(p) {
+  if (!p || typeof p !== "object") return p;
+  const gen = generatePlayerAppearance(p);
+  if (p.appearanceSeed == null || p.appearanceSeed === "") {
+    p.appearanceSeed = gen.appearanceSeed;
+  }
+  if (!normalizeSkinTone(p.skinTone)) p.skinTone = gen.skinTone;
+  else p.skinTone = normalizeSkinTone(p.skinTone);
+  if (!normalizeHairColor(p.hairColor)) p.hairColor = gen.hairColor;
+  else p.hairColor = normalizeHairColor(p.hairColor);
+  const hs = normalizeHairStyleId(p.hairStyle);
+  p.hairStyle = hs == null ? gen.hairStyle : hs;
+  return p;
+}
+
 export function ensurePlayerHistory(p) {
+  ensurePlayerAppearance(p);
   if (!p.stats) p.stats = emptyMatchStats();
   else {
     const e = emptyMatchStats();
@@ -315,6 +555,14 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     // 球衣号（入队时由 assignSquadNumbers 分配）
     number: null,
   };
+  // appearance identity persisted at create time
+  {
+    const look = generatePlayerAppearance(p);
+    p.appearanceSeed = look.appearanceSeed;
+    p.skinTone = look.skinTone;
+    p.hairColor = look.hairColor;
+    p.hairStyle = look.hairStyle;
+  }
   p.ovr = playerOverall(p);
   // 潜力：青年略高于当前，成年接近当前
   if (isYouth) {

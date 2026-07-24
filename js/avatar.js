@@ -246,24 +246,35 @@ const REGION_OF = {
 };
 
 /** 由国籍 + 哈希得到稳定的外貌；face 保存与状态无关的天生五官差异。 */
-function lookFor(h, nation, age = 25) {
+function lookFor(h, nation, age = 25, persisted = null) {
   const prof = REGION_PROFILES[REGION_OF[nation] || ""] || REGION_PROFILES.weur;
-  const skinKey = wpick(h, 11, prof.skin);
+  let skinKey = persisted?.skinTone && SKIN_TONES[persisted.skinTone]
+    ? persisted.skinTone
+    : wpick(h, 11, prof.skin);
+  if (!SKIN_TONES[skinKey]) skinKey = "fair";
   const [skin, skinShade] = SKIN_TONES[skinKey];
   // 深肤色 → 黑/深棕发（自然合理）；发型偏向短寸/短卷/爆炸头
   const darkSkin = skinKey === "deep" || skinKey === "dark";
-  const hairKey = darkSkin
-    ? wpick(h, 12, [["black", 80], ["dkbrown", 20]])
-    : wpick(h, 12, prof.hair);
+  let hairKey = persisted?.hairColor && HAIR_COLORS[persisted.hairColor]
+    ? persisted.hairColor
+    : (darkSkin
+      ? wpick(h, 12, [["black", 80], ["dkbrown", 20]])
+      : wpick(h, 12, prof.hair));
+  if (!HAIR_COLORS[hairKey]) hairKey = "dkbrown";
   let hairHex = HAIR_COLORS[hairKey];
-  // 年龄灰白
-  if (age >= 40) {
-    hairHex = wpick(h, 13, [[HAIR_COLORS.grey, 55], [HAIR_COLORS.white, 25], [mixHex(hairHex, HAIR_COLORS.grey, 0.6), 20]]);
-  } else if (age >= 34 && (h & 3) === 0) {
-    hairHex = mixHex(hairHex, HAIR_COLORS.grey, 0.45);
+  // 年龄灰白（仅在无显式灰/白发时）
+  if (hairKey !== "grey" && hairKey !== "white") {
+    if (age >= 40) {
+      hairHex = wpick(h, 13, [[HAIR_COLORS.grey, 55], [HAIR_COLORS.white, 25], [mixHex(hairHex, HAIR_COLORS.grey, 0.6), 20]]);
+    } else if (age >= 34 && (h & 3) === 0) {
+      hairHex = mixHex(hairHex, HAIR_COLORS.grey, 0.45);
+    }
   }
   const styleW = darkSkin ? STYLE_AFRO : prof.style || STYLE_DEFAULT;
-  const styleId = wpick(h, 14, styleW);
+  let styleId = Number.isFinite(Number(persisted?.hairStyle))
+    ? Math.round(Number(persisted.hairStyle))
+    : wpick(h, 14, styleW);
+  if (!(styleId >= 0 && styleId <= 9)) styleId = wpick(h, 14, styleW);
   const face = {
     eyeStyle: (h >>> 3) % 4,
     browStyle: (h >>> 8) % 4,
@@ -271,7 +282,7 @@ function lookFor(h, nation, age = 25) {
     noseStyle: (h >>> 18) % 3,
     gaze: ((h >>> 21) % 3) - 1,
   };
-  return { skin, skinShade, hairHex, styleId, darkSkin, face };
+  return { skin, skinShade, hairHex, styleId, darkSkin, face, skinKey, hairKey };
 }
 
 // ============================================================
@@ -648,7 +659,14 @@ function composeCells(opts = {}) {
   const mood = opts.mood || "neutral";
   const nation = opts.nation || null;
 
-  const look = lookFor(h, nation, age);
+  const persisted = opts.skinTone || opts.hairColor || opts.hairStyle != null
+    ? {
+        skinTone: opts.skinTone || null,
+        hairColor: opts.hairColor || null,
+        hairStyle: opts.hairStyle,
+      }
+    : null;
+  const look = lookFor(h, nation, age, persisted);
 
   const bgLum = luminance(MOOD_BG[mood]?.[0] || MOOD_BG.neutral[0]);
   const kitP = kitDisplayColor(opts.kitPrimary || "#3d8bfd", bgLum);
@@ -725,6 +743,9 @@ export function renderAvatarPngUri(opts = {}) {
     opts.pos || "",
     opts.age || 25,
     opts.nation || "",
+    opts.skinTone || "",
+    opts.hairColor || "",
+    opts.hairStyle ?? "",
     opts.mood || "neutral",
     opts.kitPrimary || "",
     opts.kitSecondary || "",
@@ -790,6 +811,9 @@ export function avatarHtml(person, opts = {}) {
     pos: person.pos,
     age: person.age,
     nation: person.nationality || null,
+    skinTone: person.skinTone || null,
+    hairColor: person.hairColor || null,
+    hairStyle: person.hairStyle,
     kitPrimary,
     kitSecondary,
     size,
@@ -807,6 +831,9 @@ export function avatarHtml(person, opts = {}) {
           size,
           kitPrimary,
           kitSecondary,
+          skinTone: person.skinTone || null,
+          hairColor: person.hairColor || null,
+          hairStyle: person.hairStyle,
         })
       : null;
 
@@ -848,7 +875,7 @@ export function avatarHtml(person, opts = {}) {
   const cls = `avatar mood-${mood}${artCls}${opts.className ? " " + opts.className : ""}`;
   return `<span class="${cls}" style="width:${size}px;height:${size}px" title="${escapeAttr(
     label
-  )}" role="img" aria-label="${escapeAttr(label)}">${inner}</span>`;
+  )}" role="img" aria-label="${escapeAttr(label)}">${inner}${moodOverlayHtml(mood)}</span>`;
 }
 
 // 资产管线公开 re-export（调用方无需改 import 路径也可测）
@@ -860,7 +887,20 @@ export {
   getKitRecoloredSrc,
   buildAvatarQuery,
   scoreAvatarEntry,
+  isMatchableEntry,
 } from "./avatar-assets.js";
+
+/** Formal portrait mood badge: keep base art neutral, overlay status. */
+function moodOverlayHtml(mood) {
+  if (!mood || mood === "neutral") return "";
+  const label =
+    mood === "injured" ? "伤" :
+    mood === "happy" ? "佳" :
+    mood === "sad" ? "低" :
+    mood === "tired" ? "疲" : "";
+  if (!label) return "";
+  return `<span class="avatar-mood-overlay mood-${mood}" aria-hidden="true">${label}</span>`;
+}
 
 function escapeAttr(s) {
   return String(s || "")
