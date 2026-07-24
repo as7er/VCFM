@@ -838,7 +838,9 @@ export function avatarHtml(person, opts = {}) {
       : null;
 
   if (tryArt && tryArt.kind === "asset" && tryArt.src) {
-    const artSrc = escapeAttr(tryArt.src);
+    // 贴头必须用高清 portrait，不能用列表 thumbnail（小图再裁头会糊/裁坏）
+    const composeSrcRaw = tryArt.srcPortrait || tryArt.src;
+    const artSrc = escapeAttr(composeSrcRaw);
     const alt = escapeAttr(person.name || "player");
     // onerror → 程序生成 data-URI；再失败则去掉图（外层 title 仍在）
     const fb = pngUri ? escapeAttr(pngUri) : "";
@@ -971,11 +973,12 @@ const HEAD_KIT_CACHE_MAX = 240;
  */
 async function getHeadOnKitSrc(srcUrl, opts = {}) {
   if (typeof document === "undefined" || !srcUrl) return srcUrl;
-  const size = Math.max(64, Math.min(256, Number(opts.size) || 128));
+  // 列表小头像也按更高像素合成再缩小，避免 30px 直接硬裁
+  const size = Math.max(96, Math.min(256, Number(opts.size) || 128));
   const kitPrimary = opts.kitPrimary || "#3d8bfd";
   const kitSecondary = opts.kitSecondary || "";
   const pos = opts.pos || "";
-  const key = ["v2", srcUrl, kitPrimary, kitSecondary, pos, size].join("|");
+  const key = ["v3", srcUrl, kitPrimary, kitSecondary, pos, size].join("|");
   if (headKitCache.has(key)) return headKitCache.get(key);
 
   const bodyUri = renderStandardKitBodyUri({
@@ -992,6 +995,7 @@ async function getHeadOnKitSrc(srcUrl, opts = {}) {
       img.decoding = "async";
       img.onload = () => resolve(img);
       img.onerror = () => resolve(null);
+      // portrait path may be relative; fine for same-origin
       img.src = url;
     });
 
@@ -1006,61 +1010,51 @@ async function getHeadOnKitSrc(srcUrl, opts = {}) {
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
 
-  // 1) standard kit body first
+  // base kit body
   ctx.drawImage(bodyImg, 0, 0, size, size);
 
-  // 2) draw head into an oval mask that ends above collar
-  // procedural head roughly occupies y=0..20 in 32 grid => ~0..0.62
   const fw = faceImg.naturalWidth || faceImg.width;
   const fh = faceImg.naturalHeight || faceImg.height;
 
-  // Source: prefer upper bust/face. Masters are roughly head+shoulders.
-  // Use a centered top crop with a bit of hair room.
-  const sx = Math.floor(fw * 0.16);
-  const sy = Math.floor(fh * 0.04);
-  const sw = Math.floor(fw * 0.68);
-  const sh = Math.floor(fh * 0.52);
+  // Head+upper hair crop from formal bust (avoid shoulders/jersey of source art)
+  const sx = Math.floor(fw * 0.14);
+  const sy = Math.floor(fh * 0.02);
+  const sw = Math.floor(fw * 0.72);
+  const sh = Math.floor(fh * 0.48);
 
-  // Destination head slot (match pixel avatar head scale better)
-  const dw = size * 0.70;
-  const dh = size * 0.58;
+  // Place head higher and a bit smaller so jersey band is clearly visible (~ bottom 38%)
+  const dw = size * 0.78;
+  const dh = size * 0.56;
   const dx = (size - dw) / 2;
-  const dy = size * 0.01;
+  const dy = size * -0.02;
 
+  // Soft circular head matte (less boxy than previous)
   ctx.save();
   ctx.beginPath();
-  // ellipse covering head/hair; bottom stays above jersey collar (~ y 0.55)
   const cx = size / 2;
-  const cy = size * 0.30;
-  const rx = size * 0.33;
-  const ry = size * 0.30;
+  const cy = size * 0.28;
+  const rx = size * 0.36;
+  const ry = size * 0.33;
   ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
   ctx.closePath();
   ctx.clip();
   ctx.drawImage(faceImg, sx, sy, sw, sh, dx, dy, dw, dh);
   ctx.restore();
 
-  // 3) redraw jersey torso (from neck down) so collar always sits cleanly under chin
-  // procedural jersey starts around y=20/32=0.625, neck at 20-21
-  const torsoY = Math.floor(size * (20 / 32));
+  // Always redraw full jersey block under chin (from neck line)
+  // grid y=20 is jersey start; keep a little neck (y=19)
+  const jerseyY = Math.floor(size * (19 / 32));
   ctx.drawImage(
     bodyImg,
     0,
-    torsoY,
+    jerseyY,
     size,
-    size - torsoY,
+    size - jerseyY,
     0,
-    torsoY,
+    jerseyY,
     size,
-    size - torsoY
+    size - jerseyY
   );
-
-  // 4) light neck blend: tiny strip just above torso using body neck pixels if present
-  const neckY = Math.floor(size * (18 / 32));
-  const neckH = Math.max(1, Math.floor(size * (3 / 32)));
-  ctx.globalAlpha = 0.92;
-  ctx.drawImage(bodyImg, 0, neckY, size, neckH, 0, neckY, size, neckH);
-  ctx.globalAlpha = 1;
 
   let out;
   try {
@@ -1112,7 +1106,7 @@ export function hydrateAvatarKitRecolor(root) {
         kitPrimary,
         kitSecondary,
         pos,
-        size: Math.max(64, Math.min(256, w * 2)),
+        size: Math.max(96, Math.min(256, Math.max(w * 3, 128))),
       })
         .then((out) => {
           if (out && img.isConnected) {
