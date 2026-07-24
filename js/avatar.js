@@ -975,7 +975,7 @@ async function getHeadOnKitSrc(srcUrl, opts = {}) {
   const kitPrimary = opts.kitPrimary || "#3d8bfd";
   const kitSecondary = opts.kitSecondary || "";
   const pos = opts.pos || "";
-  const key = [srcUrl, kitPrimary, kitSecondary, pos, size].join("|");
+  const key = ["v2", srcUrl, kitPrimary, kitSecondary, pos, size].join("|");
   if (headKitCache.has(key)) return headKitCache.get(key);
 
   const bodyUri = renderStandardKitBodyUri({
@@ -1005,39 +1005,62 @@ async function getHeadOnKitSrc(srcUrl, opts = {}) {
   if (!ctx) return srcUrl;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
+
+  // 1) standard kit body first
   ctx.drawImage(bodyImg, 0, 0, size, size);
 
+  // 2) draw head into an oval mask that ends above collar
+  // procedural head roughly occupies y=0..20 in 32 grid => ~0..0.62
   const fw = faceImg.naturalWidth || faceImg.width;
   const fh = faceImg.naturalHeight || faceImg.height;
-  const sx = Math.floor(fw * 0.10);
-  const sy = Math.floor(fh * 0.00);
-  const sw = Math.floor(fw * 0.80);
-  const sh = Math.floor(fh * 0.58);
-  const dx = size * 0.12;
-  const dy = size * 0.00;
-  const dw = size * 0.76;
-  const dh = size * 0.60;
+
+  // Source: prefer upper bust/face. Masters are roughly head+shoulders.
+  // Use a centered top crop with a bit of hair room.
+  const sx = Math.floor(fw * 0.16);
+  const sy = Math.floor(fh * 0.04);
+  const sw = Math.floor(fw * 0.68);
+  const sh = Math.floor(fh * 0.52);
+
+  // Destination head slot (match pixel avatar head scale better)
+  const dw = size * 0.70;
+  const dh = size * 0.58;
+  const dx = (size - dw) / 2;
+  const dy = size * 0.01;
 
   ctx.save();
   ctx.beginPath();
-  const rr = size * 0.14;
-  const x0 = dx;
-  const y0 = dy;
-  const x1 = dx + dw;
-  const y1 = dy + dh;
-  ctx.moveTo(x0 + rr, y0);
-  ctx.arcTo(x1, y0, x1, y1, rr);
-  ctx.arcTo(x1, y1, x0, y1, rr * 0.75);
-  ctx.arcTo(x0, y1, x0, y0, rr * 0.75);
-  ctx.arcTo(x0, y0, x1, y0, rr);
+  // ellipse covering head/hair; bottom stays above jersey collar (~ y 0.55)
+  const cx = size / 2;
+  const cy = size * 0.30;
+  const rx = size * 0.33;
+  const ry = size * 0.30;
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
   ctx.closePath();
   ctx.clip();
   ctx.drawImage(faceImg, sx, sy, sw, sh, dx, dy, dw, dh);
   ctx.restore();
 
-  const seamY = Math.floor(size * 0.52);
-  const seamH = Math.floor(size * 0.20);
-  ctx.drawImage(bodyImg, 0, seamY, size, seamH, 0, seamY, size, seamH);
+  // 3) redraw jersey torso (from neck down) so collar always sits cleanly under chin
+  // procedural jersey starts around y=20/32=0.625, neck at 20-21
+  const torsoY = Math.floor(size * (20 / 32));
+  ctx.drawImage(
+    bodyImg,
+    0,
+    torsoY,
+    size,
+    size - torsoY,
+    0,
+    torsoY,
+    size,
+    size - torsoY
+  );
+
+  // 4) light neck blend: tiny strip just above torso using body neck pixels if present
+  const neckY = Math.floor(size * (18 / 32));
+  const neckH = Math.max(1, Math.floor(size * (3 / 32)));
+  ctx.globalAlpha = 0.92;
+  ctx.drawImage(bodyImg, 0, neckY, size, neckH, 0, neckY, size, neckH);
+  ctx.globalAlpha = 1;
 
   let out;
   try {
