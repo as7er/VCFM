@@ -217,7 +217,7 @@ import {
   avatarHtml,
   loadAvatarManifest,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=130";
+} from "./avatar.js?v=132";
 
 // 本地球员肖像 manifest（失败则 avatar-assets 内置副本）
 loadAvatarManifest();
