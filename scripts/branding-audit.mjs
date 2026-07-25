@@ -16,6 +16,7 @@ import {
   ensureWorldClubTemplates,
   ensureWorldLeagueFixtures,
 } from "../js/models.js";
+import { playerAvatarKitColors } from "../js/avatar.js";
 import {
   REAL_PLAYER_NAME_REPLACEMENTS,
   applyWorldClubBranding,
@@ -97,6 +98,14 @@ assert.deepEqual(leagueCounts, {
 const world = createWorld("sunset", "Brand Audit", "zh");
 ensureCompetitions(world);
 const validClubIds = new Set(world.clubs.map((club) => club.id));
+for (const club of world.clubs) {
+  const kit = ensureKit(club);
+  assert.deepEqual(
+    playerAvatarKitColors(club),
+    { primary: kit.primary, secondary: kit.secondary || null },
+    `${club.id} avatar must use the same kit colors as shirt and number badges`
+  );
+}
 assert.equal(world.userClubId, "sunset");
 assert.equal(world.clubs.length, 188);
 assert.equal(world.fixtures.length, 3060);

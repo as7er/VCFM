@@ -897,23 +897,18 @@ function escapeAttr(s) {
 }
 
 
-/** 主题队固定配色（与 models.ensureKit 同步；avatar 不 import models 以免环依赖） */
-const AVATAR_KIT_THEME = {
-  sunset: { primary: "#f97316", secondary: "#5b21b6" },
-  harbor: { primary: "#0ea5e9", secondary: "#f8fafc" },
-  steel: { primary: "#64748b", secondary: "#dc2626" },
-  mill: { primary: "#166534", secondary: "#eab308" },
-};
-
 /** 兼容旧调用：程序脸无需异步着色 */
 export function hydrateAvatarKitRecolor() {}
 
+export function playerAvatarKitColors(club) {
+  return {
+    primary: club?.kit?.primary || club?.color || "#3d8bfd",
+    secondary: club?.kit?.secondary || club?.kit?.secondaryColor || null,
+  };
+}
+
 export function playerAvatarHtml(player, club, size = 36) {
-  const theme = club?.id ? AVATAR_KIT_THEME[club.id] : null;
-  // 主题队优先；否则用 kit / color（调用方应 ensureKit，这里再兜一层）
-  const kitPrimary = theme?.primary || club?.kit?.primary || club?.color || "#3d8bfd";
-  const kitSecondary =
-    theme?.secondary || club?.kit?.secondary || club?.kit?.secondaryColor || null;
+  const { primary: kitPrimary, secondary: kitSecondary } = playerAvatarKitColors(club);
   return avatarHtml(player, {
     role: "player",
     size,

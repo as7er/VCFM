@@ -29,8 +29,8 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=144";
-import { nationFlagHtml } from "./flags.js?v=144";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=146";
+import { nationFlagHtml } from "./flags.js?v=146";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 
 function clubDisplayName(club) {
@@ -242,7 +242,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=144";
+} from "./avatar.js?v=146";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -3775,7 +3775,23 @@ function collectGlobalSearchResults(query) {
   const userClub = getUserClub(world);
   const players = [];
   const clubs = [];
+  const nations = [];
   const youth = [];
+
+  for (const nation of listNationalTeams(world)) {
+    const score = globalSearchScore(
+      [nationName(nation.code, getLang()), nation.name, nation.nameEn, nation.code],
+      query
+    );
+    if (!Number.isFinite(score)) continue;
+    nations.push({
+      type: "nation",
+      id: nation.code,
+      label: nationName(nation.code, getLang()),
+      nation,
+      score,
+    });
+  }
 
   for (const club of world.clubs || []) {
     const clubScore = globalSearchScore(
@@ -3823,16 +3839,18 @@ function collectGlobalSearchResults(query) {
     a.label.localeCompare(b.label, getLang() === "en" ? "en" : "zh-CN", { sensitivity: "base" });
   players.sort(sortMatches);
   clubs.sort(sortMatches);
+  nations.sort(sortMatches);
   youth.sort(sortMatches);
 
   // Reserve room for every matching category, then refill unused slots by relevance.
   const selected = [
-    ...players.slice(0, 6),
+    ...players.slice(0, 5),
     ...clubs.slice(0, 2),
-    ...youth.slice(0, 2),
+    ...nations.slice(0, 2),
+    ...youth.slice(0, 1),
   ];
   const selectedKeys = new Set(selected.map((item) => `${item.type}:${item.id}`));
-  const remaining = [...players, ...clubs, ...youth]
+  const remaining = [...players, ...clubs, ...nations, ...youth]
     .filter((item) => !selectedKeys.has(`${item.type}:${item.id}`))
     .sort(sortMatches);
   while (selected.length < 10 && remaining.length) selected.push(remaining.shift());
@@ -3840,6 +3858,7 @@ function collectGlobalSearchResults(query) {
   return {
     players: selected.filter((item) => item.type === "player").sort(sortMatches),
     clubs: selected.filter((item) => item.type === "club").sort(sortMatches),
+    nations: selected.filter((item) => item.type === "nation").sort(sortMatches),
     youth: selected.filter((item) => item.type === "youth").sort(sortMatches),
   };
 }
@@ -3876,6 +3895,22 @@ function globalClubSearchRow(item) {
   </button>`;
 }
 
+function globalNationSearchRow(item) {
+  const { nation } = item;
+  const en = getLang() === "en";
+  const detail = en
+    ? `Player pool ${nation.pool} · XI OVR ${nation.strength || "—"}`
+    : `人才池 ${nation.pool} · 首发能力 ${nation.strength || "—"}`;
+  return `<button type="button" class="global-search-result" data-nation="${escapeHtml(nation.code)}">
+    <span class="global-search-nation-flag">${nationFlagHtml(nation.code)}</span>
+    <span class="global-search-copy">
+      <strong>${escapeHtml(nationName(nation.code, getLang()))}</strong>
+      <span>${escapeHtml(detail)}</span>
+    </span>
+    <span class="global-search-rating">${escapeHtml(nation.code)}</span>
+  </button>`;
+}
+
 function renderGlobalSearchResults(rawQuery) {
   const host = $("#global-search-results");
   if (!host) return;
@@ -3886,7 +3921,7 @@ function renderGlobalSearchResults(rawQuery) {
   }
 
   const results = collectGlobalSearchResults(query);
-  const total = results.players.length + results.clubs.length + results.youth.length;
+  const total = results.players.length + results.clubs.length + results.nations.length + results.youth.length;
   if (!total) {
     host.innerHTML = `<p class="global-search-status">${escapeHtml(t("search.empty"))}</p>`;
     return;
@@ -3902,6 +3937,7 @@ function renderGlobalSearchResults(rawQuery) {
   host.innerHTML = [
     group(t("search.players"), results.players, (item) => globalPlayerSearchRow(item)),
     group(t("search.clubs"), results.clubs, globalClubSearchRow),
+    group(t("search.nations"), results.nations, globalNationSearchRow),
     group(t("search.youth"), results.youth, (item) => globalPlayerSearchRow(item, { academy: true })),
   ].join("");
 }

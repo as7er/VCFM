@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=144" />
+  <link rel="stylesheet" href="css/style.css?v=146" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -141,7 +141,7 @@
           <button data-tab="fixtures" class="tab" data-i18n="tab.fixtures">赛程</button>
         </nav>
         <div class="actions">
-          <button id="btn-global-search" class="btn icon-btn" type="button" data-i18n-title="search.open" aria-label="搜索球员和俱乐部">
+          <button id="btn-global-search" class="btn icon-btn" type="button" data-i18n-title="search.open" aria-label="搜索球员、俱乐部和国家队">
             <span aria-hidden="true">🔍</span>
           </button>
           <div class="topbar-prefs">
@@ -991,12 +991,12 @@
     <div id="season-summary" class="season-summary hidden" role="dialog" aria-modal="true"></div>
   </div>
 
-  <script type="module" src="js/main.js?v=144"></script>
+  <script type="module" src="js/main.js?v=146"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v144";
+        var CURRENT_CACHE = "vcfm-v146";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1006,7 +1006,7 @@
             );
           }).catch(function () {});
         }
-        navigator.serviceWorker.register("./sw.js?v=144").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=146").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1015,8 +1015,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v144")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v144", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v146")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v146", "1");
               location.reload();
             }
           } catch (e) {
