@@ -478,7 +478,7 @@
               <select id="intl-competition" aria-label="competition" style="min-width:12rem"></select>
             </div>
             <p class="hint" style="margin:0.5rem 0 0.75rem" data-i18n="intl.hint">
-              约每 30 天国际比赛日。赛季年份逢 2 为世界国家杯，逢 0 为欧洲国家锦标赛，其余为国际系列赛。
+              约每 30 天国际比赛日。世界国家杯 32 队、欧洲国家锦标赛 16 队；其余赛季为全员国际系列赛。点选国家可查看名单。
             </p>
             <div id="intl-summary" class="intl-summary muted" style="margin-bottom:0.75rem"></div>
             <div id="intl-tables" class="intl-tables" style="display:grid;gap:0.75rem"></div>
@@ -505,6 +505,35 @@
               <div style="flex:1;min-width:12rem">
                 <h3 style="margin:0 0 0.4rem;font-size:0.95rem" data-i18n="intl.history">历届冠军</h3>
                 <div id="intl-history" class="muted"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:0.75rem">
+            <div class="row-between" style="flex-wrap:wrap;gap:0.5rem;align-items:center">
+              <h2 style="margin:0;font-size:1.05rem" data-i18n="intl.nations">国家队一览</h2>
+              <span id="intl-nations-count" class="muted" style="font-size:0.85rem"></span>
+            </div>
+            <p class="hint" style="margin:0.4rem 0 0.6rem" data-i18n="intl.nationsHint">
+              按现役球员池组成国家队。点击一行查看 23 人大名单与国际数据。
+            </p>
+            <div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:0.75rem;align-items:start" class="intl-nations-grid">
+              <div class="table-wrap" style="max-height:28rem;overflow:auto">
+                <table id="intl-nations">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th data-i18n="intl.colNation">国家</th>
+                      <th data-i18n="intl.colPool">人才池</th>
+                      <th data-i18n="intl.colStrength">实力</th>
+                      <th data-i18n="intl.colRecord">战绩</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <div id="intl-nation-detail" class="intl-nation-detail">
+                <p class="muted" data-i18n="intl.pickNation">选择左侧国家查看名单</p>
               </div>
             </div>
           </div>

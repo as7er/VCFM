@@ -727,7 +727,12 @@ table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 th, td { padding: 0.55rem 0.45rem; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th { color: var(--muted); font-weight: 600; font-size: 0.8rem; }
 tr.me { background: var(--row-me); }
+tr.row-active td { background: var(--row-me); }
 tr:hover td { background: var(--row-hover); }
+.intl-nation-link:hover { text-decoration: underline; color: var(--accent, #6cf); }
+@media (max-width: 720px) {
+  .intl-nations-grid { grid-template-columns: 1fr !important; }
+}
 
 /* Dashboard */
 .next-match {

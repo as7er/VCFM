@@ -183,6 +183,11 @@ import {
   internationalMatches,
   internationalTable,
   internationalLeaders,
+  listNationalTeams,
+  nationalSquad,
+  nationalRecords,
+  emptyNationRow,
+  nationalCompetitionStats,
   nationName,
   nationFlag,
 } from "./intl.js";
@@ -1320,6 +1325,128 @@ function refreshAll() {
   checkExportReminder();
 }
 
+/** 世界赛事页当前选中的国家队 code */
+let selectedNationCode = null;
+
+function nationCellHtml(code, clickable = true) {
+  const label = `${nationFlag(code)} ${escapeHtml(nationName(code))}`;
+  if (!clickable) return label;
+  return `<button type="button" class="intl-nation-link" data-nation="${escapeHtml(code)}" style="background:none;border:none;padding:0;color:inherit;cursor:pointer;font:inherit;text-align:left">${label}</button>`;
+}
+
+/** meta / record 由调用方传入，避免在同一次渲染里重复全量统计。 */
+function renderNationDetail(code, competitionId = null, meta = null, record = null) {
+  const detailEl = $("#intl-nation-detail");
+  if (!detailEl || !world || !code) return;
+  const en = getLang() === "en";
+  const squad = nationalSquad(world, code);
+  const eventStats = nationalCompetitionStats(world, code, competitionId);
+  if (!squad.length) {
+    detailEl.innerHTML = `<p class="muted">${nationFlag(code)} ${escapeHtml(nationName(code))} — ${escapeHtml(
+      en ? "No eligible players in world pool." : "人才池中暂无可用球员。"
+    )}</p>`;
+    return;
+  }
+  const recText = en
+    ? `${record.played} played · ${record.w}W ${record.d}D ${record.l}L · GD ${record.gd}`
+    : `${record.played} 场 · ${record.w}胜 ${record.d}平 ${record.l}负 · 净胜 ${record.gd}`;
+  detailEl.innerHTML = `
+    <div class="row-between" style="flex-wrap:wrap;gap:0.35rem;margin-bottom:0.45rem">
+      <strong style="font-size:1rem">${nationFlag(code)} ${escapeHtml(nationName(code))}</strong>
+      <span class="muted" style="font-size:0.85rem">${escapeHtml(
+        en
+          ? `Pool ${meta?.pool ?? "—"} · XI OVR ${meta?.strength ?? "—"}`
+          : `人才池 ${meta?.pool ?? "—"} · 首发均能 ${meta?.strength ?? "—"}`
+      )}</span>
+    </div>
+    <p class="muted" style="margin:0 0 0.5rem;font-size:0.85rem">${escapeHtml(recText)}</p>
+    <h3 style="margin:0 0 0.35rem;font-size:0.9rem">${escapeHtml(t("intl.squad"))}</h3>
+    <div class="table-wrap" style="max-height:22rem;overflow:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>${escapeHtml(en ? "Pos" : "位置")}</th>
+            <th>${escapeHtml(en ? "Player" : "球员")}</th>
+            <th>${escapeHtml(en ? "Club" : "俱乐部")}</th>
+            <th>OVR</th>
+            <th>${escapeHtml(en ? "Caps" : "场")}</th>
+            <th>${escapeHtml(en ? "G" : "球")}</th>
+            <th>${escapeHtml(en ? "A" : "助")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${squad
+            .map(({ player, club, lastCalledUp }) => {
+              const intl = player.intl || {};
+              const ev = eventStats.get(player.id);
+              const mark = lastCalledUp ? " ★" : "";
+              return `<tr>
+                <td>${escapeHtml(player.pos || "—")}</td>
+                <td>${escapeHtml(player.name || "—")}${mark}</td>
+                <td>${escapeHtml(club?.name || "—")}</td>
+                <td>${player.ovr ?? "—"}</td>
+                <td>${intl.caps || 0}${ev?.apps ? ` <span class="muted">(${ev.apps})</span>` : ""}</td>
+                <td>${intl.goals || 0}${ev?.goals ? ` <span class="muted">(+${ev.goals})</span>` : ""}</td>
+                <td>${intl.assists || 0}</td>
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+    <p class="hint" style="margin:0.4rem 0 0;font-size:0.8rem">${escapeHtml(
+      en ? "★ last call-up · (n) this competition" : "★ 最近一次入选 · (n) 为本赛事数据"
+    )}</p>`;
+}
+
+function renderNationalTeamsPanel(competitionId = null) {
+  if (!world) return;
+  const body = $("#intl-nations tbody");
+  const countEl = $("#intl-nations-count");
+  if (!body) return;
+  const en = getLang() === "en";
+  const teams = listNationalTeams(world);
+  const eligible = teams.filter((item) => item.eligible).length;
+  if (countEl) {
+    countEl.textContent = en
+      ? `${eligible} eligible / ${teams.length} nations`
+      : `${eligible} 支可参赛 / 共 ${teams.length} 国`;
+  }
+  if (!selectedNationCode || !teams.some((item) => item.code === selectedNationCode)) {
+    selectedNationCode = teams.find((item) => item.eligible)?.code || teams[0]?.code || null;
+  }
+  const records = nationalRecords(world);
+  body.innerHTML = teams
+    .map((item, index) => {
+      const rec = records.get(item.code);
+      const active = item.code === selectedNationCode ? ' class="row-active"' : "";
+      const recLabel = rec?.played ? `${rec.w}-${rec.d}-${rec.l}` : "—";
+      return `<tr data-nation="${escapeHtml(item.code)}"${active} style="cursor:pointer${item.eligible ? "" : ";opacity:0.55"}">
+        <td>${index + 1}</td>
+        <td>${nationFlag(item.code)} ${escapeHtml(nationName(item.code))}</td>
+        <td>${item.pool}</td>
+        <td>${item.eligible ? item.strength : "—"}</td>
+        <td>${recLabel}</td>
+      </tr>`;
+    })
+    .join("");
+  if (!body._bound) {
+    body._bound = true;
+    body.addEventListener("click", (ev) => {
+      const row = ev.target.closest("tr[data-nation]");
+      if (!row) return;
+      selectedNationCode = row.getAttribute("data-nation");
+      renderCompetitions();
+    });
+  }
+  renderNationDetail(
+    selectedNationCode,
+    competitionId,
+    teams.find((item) => item.code === selectedNationCode) || null,
+    records.get(selectedNationCode) || emptyNationRow()
+  );
+}
+
 /** 世界赛事 / 国家队页 */
 function renderCompetitions() {
   if (!world) return;
@@ -1342,7 +1469,8 @@ function renderCompetitions() {
           .map((c) => {
             const name = en ? c.nameEn || c.name : c.name;
             const mark = c.completed ? (en ? " ✓" : " ✓") : "";
-            return `<option value="${escapeHtml(c.id)}">${escapeHtml(name)} · S${c.season}${mark}</option>`;
+            const n = c.participants?.length ? ` · ${c.participants.length}${en ? "t" : "队"}` : "";
+            return `<option value="${escapeHtml(c.id)}">${escapeHtml(name)} · S${c.season}${n}${mark}</option>`;
           })
           .join("")
       : `<option value="">${escapeHtml(t("intl.noComp"))}</option>`;
@@ -1366,9 +1494,11 @@ function renderCompetitions() {
     matchesBody.innerHTML = `<tr><td colspan="5" class="muted">${escapeHtml(t("intl.emptyMatches"))}</td></tr>`;
     if (scorersEl) scorersEl.textContent = "—";
     if (historyEl) historyEl.textContent = "—";
+    renderNationalTeamsPanel(null);
     return;
   }
 
+  const koStage = competition.knockout?.stage;
   const stageLabel =
     competition.stage === "group"
       ? en
@@ -1376,8 +1506,24 @@ function renderCompetitions() {
         : "小组赛"
       : competition.stage === "knockout"
         ? en
-          ? "Knockout"
-          : "淘汰赛"
+          ? koStage === "R16"
+            ? "Round of 16"
+            : koStage === "QF"
+              ? "Quarter-finals"
+              : koStage === "SF"
+                ? "Semi-finals"
+                : koStage === "F"
+                  ? "Final"
+                  : "Knockout"
+          : koStage === "R16"
+            ? "十六强"
+            : koStage === "QF"
+              ? "四分之一决赛"
+              : koStage === "SF"
+                ? "半决赛"
+                : koStage === "F"
+                  ? "决赛"
+                  : "淘汰赛"
         : competition.stage === "series"
           ? en
             ? "Series"
@@ -1387,7 +1533,9 @@ function renderCompetitions() {
   const champ = competition.champion
     ? `${nationFlag(competition.champion)} ${nationName(competition.champion)}`
     : "—";
+  const partN = competition.participants?.length || 0;
   sumEl.innerHTML = `<strong>${escapeHtml(en ? competition.nameEn || competition.name : competition.name)}</strong>
+    · ${partN}${en ? " teams" : " 队"}
     · ${escapeHtml(t("intl.stage"))}: ${escapeHtml(stageLabel)}
     · ${escapeHtml(status)}
     ${competition.champion ? ` · ${escapeHtml(t("intl.champion"))}: ${champ}` : ""}`;
@@ -1395,6 +1543,8 @@ function renderCompetitions() {
   // tables
   let tablesHtml = "";
   if (competition.groups?.length) {
+    tablesEl.style.display = "grid";
+    tablesEl.style.gridTemplateColumns = competition.groups.length > 4 ? "repeat(auto-fill,minmax(14rem,1fr))" : "repeat(auto-fill,minmax(16rem,1fr))";
     for (const g of competition.groups) {
       const rows = internationalTable(competition, g.teams);
       tablesHtml += `<div class="card" style="padding:0.6rem;margin:0">
@@ -1412,7 +1562,7 @@ function renderCompetitions() {
                 .map(
                   (r, i) => `<tr>
                 <td>${i + 1}</td>
-                <td>${nationFlag(r.code || r.id)} ${escapeHtml(nationName(r.code || r.id))}</td>
+                <td>${nationCellHtml(r.code || r.id)}</td>
                 <td>${r.played || 0}</td><td>${r.w || 0}</td><td>${r.d || 0}</td><td>${r.l || 0}</td>
                 <td>${(r.gf || 0) - (r.ga || 0)}</td><td><strong>${r.pts || 0}</strong></td>
               </tr>`
@@ -1424,24 +1574,27 @@ function renderCompetitions() {
       </div>`;
     }
   } else {
+    tablesEl.style.display = "block";
     const rows = internationalTable(competition);
     tablesHtml = `<div class="card" style="padding:0.6rem;margin:0">
       <strong style="font-size:0.85rem">${escapeHtml(t("intl.series"))}</strong>
-      <div class="table-wrap" style="margin-top:0.35rem">
+      <div class="table-wrap" style="margin-top:0.35rem;max-height:22rem;overflow:auto">
         <table>
           <thead><tr>
             <th>#</th><th>${escapeHtml(en ? "Nation" : "国家")}</th>
-            <th>${escapeHtml(en ? "P" : "赛")}</th><th>${escapeHtml(en ? "Pts" : "分")}</th>
+            <th>${escapeHtml(en ? "P" : "赛")}</th><th>${escapeHtml(en ? "W" : "胜")}</th>
+            <th>${escapeHtml(en ? "D" : "平")}</th><th>${escapeHtml(en ? "L" : "负")}</th>
+            <th>${escapeHtml(en ? "Pts" : "分")}</th>
             <th>${escapeHtml(en ? "GD" : "净")}</th>
           </tr></thead>
           <tbody>
             ${rows
-              .slice(0, 16)
               .map(
                 (r, i) => `<tr>
               <td>${i + 1}</td>
-              <td>${nationFlag(r.code || r.id)} ${escapeHtml(nationName(r.code || r.id))}</td>
-              <td>${r.played || 0}</td><td><strong>${r.pts || 0}</strong></td>
+              <td>${nationCellHtml(r.code || r.id)}</td>
+              <td>${r.played || 0}</td><td>${r.w || 0}</td><td>${r.d || 0}</td><td>${r.l || 0}</td>
+              <td><strong>${r.pts || 0}</strong></td>
               <td>${(r.gf || 0) - (r.ga || 0)}</td>
             </tr>`
               )
@@ -1452,8 +1605,18 @@ function renderCompetitions() {
     </div>`;
   }
   tablesEl.innerHTML = tablesHtml || `<p class="muted">${escapeHtml(t("intl.noComp"))}</p>`;
+  if (!tablesEl._nationBound) {
+    tablesEl._nationBound = true;
+    tablesEl.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-nation]");
+      if (!btn) return;
+      selectedNationCode = btn.getAttribute("data-nation");
+      renderCompetitions();
+      $("#intl-nation-detail")?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    });
+  }
 
-  const matches = internationalMatches(world, competition.id).slice().reverse().slice(0, 24);
+  const matches = internationalMatches(world, competition.id).slice().reverse().slice(0, 40);
   matchesBody.innerHTML = matches.length
     ? matches
         .map((m) => {
@@ -1461,21 +1624,35 @@ function renderCompetitions() {
             m.homeGoals != null && m.awayGoals != null
               ? `${m.homeGoals} - ${m.awayGoals}`
               : "—";
+          const round = en ? m.roundLabelEn || m.roundLabel : m.roundLabel;
           return `<tr>
-            <td>D${m.day ?? "—"}</td>
-            <td>${nationFlag(m.home)} ${escapeHtml(nationName(m.home))}</td>
-            <td><strong>${score}</strong></td>
-            <td>${nationFlag(m.away)} ${escapeHtml(nationName(m.away))}</td>
+            <td>D${m.day ?? "—"}<div class="muted" style="font-size:0.75rem">${escapeHtml(round || "")}</div></td>
+            <td>${nationCellHtml(m.home)}</td>
+            <td><strong>${score}</strong>${
+              m.penalties
+                ? `<div class="muted" style="font-size:0.75rem">(${m.penalties.home}-${m.penalties.away} pen)</div>`
+                : ""
+            }</td>
+            <td>${nationCellHtml(m.away)}</td>
             <td>${m.played === false ? (en ? "Sched." : "未赛") : en ? "FT" : "完场"}</td>
           </tr>`;
         })
         .join("")
     : `<tr><td colspan="5" class="muted">${escapeHtml(t("intl.emptyMatches"))}</td></tr>`;
+  if (!matchesBody._nationBound) {
+    matchesBody._nationBound = true;
+    matchesBody.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-nation]");
+      if (!btn) return;
+      selectedNationCode = btn.getAttribute("data-nation");
+      renderCompetitions();
+    });
+  }
 
   if (scorersEl) {
     const leaders = internationalLeaders(world, competition.id);
     const scorers = leaders?.scorers || leaders?.goals || [];
-    const top = (Array.isArray(scorers) ? scorers : []).slice(0, 8);
+    const top = (Array.isArray(scorers) ? scorers : []).slice(0, 10);
     scorersEl.innerHTML = top.length
       ? `<ol style="margin:0;padding-left:1.2rem">${top
           .map(
@@ -1498,6 +1675,8 @@ function renderCompetitions() {
           .join("")}</ul>`
       : "—";
   }
+
+  renderNationalTeamsPanel(competition.id);
 }
 
 /** 信箱筛选：pending | all */

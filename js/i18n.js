@@ -320,7 +320,7 @@ const dict = {
     "div.11": "法国乙级联赛",
 
     "intl.title": "世界赛事 · 国家队",
-    "intl.hint": "约每 30 天国际比赛日。赛季年份逢 2 为世界国家杯，逢 0 为欧洲国家锦标赛，其余为国际系列赛。",
+    "intl.hint": "约每 30 天国际比赛日。世界国家杯 32 队、欧洲国家锦标赛 16 队；其余赛季为全员国际系列赛。点选国家可查看名单。",
     "intl.active": "本赛季赛事",
     "intl.stage": "阶段",
     "intl.noComp": "暂无进行中的国际赛事",
@@ -333,6 +333,14 @@ const dict = {
     "intl.emptyMatches": "尚无比赛记录",
     "intl.completed": "已结束",
     "intl.inProgress": "进行中",
+    "intl.nations": "国家队一览",
+    "intl.nationsHint": "按现役球员池组成国家队。点击一行查看 23 人大名单与国际数据。",
+    "intl.colNation": "国家",
+    "intl.colPool": "人才池",
+    "intl.colStrength": "实力",
+    "intl.colRecord": "战绩",
+    "intl.squad": "国家队名单",
+    "intl.pickNation": "选择左侧国家查看名单",
 
     // media
     "media.title": "媒体中心",
@@ -765,7 +773,7 @@ const dict = {
     "div.11": "French Second Division",
 
     "intl.title": "World · National teams",
-    "intl.hint": "International breaks about every 30 days. Season years ending in 2 host the World Nations Cup; years ending in 0 host the European Nations Championship; other seasons run friendlies series.",
+    "intl.hint": "International breaks about every 30 days. World Nations Cup: 32 teams; European Nations Championship: 16 teams; other seasons run a full-nation series. Select a nation to view its squad.",
     "intl.active": "This season",
     "intl.stage": "Stage",
     "intl.noComp": "No active international competition",
@@ -778,6 +786,14 @@ const dict = {
     "intl.emptyMatches": "No matches yet",
     "intl.completed": "Completed",
     "intl.inProgress": "In progress",
+    "intl.nations": "National teams",
+    "intl.nationsHint": "National sides are built from the active player pool. Click a row for the 23-man squad and international stats.",
+    "intl.colNation": "Nation",
+    "intl.colPool": "Pool",
+    "intl.colStrength": "Strength",
+    "intl.colRecord": "Record",
+    "intl.squad": "Squad",
+    "intl.pickNation": "Select a nation to view its squad",
 
     "media.title": "Media centre",
     "media.hint": "Match reports, transfers, youth features, rumours and columns appear here.",
