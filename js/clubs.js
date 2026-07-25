@@ -62,6 +62,62 @@ function makeShortName(countryCode, cityEn, index) {
   return code;
 }
 
+const TOP_DIVISIONS = new Set([1, 4, 6, 8, 10]);
+const SECOND_DIVISIONS = new Set([2, 5, 7, 9, 11]);
+
+function buildRealityProfile(countryCode, division, index, count, power, money) {
+  const tier = TOP_DIVISIONS.has(division) ? 1 : SECOND_DIVISIONS.has(division) ? 2 : 3;
+  const rank = index + 1;
+  let stature;
+  if (tier === 1) {
+    stature = power >= 80
+      ? "global_power"
+      : power >= 77
+        ? "title_contender"
+        : power >= 73
+          ? "continental"
+          : power >= 68
+            ? "established"
+            : "survival";
+  } else if (tier === 2) {
+    stature = rank <= Math.max(3, Math.round(count * 0.2))
+      ? "promotion_favorite"
+      : rank >= Math.round(count * 0.8)
+        ? "relegation_fight"
+        : "second_tier";
+  } else {
+    stature = rank <= 4 ? "promotion_favorite" : rank >= count - 3 ? "relegation_fight" : "lower_league";
+  }
+  const facilityBase = tier === 1
+    ? stature === "global_power"
+      ? { stadiumLevel: 5, trainingLevel: 5 }
+      : stature === "title_contender"
+        ? { stadiumLevel: 4, trainingLevel: 4 }
+        : stature === "continental"
+          ? { stadiumLevel: 4, trainingLevel: 3 }
+          : { stadiumLevel: 3, trainingLevel: 2 }
+    : tier === 2
+      ? { stadiumLevel: 2, trainingLevel: stature === "promotion_favorite" ? 2 : 1 }
+      : { stadiumLevel: 1, trainingLevel: 1 };
+  const youthLevel = tier === 1
+    ? rank <= 3 || rank % 7 === 0
+      ? 3
+      : 2
+    : stature === "promotion_favorite"
+      ? 2
+      : 1;
+  return {
+    version: 1,
+    referenceSlot: `${countryCode}-T${tier}-${String(rank).padStart(2, "0")}`,
+    tier,
+    domesticRankSeed: rank,
+    stature,
+    financeBand: money >= 45_000_000 ? 5 : money >= 30_000_000 ? 4 : money >= 18_000_000 ? 3 : money >= 8_000_000 ? 2 : 1,
+    youthLevel,
+    ...facilityBase,
+  };
+}
+
 function buildBranding(base, renamed, division, countryId) {
   const [nameEn, nameZh] = renamed;
   const index = brandingIndex++;
@@ -248,6 +304,7 @@ function pack(list, renamedList, division, countryId = "crownland") {
   return list.map((row, i) => {
     const [id, name, short, power, money] = row;
     const branding = buildBranding({ id, name, short }, renamedList[i], division, countryId);
+    const realityProfile = buildRealityProfile(branding.countryCode, division, i, list.length, power, money);
     return {
       id,
       name: branding.nameZh,
@@ -270,15 +327,22 @@ function pack(list, renamedList, division, countryId = "crownland") {
       kit: { ...branding.kit },
       crest: { ...branding.crest },
       branding,
+      realityProfile,
     };
   });
 }
 
-function packGenerated(names, renamedList, division, countryId, { maxPower, minPower, maxMoney, minMoney }) {
+function packGenerated(
+  names,
+  renamedList,
+  division,
+  countryId,
+  { maxPower, minPower, maxMoney, minMoney, powerCurve = null, moneyCurve = null }
+) {
   return names.map((name, i) => {
     const ratio = names.length <= 1 ? 0 : i / (names.length - 1);
-    const power = Math.round(maxPower + (minPower - maxPower) * ratio);
-    const money = Math.round(maxMoney + (minMoney - maxMoney) * ratio);
+    const power = powerCurve?.[i] ?? Math.round(maxPower + (minPower - maxPower) * ratio);
+    const money = moneyCurve?.[i] ?? Math.round(maxMoney + (minMoney - maxMoney) * ratio);
     const id = `${countryId.slice(0, 3)}_${division}_${String(i + 1).padStart(2, "0")}`;
     const legacyShortName = name.split(/\s+/)[0].slice(0, 14);
     const branding = buildBranding(
@@ -287,6 +351,7 @@ function packGenerated(names, renamedList, division, countryId, { maxPower, minP
       division,
       countryId
     );
+    const realityProfile = buildRealityProfile(branding.countryCode, division, i, names.length, power, money);
     return {
       id,
       name: branding.nameZh,
@@ -309,6 +374,7 @@ function packGenerated(names, renamedList, division, countryId, { maxPower, minP
       kit: { ...branding.kit },
       crest: { ...branding.crest },
       branding,
+      realityProfile,
     };
   });
 }
@@ -368,6 +434,27 @@ const LUMERA_SECOND = [
   "Port d'Aube", "Lac d'Or", "Vieux Marche", "Haute-Rive",
   "Moulin Vert", "Cote Claire", "Jardin FC", "Plein-Ciel",
 ];
+
+// 匿名现实竞争曲线：只保存联赛席位层级，不保存或展示现实俱乐部身份。
+// 顶部断层、争冠集团和中下游密度分别贴近五国当代联赛生态。
+const TOP_REALITY_CURVES = Object.freeze({
+  ESP: {
+    power: [82, 81, 77, 76, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63],
+    money: [56, 54, 38, 34, 30, 27, 25, 23, 21, 20, 19, 18, 17, 16, 15, 14].map((n) => n * 1_000_000),
+  },
+  GER: {
+    power: [82, 78, 77, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63],
+    money: [52, 40, 36, 32, 29, 27, 25, 23, 21, 20, 19, 18, 17, 16, 15, 14].map((n) => n * 1_000_000),
+  },
+  ITA: {
+    power: [79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64],
+    money: [45, 43, 40, 37, 34, 31, 28, 25, 23, 21, 19, 18, 17, 16, 15, 14].map((n) => n * 1_000_000),
+  },
+  FRA: {
+    power: [81, 76, 75, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61],
+    money: [50, 34, 30, 27, 24, 22, 20, 18, 17, 16, 15, 14, 13, 12, 11, 10].map((n) => n * 1_000_000),
+  },
+});
 
 const ESP_TOP_BRANDS = [
   ["Atlético Solmar", "索尔马竞技"],
@@ -525,13 +612,25 @@ export const CLUB_TEMPLATES = [
   ...pack(D1, ENG_D1_BRANDS, 1, "crownland"),
   ...pack(D2, ENG_D2_BRANDS, 2, "crownland"),
   ...pack(D3, ENG_D3_BRANDS, 3, "crownland"),
-  ...packGenerated(SOLARA_TOP, ESP_TOP_BRANDS, 4, "solara", { maxPower: 79, minPower: 64, maxMoney: 44_000_000, minMoney: 13_000_000 }),
+  ...packGenerated(SOLARA_TOP, ESP_TOP_BRANDS, 4, "solara", {
+    maxPower: 82, minPower: 63, maxMoney: 56_000_000, minMoney: 14_000_000,
+    powerCurve: TOP_REALITY_CURVES.ESP.power, moneyCurve: TOP_REALITY_CURVES.ESP.money,
+  }),
   ...packGenerated(SOLARA_SECOND, ESP_SECOND_BRANDS, 5, "solara", { maxPower: 62, minPower: 47, maxMoney: 9_500_000, minMoney: 2_000_000 }),
-  ...packGenerated(EISENMARK_TOP, GER_TOP_BRANDS, 6, "eisenmark", { maxPower: 80, minPower: 65, maxMoney: 46_000_000, minMoney: 14_000_000 }),
+  ...packGenerated(EISENMARK_TOP, GER_TOP_BRANDS, 6, "eisenmark", {
+    maxPower: 82, minPower: 63, maxMoney: 52_000_000, minMoney: 14_000_000,
+    powerCurve: TOP_REALITY_CURVES.GER.power, moneyCurve: TOP_REALITY_CURVES.GER.money,
+  }),
   ...packGenerated(EISENMARK_SECOND, GER_SECOND_BRANDS, 7, "eisenmark", { maxPower: 63, minPower: 48, maxMoney: 10_000_000, minMoney: 2_100_000 }),
-  ...packGenerated(BELLADORO_TOP, ITA_TOP_BRANDS, 8, "belladoro", { maxPower: 79, minPower: 64, maxMoney: 43_000_000, minMoney: 13_000_000 }),
+  ...packGenerated(BELLADORO_TOP, ITA_TOP_BRANDS, 8, "belladoro", {
+    maxPower: 79, minPower: 64, maxMoney: 45_000_000, minMoney: 14_000_000,
+    powerCurve: TOP_REALITY_CURVES.ITA.power, moneyCurve: TOP_REALITY_CURVES.ITA.money,
+  }),
   ...packGenerated(BELLADORO_SECOND, ITA_SECOND_BRANDS, 9, "belladoro", { maxPower: 62, minPower: 47, maxMoney: 9_200_000, minMoney: 1_900_000 }),
-  ...packGenerated(LUMERA_TOP, FRA_TOP_BRANDS, 10, "lumera", { maxPower: 78, minPower: 63, maxMoney: 41_000_000, minMoney: 12_000_000 }),
+  ...packGenerated(LUMERA_TOP, FRA_TOP_BRANDS, 10, "lumera", {
+    maxPower: 81, minPower: 61, maxMoney: 50_000_000, minMoney: 10_000_000,
+    powerCurve: TOP_REALITY_CURVES.FRA.power, moneyCurve: TOP_REALITY_CURVES.FRA.money,
+  }),
   ...packGenerated(LUMERA_SECOND, FRA_SECOND_BRANDS, 11, "lumera", { maxPower: 61, minPower: 46, maxMoney: 8_800_000, minMoney: 1_800_000 }),
 ];
 

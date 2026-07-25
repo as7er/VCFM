@@ -677,7 +677,9 @@ export function finishSeason(world) {
       // 保证至少 1 门将
       const needGk = !club.players.some((p) => p.pos === "GK");
       club.players.push(
-        createPlayer(needGk ? "GK" : posPick, club.power - 5 + Math.floor(rng() * 8), club.id)
+        createPlayer(needGk ? "GK" : posPick, club.power - 5 + Math.floor(rng() * 8), club.id, {
+          homeNation: club.countryCode,
+        })
       );
     }
     fillYouthSquad(club);

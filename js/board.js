@@ -16,6 +16,22 @@ const STATUS_LABEL = {
   failed: "未完成",
 };
 
+function ordinalEn(n) {
+  const value = Number(n) || 0;
+  const mod100 = value % 100;
+  const suffix =
+    mod100 >= 11 && mod100 <= 13
+      ? "th"
+      : value % 10 === 1
+        ? "st"
+        : value % 10 === 2
+          ? "nd"
+          : value % 10 === 3
+            ? "rd"
+            : "th";
+  return `${value}${suffix}`;
+}
+
 /** 按队力在本级排名生成目标 */
 export function generateBoardObjective(userClub, allClubs, season) {
   const div = userClub.division || 3;
@@ -267,7 +283,9 @@ export function checkBoardMidSeason(world, sortedTableFn) {
       world.news.unshift({ day: world.day, text });
       pushBoardInbox(world, {
         title: "董事会最后警告",
+        titleEn: "Final warning from the board",
         body: text,
+        bodyEn: `Final warning: the club is ${ordinalEn(prog.pos)}, with a target of top ${board.targetPos}. Results must improve to avoid dismissal. Warning ${w}/3.`,
         warning: true,
         priority: 3,
       });
@@ -276,7 +294,9 @@ export function checkBoardMidSeason(world, sortedTableFn) {
       world.news.unshift({ day: world.day, text });
       pushBoardInbox(world, {
         title: "董事会施压",
+        titleEn: "The board demands improvement",
         body: text,
+        bodyEn: `The club is ${ordinalEn(prog.pos)}, with a target of top ${board.targetPos}. Warning ${w}/3 · failure penalty ${formatMoney(board.fine)}.`,
         warning: true,
         priority: 3,
       });
@@ -291,7 +311,9 @@ export function checkBoardMidSeason(world, sortedTableFn) {
       world.news.unshift({ day: world.day, text });
       pushBoardInbox(world, {
         title: "董事会认可近况",
+        titleEn: "The board acknowledges recent progress",
         body: text,
+        bodyEn: `The club has recovered to ${ordinalEn(prog.pos)} and the objective is back on track. Warnings reduced to ${board.sackWarnings}/3.`,
         priority: 1,
       });
       for (const p of user.players || []) {
@@ -302,7 +324,9 @@ export function checkBoardMidSeason(world, sortedTableFn) {
       world.news.unshift({ day: world.day, text });
       pushBoardInbox(world, {
         title: "董事会认可近况",
+        titleEn: "The board acknowledges recent progress",
         body: text,
+        bodyEn: `The club has recovered to ${ordinalEn(prog.pos)} and the target of top ${board.targetPos} is back on track.`,
         priority: 1,
       });
       for (const p of user.players || []) {
@@ -314,7 +338,9 @@ export function checkBoardMidSeason(world, sortedTableFn) {
     world.news.unshift({ day: world.day, text });
     pushBoardInbox(world, {
       title: "目标告急",
+      titleEn: "Board objective at risk",
       body: text,
+      bodyEn: `The club remains ${ordinalEn(prog.pos)} against a top-${board.targetPos} target · warnings ${board.sackWarnings || 0}/3.`,
       warning: true,
       priority: 2,
     });

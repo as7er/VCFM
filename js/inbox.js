@@ -46,7 +46,9 @@ export function inboxCatLabel(cat, lang = "zh") {
  * @param {object} article
  * @param {string} article.category board|transfer|scout|player|media|system
  * @param {string} article.title
+ * @param {string} [article.titleEn]
  * @param {string} [article.body]
+ * @param {string} [article.bodyEn]
  * @param {number} [article.priority] 1–3
  * @param {object} [article.ref] 处理用引用
  * @param {Array} [article.actions]
@@ -73,7 +75,9 @@ export function pushInbox(world, article) {
     category: article.category || "system",
     priority: Math.max(1, Math.min(3, article.priority || 1)),
     title: article.title,
+    titleEn: article.titleEn || "",
     body: article.body || "",
+    bodyEn: article.bodyEn || "",
     status: "pending", // pending | read | done | expired
     actions: article.actions || [{ id: "ack", label: "知道了", labelEn: "OK" }],
     ref: article.ref || null,
@@ -129,10 +133,16 @@ export function syncPoachBidsToInbox(world) {
   for (const bid of world.poachBids) {
     if (bid.status !== "pending") continue;
     const key = `poach_${bid.id}`;
+    const buyer = world.clubs?.find((club) => club.id === bid.buyerId);
+    const buyerNameEn = buyer?.nameEn || buyer?.name || bid.buyerName;
+    const titleEn = `${buyerNameEn} want to sign ${bid.playerName}`;
+    const bodyEn = `Offer ${formatMoney(bid.fee)} · ${bid.pos} · ability ${bid.ovr}. Valid until D${bid.expiresDay}. Respond here or on the Transfers page.`;
     const existing = world.inbox.find((m) => m.dedupeKey === key);
     if (existing) {
       if (existing.status === "pending" || existing.status === "read") {
         existing.expiresDay = bid.expiresDay;
+        existing.titleEn = titleEn;
+        existing.bodyEn = bodyEn;
       }
       continue;
     }
@@ -140,7 +150,9 @@ export function syncPoachBidsToInbox(world) {
       category: "transfer",
       priority: 3,
       title: `${bid.buyerName} 求购 ${bid.playerName}`,
+      titleEn,
       body: `报价 ${formatMoney(bid.fee)} · ${bid.pos} · 能力 ${bid.ovr}。有效至第 ${bid.expiresDay} 天。可在信箱或转会页处理。`,
+      bodyEn,
       dedupeKey: key,
       expiresDay: bid.expiresDay,
       ref: { kind: "poach", bidId: bid.id },
@@ -285,13 +297,18 @@ export function resolveInboxAction(world, mailId, actionId) {
 }
 
 /** 董事会相关邮件（由 board 模块调用） */
-export function pushBoardInbox(world, { title, body, priority = 2, warning = false } = {}) {
+export function pushBoardInbox(
+  world,
+  { title, titleEn = "", body, bodyEn = "", priority = 2, warning = false } = {}
+) {
   if (!title) return null;
   return pushInbox(world, {
     category: "board",
     priority: warning ? 3 : priority,
     title,
+    titleEn,
     body: body || "",
+    bodyEn,
     dedupeKey: `board_${world.day}_${title.slice(0, 24)}`,
     ref: { kind: "board" },
     actions: warning
@@ -357,7 +374,9 @@ function maybePlayerRequest(world, user) {
       category: "player",
       priority: 2,
       title: `${p.name} 要求更多出场时间`,
+      titleEn: `${p.name} asks for more playing time`,
       body: `${p.name}（${p.pos} · 能力 ${p.ovr}）认为自己坐板凳太久，希望近两周获得稳定机会。处理不当可能影响更衣室。`,
+      bodyEn: `${p.name} (${p.pos} · ability ${p.ovr}) feels he has spent too long on the bench and wants regular minutes over the next two weeks. Poor handling may affect the dressing room.`,
       dedupeKey: key,
       expiresDay: (world.day || 0) + 10,
       ref: { kind: "player", playerId: p.id, topic: "playtime" },
@@ -376,7 +395,9 @@ function maybePlayerRequest(world, user) {
       category: "player",
       priority: 2,
       title: `${p.name} 想谈续约`,
+      titleEn: `${p.name} wants to discuss a new contract`,
       body: `合同仅剩 ${p.contractYears ?? "?"} 年。若续约，参考约 ${offer?.years || 3} 年 / 周薪 ${formatMoney(offer?.newWage || p.wage)}（具体仍在转会页操作）。`,
+      bodyEn: `${p.contractYears ?? "?"} year(s) remain. A likely offer is about ${offer?.years || 3} years at ${formatMoney(offer?.newWage || p.wage)} per week. Complete negotiations on the Transfers page.`,
       dedupeKey: key,
       expiresDay: (world.day || 0) + 12,
       ref: { kind: "player", playerId: p.id, topic: "contract" },
@@ -394,7 +415,9 @@ function maybePlayerRequest(world, user) {
       category: "player",
       priority: 2,
       title: `${p.name} 士气低落，想见你`,
+      titleEn: `${p.name} requests a meeting about low morale`,
       body: `当前士气约 ${Math.round(p.morale || 0)}。一次简短约谈可能稳住状态。`,
+      bodyEn: `Current morale is about ${Math.round(p.morale || 0)}. A short conversation may help steady the player.`,
       dedupeKey: key,
       expiresDay: (world.day || 0) + 7,
       ref: { kind: "player", playerId: p.id, topic: "morale" },
@@ -428,7 +451,9 @@ function maybeScoutTip(world, user) {
     category: "scout",
     priority: 1,
     title: `球探报告：关注 ${p.name}`,
+    titleEn: `Scout report: watch ${p.name}`,
     body: `${c.name} 的 ${p.name}（${p.pos} · ${p.age} 岁 · 能力约 ${p.ovr} / 潜力 ${p.potential || "?"}）。估值约 ${formatMoney(val)}。是否加入关注？`,
+    bodyEn: `${p.name} of ${c.nameEn || c.name} (${p.pos} · age ${p.age} · ability about ${p.ovr} / potential ${p.potential || "?"}). Estimated value ${formatMoney(val)}. Add to watchlist?`,
     dedupeKey: key,
     expiresDay: (world.day || 0) + 14,
     ref: { kind: "scout", playerId: p.id, clubId: c.id },
@@ -451,11 +476,21 @@ function maybeScoutTip(world, user) {
 /** 董事会目标新建时 */
 export function pushBoardObjectiveMail(world, board) {
   if (!board) return;
+  const targetEn =
+    board.type === "title"
+      ? "win the title"
+      : board.type === "promote"
+        ? `earn promotion by finishing in the top ${board.targetPos}`
+        : board.type === "survive"
+          ? `avoid relegation by finishing ${board.targetPos}th or better`
+          : `finish in the top ${board.targetPos}`;
   pushInbox(world, {
     category: "board",
     priority: 2,
     title: `本赛季董事会目标：${board.label}`,
+    titleEn: `Board objective this season: ${targetEn}`,
     body: `达成奖金 ${formatMoney(board.bonus)}，未完成罚款 ${formatMoney(board.fine)}。请合理排兵与转会。`,
+    bodyEn: `Success bonus ${formatMoney(board.bonus)}; failure penalty ${formatMoney(board.fine)}. Plan the squad and transfer business accordingly.`,
     dedupeKey: `board_obj_${board.season}`,
     ref: { kind: "board", topic: "objective" },
     actions: [

@@ -45,31 +45,43 @@ export function isTransferWindowOpen(world) {
   return getTransferPhase(world) !== "closed";
 }
 
-export function transferWindowLabel(world) {
+export function transferWindowLabel(world, lang = "zh") {
   const phase = getTransferPhase(world);
   const tw = ensureTransferWindow(world);
+  const en = lang === "en";
   if (phase === "summer") {
-    return `夏窗开放（D${tw.summerStart}–D${tw.summerEnd}）· 剩 ${Math.max(0, tw.summerEnd - (world.day || 0))} 天`;
+    const left = Math.max(0, tw.summerEnd - (world.day || 0));
+    return en
+      ? `Summer window open (D${tw.summerStart}–D${tw.summerEnd}) · ${left} days left`
+      : `夏窗开放（D${tw.summerStart}–D${tw.summerEnd}）· 剩 ${left} 天`;
   }
   if (phase === "winter") {
-    return `冬窗开放（D${tw.winterStart}–D${tw.winterEnd}）· 剩 ${Math.max(0, tw.winterEnd - (world.day || 0))} 天`;
+    const left = Math.max(0, tw.winterEnd - (world.day || 0));
+    return en
+      ? `Winter window open (D${tw.winterStart}–D${tw.winterEnd}) · ${left} days left`
+      : `冬窗开放（D${tw.winterStart}–D${tw.winterEnd}）· 剩 ${left} 天`;
   }
   // 下个窗口提示
   const day = world?.day || 1;
   if (day < tw.summerStart) {
-    return `转会窗关闭 · 夏窗 D${tw.summerStart} 开启`;
+    return en
+      ? `Transfer window closed · summer window opens D${tw.summerStart}`
+      : `转会窗关闭 · 夏窗 D${tw.summerStart} 开启`;
   }
   if (day < tw.winterStart) {
-    return `转会窗关闭 · 冬窗 D${tw.winterStart} 开启（约 ${tw.winterStart - day} 天后）`;
+    return en
+      ? `Transfer window closed · winter window opens D${tw.winterStart} (about ${tw.winterStart - day} days)`
+      : `转会窗关闭 · 冬窗 D${tw.winterStart} 开启（约 ${tw.winterStart - day} 天后）`;
   }
-  return `转会窗关闭 · 下季夏窗再开`;
+  return en ? "Transfer window closed · reopens next summer" : "转会窗关闭 · 下季夏窗再开";
 }
 
-export function transferWindowShort(world) {
+export function transferWindowShort(world, lang = "zh") {
   const phase = getTransferPhase(world);
-  if (phase === "summer") return "夏窗开放";
-  if (phase === "winter") return "冬窗开放";
-  return "转会窗关闭";
+  const en = lang === "en";
+  if (phase === "summer") return en ? "Summer window open" : "夏窗开放";
+  if (phase === "winter") return en ? "Winter window open" : "冬窗开放";
+  return en ? "Transfer window closed" : "转会窗关闭";
 }
 
 /**

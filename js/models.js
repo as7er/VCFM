@@ -2,6 +2,7 @@
 
 import {
   NATIONALITIES,
+  NATIONAL_TEAM_BASE_STRENGTH,
   CLUB_TEMPLATES,
   clubBrandingById,
   FORMATIONS,
@@ -46,6 +47,77 @@ function gauss(mean, spread) {
   return mean + z * spread;
 }
 
+const TALENT_MODEL_VERSION = 1;
+const TALENT_REFERENCE = 18;
+const TALENT_SCALE = 1;
+
+/** 将现实国家队层级温和映射到个人属性，不覆盖俱乐部自身的实力档位。 */
+export function nationalTalentOffset(code) {
+  const strength = NATIONAL_TEAM_BASE_STRENGTH[code];
+  return Number.isFinite(strength) ? (strength - TALENT_REFERENCE) * TALENT_SCALE : 0;
+}
+
+function pickPlayerNation(homeNation, isYouth, power) {
+  const home = NATIONALITIES.find((nation) => nation.code === homeNation);
+  if (home) {
+    // 低级别球队更依赖本土球员；青训营以本地培养为主。
+    const seniorHomeChance = Math.max(0.45, Math.min(0.68, 0.62 - (power - 55) * 0.005));
+    if (Math.random() < (isYouth ? 0.72 : seniorHomeChance)) return home;
+  }
+  const foreignPool = home ? NATIONALITIES.filter((nation) => nation.code !== home.code) : NATIONALITIES;
+  // 高水平俱乐部更常吸引成熟足球强国球员；低级别联赛承载更多弱国球员。
+  // 这只影响球员出现在哪个档位的俱乐部，不会在国家队阶段篡改其能力。
+  const clubLevel = Math.max(-0.85, Math.min(1, (power - 62) / 20));
+  const weights = foreignPool.map((nation) => {
+    const strength = NATIONAL_TEAM_BASE_STRENGTH[nation.code] ?? 17.2;
+    return Math.exp((strength - 17.2) * clubLevel * 0.55);
+  });
+  let roll = Math.random() * weights.reduce((sum, weight) => sum + weight, 0);
+  for (let i = 0; i < foreignPool.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return foreignPool[i];
+  }
+  return foreignPool[foreignPool.length - 1];
+}
+
+function stableUnit(seed) {
+  let h = 2166136261;
+  for (const ch of String(seed || "")) {
+    h ^= ch.charCodeAt(0);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967296;
+}
+
+function migrateAttribute(value, offset, seed) {
+  const whole = Math.trunc(offset);
+  const fraction = Math.abs(offset - whole);
+  const extra = fraction > 0 && stableUnit(seed) < fraction ? Math.sign(offset) : 0;
+  return clamp((Number(value) || 1) + whole + extra);
+}
+
+/**
+ * 旧档一次性迁移：直接修改俱乐部持有的同一球员对象，并同步总评、潜力与财务数据。
+ * 新生成球员已带版本标记，不会被重复校准。
+ */
+export function ensureRealisticPlayerTalent(p) {
+  if (!p || (p.talentModelVersion || 0) >= TALENT_MODEL_VERSION) return false;
+  const oldOvr = Number(p.ovr) || playerOverall(p);
+  const oldPotential = Number(p.potential) || oldOvr;
+  const potentialGap = Math.max(0, oldPotential - oldOvr);
+  const offset = nationalTalentOffset(p.nationality);
+  for (const key of Object.keys(p.attrs || {})) {
+    p.attrs[key] = migrateAttribute(p.attrs[key], offset, `${p.id}:${key}:talent-v${TALENT_MODEL_VERSION}`);
+  }
+  p.abilitySeed = normalizedAbilitySeed(p);
+  setPlayerOverall(p, p.abilitySeed);
+  p.potential = clamp(p.ovr + potentialGap, p.ovr, 20);
+  p.value = estimateValue(p);
+  p.wage = p.fromYouth ? Math.max(200, Math.round(estimateWage(p) * 0.25)) : estimateWage(p);
+  p.talentModelVersion = TALENT_MODEL_VERSION;
+  return true;
+}
+
 export function playerOverall(p) {
   const { pos, attrs } = p;
   let raw;
@@ -59,6 +131,133 @@ export function playerOverall(p) {
     raw = (attrs.shooting + attrs.pace + attrs.dribbling + attrs.finishing + attrs.strength) / 5;
   }
   return clamp(raw, 1, 20);
+}
+
+const OVERALL_KEYS = Object.freeze({
+  GK: ["reflexes", "handling", "positioning", "kicking"],
+  DEF: ["tackling", "marking", "strength", "pace", "passing"],
+  MID: ["passing", "vision", "stamina", "pace", "shooting"],
+  ATT: ["shooting", "pace", "dribbling", "finishing", "strength"],
+});
+
+// 位置塑形对关键属性均值的额外抬升；统一回到 DEF 的 +1.2 基准。
+const POSITION_OVR_EXCESS = Object.freeze({ GK: 0.8, DEF: 0, MID: -0.2, ATT: 0.4 });
+export const ABILITY_DISTRIBUTION_VERSION = 1;
+
+function rawPlayerOverall(p) {
+  const keys = OVERALL_KEYS[p?.pos] || OVERALL_KEYS.MID;
+  return keys.reduce((sum, key) => sum + (Number(p?.attrs?.[key]) || 1), 0) / keys.length;
+}
+
+function normalizedAbilitySeed(p) {
+  return rawPlayerOverall(p) - (POSITION_OVR_EXCESS[p?.pos] || 0);
+}
+
+function setPlayerOverall(p, target) {
+  if (!p?.attrs) return 0;
+  const wanted = clamp(target);
+  const keys = OVERALL_KEYS[p.pos] || OVERALL_KEYS.MID;
+  const delta = wanted - rawPlayerOverall(p);
+  for (const key of keys) p.attrs[key] = clamp((p.attrs[key] || 1) + delta);
+
+  let current = playerOverall(p);
+  let guard = 0;
+  while (current !== wanted && guard++ < 120) {
+    const direction = current < wanted ? 1 : -1;
+    const candidates = keys
+      .filter((key) => direction > 0 ? p.attrs[key] < 20 : p.attrs[key] > 1)
+      .sort((a, b) => direction > 0 ? p.attrs[a] - p.attrs[b] : p.attrs[b] - p.attrs[a]);
+    if (!candidates.length) break;
+    p.attrs[candidates[guard % candidates.length]] += direction;
+    current = playerOverall(p);
+  }
+  p.ovr = current;
+  return current;
+}
+
+function scaledCount(base, population, reference) {
+  return Math.max(1, Math.round(base * (population / reference)));
+}
+
+/**
+ * 一次性世界能力标尺：保留球员相对排序，仅压缩 18–20 的人数并同步潜力/财务。
+ * 它发生在数据库生成/旧档迁移阶段，不参与比赛或国家队的隐藏修正。
+ */
+export function calibrateWorldAbilityDistribution(clubs) {
+  const firstTeam = (clubs || []).flatMap((club) => (club.players || []).map((player) => ({ player, club })));
+  if (!firstTeam.length) return null;
+  const original = new Map();
+  for (const { player } of firstTeam) {
+    original.set(player.id, {
+      ovr: Number(player.ovr) || playerOverall(player),
+      potential: Number(player.potential) || Number(player.ovr) || playerOverall(player),
+    });
+  }
+
+  const ranked = firstTeam
+    .map((entry) => ({
+      ...entry,
+      seed: Number.isFinite(entry.player.abilitySeed)
+        ? entry.player.abilitySeed
+        : normalizedAbilitySeed(entry.player),
+    }))
+    .sort((a, b) => b.seed - a.seed || stableUnit(`${a.player.id}:ability-rank`) - stableUnit(`${b.player.id}:ability-rank`));
+
+  const count20 = scaledCount(2, ranked.length, 3572);
+  const count19 = scaledCount(24, ranked.length, 3572);
+  const count18 = scaledCount(110, ranked.length, 3572);
+  ranked.forEach(({ player, seed }, index) => {
+    const target = index < count20
+      ? 20
+      : index < count20 + count19
+        ? 19
+        : index < count20 + count19 + count18
+          ? 18
+          : Math.min(17, clamp(seed));
+    setPlayerOverall(player, target);
+    player.abilitySeed = seed;
+    player.abilityDistributionVersion = ABILITY_DISTRIBUTION_VERSION;
+  });
+
+  const allPlayers = (clubs || []).flatMap((club) => [
+    ...(club.players || []),
+    ...(club.youth?.players || []),
+  ]);
+  const potentialRanked = allPlayers
+    .map((player) => {
+      const old = original.get(player.id) || {
+        ovr: Number(player.ovr) || playerOverall(player),
+        potential: Number(player.potential) || Number(player.ovr) || playerOverall(player),
+      };
+      const normalizedPotential = old.potential - (POSITION_OVR_EXCESS[player.pos] || 0);
+      const youthBonus = (player.age || 25) <= 21 ? Math.min(0.6, (22 - (player.age || 21)) * 0.1) : 0;
+      return { player, score: normalizedPotential + (player.ovr || 10) * 0.25 + youthBonus };
+    })
+    .sort((a, b) => b.score - a.score || stableUnit(`${a.player.id}:potential-rank`) - stableUnit(`${b.player.id}:potential-rank`));
+
+  const potential20 = scaledCount(8, potentialRanked.length, 4700);
+  const potential19 = scaledCount(48, potentialRanked.length, 4700);
+  const potential18 = scaledCount(180, potentialRanked.length, 4700);
+  potentialRanked.forEach(({ player, score }, index) => {
+    const tier = index < potential20
+      ? 20
+      : index < potential20 + potential19
+        ? 19
+        : index < potential20 + potential19 + potential18
+          ? 18
+          : Math.min(17, clamp(score - (player.ovr || 10) * 0.25));
+    player.potential = Math.max(player.ovr || 1, tier);
+    player.value = estimateValue(player);
+    player.wage = player.fromYouth
+      ? Math.max(200, Math.round(estimateWage(player) * 0.25))
+      : estimateWage(player);
+  });
+
+  return {
+    players: ranked.length,
+    current: { 20: count20, 19: count19, 18: count18 },
+    potential: { 20: potential20, 19: potential19, 18: potential18 },
+  };
 }
 
 export function estimateValue(p) {
@@ -489,7 +688,10 @@ export function resetSeasonStats(p) {
 
 export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
   const isYouth = !!opts.youth;
-  const mean = power / 5; // 约 12–16 落在 1–20
+  const nation = opts.nationality
+    ? NATIONALITIES.find((item) => item.code === opts.nationality) || pickPlayerNation(opts.homeNation, isYouth, power)
+    : pickPlayerNation(opts.homeNation, isYouth, power);
+  const mean = power / 5 + nationalTalentOffset(nation.code); // 俱乐部档位为主，国籍层级只作有限修正
   const spread = isYouth ? 1.8 : 2.2;
   const g = () => clamp(gauss(mean, spread));
 
@@ -535,7 +737,6 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
   }
 
   const age = isYouth ? rand(15, 18) : rand(17, 34);
-  const nation = pick(NATIONALITIES);
   const p = {
     id: uid(isYouth ? "yt" : "pl"),
     name: generatePlayerName(nation.code, pick),
@@ -543,6 +744,7 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     age,
     nationality: nation.code,
     nationName: nation.name,
+    nationNameEn: nation.nameEn,
     nationFlag: nation.flag,
     attrs,
     fitness: rand(85, 100),
@@ -562,6 +764,7 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     honors: [],
     // 球衣号（入队时由 assignSquadNumbers 分配）
     number: null,
+    talentModelVersion: TALENT_MODEL_VERSION,
   };
   // appearance identity persisted at create time
   {
@@ -622,7 +825,7 @@ export function createYouthPlayer(club) {
   // 实力与俱乐部+青训等级挂钩
   const power = Math.max(40, club.power - 18 + level * 3 + rand(-4, 6));
   const pos = pick(["GK", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"]);
-  const p = createPlayer(pos, power, club.id, { youth: true });
+  const p = createPlayer(pos, power, club.id, { youth: true, homeNation: club.countryCode });
   // 高等级更容易出高潜力
   if (Math.random() < 0.08 + level * 0.04) {
     p.potential = clamp(p.potential + rand(1, 3), p.potential, 20);
@@ -851,7 +1054,7 @@ const SQUAD_SHAPE = [
 export function createClub(template, lang = "zh") {
   const players = SQUAD_SHAPE.map((pos) => {
     const jitter = rand(-6, 6);
-    return createPlayer(pos, template.power + jitter, template.id);
+    return createPlayer(pos, template.power + jitter, template.id, { homeNation: template.countryCode });
   });
   // 排序：主力能力略高
   players.sort((a, b) => b.ovr - a.ovr);
@@ -875,18 +1078,26 @@ export function createClub(template, lang = "zh") {
     stadiumName: template.stadiumName ? { ...template.stadiumName } : null,
     colors: template.colors ? { ...template.colors } : null,
     crest: template.crest ? { ...template.crest } : null,
+    realityProfile: template.realityProfile ? { ...template.realityProfile } : null,
     players,
     tactics: defaultTactics(),
     form: [], // W/D/L 最近
     youth: {
-      level: DIVISIONS[division]?.tier === 1 ? 2 : 1,
+      level: template.realityProfile?.youthLevel || (DIVISIONS[division]?.tier === 1 ? 2 : 1),
       players: [],
       daysSinceIntake: rand(0, 20),
     },
     staff: null, // create 后填充，避免循环依赖 staff.js
     kit: null,
     training: { focus: "balanced", intensity: "normal" },
-    facilities: null, // ensureFacilities 时按联赛补默认
+    facilities: template.realityProfile
+      ? {
+          stadium: template.realityProfile.stadiumLevel || 1,
+          training: template.realityProfile.trainingLevel || 1,
+          youth: template.realityProfile.youthLevel || 1,
+          projects: [],
+        }
+      : null,
   };
   applyClubBranding(club, clubBrandingById[club.id] || template.branding, lang);
   ensureKit(club);
@@ -1379,6 +1590,8 @@ export function createWorld(userClubId, managerName, lang = "zh") {
     autoLineup(c);
     return c;
   });
+  calibrateWorldAbilityDistribution(clubs);
+  for (const club of clubs) autoLineup(club);
   // staff 延迟到 main/engine ensure，避免 models↔staff 循环
 
   const user = clubs.find((c) => c.id === userClubId);
@@ -1395,6 +1608,7 @@ export function createWorld(userClubId, managerName, lang = "zh") {
 
   const world = {
     version: 7,
+    abilityDistributionVersion: ABILITY_DISTRIBUTION_VERSION,
     season: 2026,
     day: 1,
     managerName,
@@ -1460,6 +1674,11 @@ export function ensureWorldClubTemplates(world, lang = "zh") {
     world.clubs.push(club);
     world.table[club.id] = { played: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
     added++;
+  }
+  if (added > 0) {
+    calibrateWorldAbilityDistribution(world.clubs);
+    for (const club of world.clubs) autoLineup(club);
+    world.abilityDistributionVersion = ABILITY_DISTRIBUTION_VERSION;
   }
   return added;
 }

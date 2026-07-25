@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=123" />
+  <link rel="stylesheet" href="css/style.css?v=144" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -248,8 +248,8 @@
                     <th data-i18n="th.age">年龄</th>
                     <th data-i18n="th.ovr">能力</th>
                     <th data-i18n="th.apps" title="本赛季出场">出场</th>
-                    <th data-i18n="th.goals" title="本赛季进球 / 门将零封">进球</th>
-                    <th data-i18n="th.assists" title="本赛季助攻 / 门将失球">助攻</th>
+                    <th data-i18n="th.goalsCs" data-i18n-title="th.goalsCsTitle">进球/零封</th>
+                    <th data-i18n="th.assistsGa" data-i18n-title="th.assistsGaTitle">助攻/失球</th>
                     <th data-i18n="th.avgR" title="本赛季场均评分">场均</th>
                     <th data-i18n="th.lastR" title="最近一场评分">最近</th>
                     <th data-i18n="th.fit">体能</th>
@@ -517,24 +517,19 @@
             <p class="hint" style="margin:0.4rem 0 0.6rem" data-i18n="intl.nationsHint">
               按现役球员池组成国家队。点击一行查看 23 人大名单与国际数据。
             </p>
-            <div style="display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:0.75rem;align-items:start" class="intl-nations-grid">
-              <div class="table-wrap" style="max-height:28rem;overflow:auto">
-                <table id="intl-nations">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th data-i18n="intl.colNation">国家</th>
-                      <th data-i18n="intl.colPool">人才池</th>
-                      <th data-i18n="intl.colStrength">实力</th>
-                      <th data-i18n="intl.colRecord">战绩</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
-              </div>
-              <div id="intl-nation-detail" class="intl-nation-detail">
-                <p class="muted" data-i18n="intl.pickNation">选择左侧国家查看名单</p>
-              </div>
+            <div class="table-wrap" style="max-height:32rem;overflow:auto">
+              <table id="intl-nations">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th data-i18n="intl.colNation">国家</th>
+                    <th data-i18n="intl.colPool">人才池</th>
+                    <th data-i18n="intl.colStrength">实力</th>
+                    <th data-i18n="intl.colRecord">战绩</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -996,12 +991,12 @@
     <div id="season-summary" class="season-summary hidden" role="dialog" aria-modal="true"></div>
   </div>
 
-  <script type="module" src="js/main.js?v=123"></script>
+  <script type="module" src="js/main.js?v=144"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v123";
+        var CURRENT_CACHE = "vcfm-v144";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1011,7 +1006,7 @@
             );
           }).catch(function () {});
         }
-        navigator.serviceWorker.register("./sw.js?v=123").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=144").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1020,8 +1015,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v123")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v123", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v144")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v144", "1");
               location.reload();
             }
           } catch (e) {

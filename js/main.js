@@ -2,10 +2,12 @@
 
 import {
   CLUB_TEMPLATES,
+  clubBrandingById,
   FORMATIONS,
   FORMATION_MOD,
   POS_LABEL,
   NATIONALITIES,
+  NATIONAL_TEAM_KITS,
   DIVISIONS,
   DIVISION_IDS,
   START_DIVISION,
@@ -27,13 +29,30 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=123";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=144";
+import { nationFlagHtml } from "./flags.js?v=144";
+import { applyWorldClubBranding, localizedClubName } from "./branding.js";
+
+function clubDisplayName(club) {
+  return localizedClubName(club, getLang()) || club?.name || "—";
+}
+
+function clubNameById(clubId, fallback = "—") {
+  const club = world?.clubs?.find((item) => item.id === clubId);
+  return club ? clubDisplayName(club) : fallback;
+}
+
+function positionLabel(pos) {
+  return getLang() === "en" ? pos || "—" : POS_LABEL[pos] || pos || "—";
+}
 
 function nationLabel(p) {
-  if (p.nationFlag && p.nationName) return `${p.nationFlag} ${p.nationName}`;
   if (p.nationality) {
     const n = NATIONALITIES.find((x) => x.code === p.nationality);
-    if (n) return `${n.flag} ${n.name}`;
+    if (n) return `${nationFlagHtml(n.code)}${getLang() === "en" ? n.nameEn || n.name : n.name}`;
+  }
+  if (p.nationFlag && p.nationName) {
+    return `${p.nationFlag} ${getLang() === "en" ? p.nationNameEn || p.nationName : p.nationName}`;
   }
   return "—";
 }
@@ -46,6 +65,9 @@ import {
   ensureYouthAcademy,
   fillYouthSquad,
   ensurePlayerHistory,
+  ensureRealisticPlayerTalent,
+  calibrateWorldAbilityDistribution,
+  ABILITY_DISTRIBUTION_VERSION,
   emptyMatchStats,
   seasonAvgRating,
   ratingClass,
@@ -189,7 +211,6 @@ import {
   emptyNationRow,
   nationalCompetitionStats,
   nationName,
-  nationFlag,
 } from "./intl.js";
 import {
   buildPreMatchBriefing,
@@ -221,7 +242,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=136";
+} from "./avatar.js?v=144";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -650,7 +671,11 @@ function refreshSlotUI() {
       const detail =
         getLang() === "en"
           ? `Slot ${n}: ${info.clubName || "—"} · S${info.season ?? "?"} D${info.day ?? "?"}`
-          : `槽 ${n}：${info.clubName || "—"} · S${info.season ?? "?"} D${info.day ?? "?"}`;
+          : `${getLang() === "en" ? "Slot" : "槽"} ${n}：${
+              clubBrandingById[info.clubId]
+                ? localizedClubName(clubBrandingById[info.clubId], getLang())
+                : info.clubName || "—"
+            } · S${info.season ?? "?"} D${info.day ?? "?"}`;
       if (!confirm(`${t("start.slotDeleteConfirm", { n })}\n${detail}`)) return;
       if (!clearSave(n)) {
         toast(t("start.slotDeleteFail"));
@@ -692,11 +717,17 @@ function divisionSelectOptionsHtml(includeAll = false) {
   if (includeAll) {
     parts.push(`<option value="all">${escapeHtml(t("clubs.allDiv"))}</option>`);
   }
-  for (const id of DIVISION_IDS) {
-    const d = DIVISIONS[id];
-    if (!d) continue;
-    const label = t("div." + id) || (en ? d.nameEn || d.name : d.name);
-    parts.push(`<option value="${id}">${escapeHtml(label)}</option>`);
+  for (const country of COUNTRY_LIST) {
+    const options = DIVISION_IDS.filter((id) => DIVISIONS[id]?.countryId === country.id)
+      .map((id) => {
+        const d = DIVISIONS[id];
+        const label = t("div." + id) || (en ? d.nameEn || d.name : d.name);
+        return `<option value="${id}">${escapeHtml(label)}</option>`;
+      })
+      .join("");
+    if (!options) continue;
+    const countryLabel = en ? country.nameEn || country.name : country.name;
+    parts.push(`<optgroup label="${escapeHtml(countryLabel)}">${options}</optgroup>`);
   }
   return parts.join("");
 }
@@ -746,7 +777,7 @@ function fillClubSelect() {
   sel.innerHTML = starters
     .map(
       (c) =>
-        `<option value="${c.id}">${t("start.clubOption", { name: c.name, power: c.power })}</option>`
+        `<option value="${c.id}">${t("start.clubOption", { name: clubDisplayName(c), power: c.power })}</option>`
     )
     .join("");
   if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
@@ -782,12 +813,12 @@ function initStart() {
       }
       const slot = getActiveSlot();
       if (hasSave(slot) && !confirm(t("start.overwriteConfirm", { n: slot }))) return;
-      world = createWorld(clubId, manager);
+      world = createWorld(clubId, manager, getLang());
       ensureMedia(world);
       for (const c of world.clubs) ensureStaff(c);
       refreshStaffMarket(world);
       const u = world.clubs.find((c) => c.id === clubId);
-      mediaSeasonKickoff(world, u, DIVISIONS[u.division || 3]?.name || "乙级联赛");
+      mediaSeasonKickoff(world, u, t("div." + (u.division || 3)) || DIVISIONS[u.division || 3]?.name || "League");
       ensureBoardObjective(world);
       ensureTransferWindow(world);
       processTransferWindowDay(world);
@@ -876,6 +907,9 @@ function migrateWorld(w) {
     if (tpl) {
       c.name = tpl.name;
       c.short = tpl.short;
+      c.countryId = tpl.countryId || c.countryId;
+      c.countryCode = tpl.countryCode || c.countryCode;
+      c.realityProfile = tpl.realityProfile ? { ...tpl.realityProfile } : c.realityProfile || null;
       if (tpl.color && !c.kit) c.color = tpl.color;
     }
     ensureStaff(c);
@@ -889,6 +923,7 @@ function migrateWorld(w) {
     if (!c.youth.players.length) fillYouthSquad(c);
     for (const p of c.players || []) {
       if (p.potential == null) p.potential = Math.min(20, (p.ovr || 10) + 1);
+      ensureRealisticPlayerTalent(p);
       ensurePlayerHistory(p);
       ensureIntl(p);
       ensureHonors(p);
@@ -896,11 +931,20 @@ function migrateWorld(w) {
     }
     for (const p of c.youth.players || []) {
       if (p.potential == null) p.potential = Math.min(20, (p.ovr || 10) + 1);
+      ensureRealisticPlayerTalent(p);
       ensurePlayerHistory(p);
       ensureIntl(p);
       ensureHonors(p);
     }
   }
+  for (const p of w.freeAgents || []) ensureRealisticPlayerTalent(p);
+  for (const p of w.retiredPlayers || []) ensureRealisticPlayerTalent(p);
+  if ((w.abilityDistributionVersion || 0) < ABILITY_DISTRIBUTION_VERSION) {
+    calibrateWorldAbilityDistribution(w.clubs || []);
+    for (const club of w.clubs || []) autoLineup(club);
+    w.abilityDistributionVersion = ABILITY_DISTRIBUTION_VERSION;
+  }
+  applyWorldClubBranding(w, clubBrandingById, getLang());
   // 旧档若不足三级结构，提示开新档体验完整升降级
   const counts = { 1: 0, 2: 0, 3: 0 };
   for (const c of w.clubs || []) counts[c.division || 3]++;
@@ -1201,6 +1245,16 @@ function bindMainOnce() {
   // 积分榜 / 赛程 / 数据榜等：点击队名打开俱乐部详情
   document.body.addEventListener("click", (e) => {
     if (!world) return;
+    const nationLink = e.target.closest("[data-nation]");
+    if (nationLink) {
+      e.preventDefault();
+      e.stopPropagation();
+      selectedNationCode = nationLink.dataset.nation;
+      const competitionId = $("#intl-competition")?.value || world.international?.activeCompetitionId || null;
+      renderCompetitions();
+      showNationModal(selectedNationCode, competitionId);
+      return;
+    }
     const clubLink = e.target.closest("[data-club-link]");
     if (clubLink) {
       e.preventDefault();
@@ -1212,7 +1266,10 @@ function bindMainOnce() {
     if (playerLink) {
       e.preventDefault();
       e.stopPropagation();
-      showPlayerModal(playerLink.dataset.playerLink);
+      showPlayerModal(playerLink.dataset.playerLink, {
+        nationCode: playerLink.dataset.playerNation || null,
+        squadNumber: playerLink.dataset.playerNumber ? Number(playerLink.dataset.playerNumber) : null,
+      });
     }
   });
 
@@ -1329,30 +1386,46 @@ function refreshAll() {
 let selectedNationCode = null;
 
 function nationCellHtml(code, clickable = true) {
-  const label = `${nationFlag(code)} ${escapeHtml(nationName(code))}`;
+  const label = `${nationFlagHtml(code)}${escapeHtml(nationName(code, getLang()))}`;
   if (!clickable) return label;
   return `<button type="button" class="intl-nation-link" data-nation="${escapeHtml(code)}" style="background:none;border:none;padding:0;color:inherit;cursor:pointer;font:inherit;text-align:left">${label}</button>`;
 }
 
+function nationalTeamView(code) {
+  const nation = NATIONALITIES.find((item) => item.code === code);
+  const kit = NATIONAL_TEAM_KITS[code] || {
+    style: "solid",
+    primary: "#334155",
+    secondary: "#f8fafc",
+    numberColor: "#f8fafc",
+  };
+  return {
+    id: `national-${code}`,
+    name: nation?.name || code,
+    nameEn: nation?.nameEn || code,
+    color: kit.primary,
+    kit: { ...kit },
+  };
+}
+
 /** meta / record 由调用方传入，避免在同一次渲染里重复全量统计。 */
-function renderNationDetail(code, competitionId = null, meta = null, record = null) {
-  const detailEl = $("#intl-nation-detail");
-  if (!detailEl || !world || !code) return;
+function nationDetailHtml(code, competitionId = null, meta = null, record = null) {
+  if (!world || !code) return "";
   const en = getLang() === "en";
   const squad = nationalSquad(world, code);
+  const nationalTeam = nationalTeamView(code);
   const eventStats = nationalCompetitionStats(world, code, competitionId);
   if (!squad.length) {
-    detailEl.innerHTML = `<p class="muted">${nationFlag(code)} ${escapeHtml(nationName(code))} — ${escapeHtml(
+    return `<p class="muted">${nationFlagHtml(code)}${escapeHtml(nationName(code, getLang()))} — ${escapeHtml(
       en ? "No eligible players in world pool." : "人才池中暂无可用球员。"
     )}</p>`;
-    return;
   }
   const recText = en
     ? `${record.played} played · ${record.w}W ${record.d}D ${record.l}L · GD ${record.gd}`
     : `${record.played} 场 · ${record.w}胜 ${record.d}平 ${record.l}负 · 净胜 ${record.gd}`;
-  detailEl.innerHTML = `
+  return `
     <div class="row-between" style="flex-wrap:wrap;gap:0.35rem;margin-bottom:0.45rem">
-      <strong style="font-size:1rem">${nationFlag(code)} ${escapeHtml(nationName(code))}</strong>
+      <strong style="font-size:1rem">${nationFlagHtml(code)}${escapeHtml(nationName(code, getLang()))}</strong>
       <span class="muted" style="font-size:0.85rem">${escapeHtml(
         en
           ? `Pool ${meta?.pool ?? "—"} · XI OVR ${meta?.strength ?? "—"}`
@@ -1365,10 +1438,14 @@ function renderNationDetail(code, competitionId = null, meta = null, record = nu
       <table>
         <thead>
           <tr>
+            <th>#</th>
             <th>${escapeHtml(en ? "Pos" : "位置")}</th>
             <th>${escapeHtml(en ? "Player" : "球员")}</th>
             <th>${escapeHtml(en ? "Club" : "俱乐部")}</th>
             <th>OVR</th>
+            <th title="${escapeHtml(en ? "Season average / last rating" : "赛季场均 / 上一场评分")}">${escapeHtml(en ? "Form" : "状态")}</th>
+            <th>${escapeHtml(en ? "Fit" : "体能")}</th>
+            <th title="${escapeHtml(en ? "Ability, form, playing time, fitness and international continuity" : "综合能力、状态、出场、体能与国家队连续性")}">${escapeHtml(en ? "Call-up" : "征召分")}</th>
             <th>${escapeHtml(en ? "Caps" : "场")}</th>
             <th>${escapeHtml(en ? "G" : "球")}</th>
             <th>${escapeHtml(en ? "A" : "助")}</th>
@@ -1376,15 +1453,28 @@ function renderNationDetail(code, competitionId = null, meta = null, record = nu
         </thead>
         <tbody>
           ${squad
-            .map(({ player, club, lastCalledUp }) => {
+            .map(({ player, club, lastCalledUp, selectionScore, squadNumber }) => {
               const intl = player.intl || {};
               const ev = eventStats.get(player.id);
               const mark = lastCalledUp ? " ★" : "";
+              const apps = player.stats?.apps || 0;
+              const avgRating = apps > 0 && (player.stats?.ratingSum || 0) > 0 ? player.stats.ratingSum / apps : null;
+              const lastRating = player.stats?.lastRating;
+              const form = avgRating == null && lastRating == null ? "—" : `${avgRating == null ? "—" : avgRating.toFixed(1)} / ${lastRating == null ? "—" : Number(lastRating).toFixed(1)}`;
               return `<tr>
+                <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(nationalTeam)}">${squadNumber ?? "—"}</span></td>
                 <td>${escapeHtml(player.pos || "—")}</td>
-                <td>${escapeHtml(player.name || "—")}${mark}</td>
-                <td>${escapeHtml(club?.name || "—")}</td>
+                <td class="name-with-avatar">${playerAvatarHtml(player, nationalTeam, 26)} <span>${playerLinkHtml(
+                  player.id,
+                  player.name || "—",
+                  "",
+                  { nationCode: code, squadNumber }
+                )}${mark}</span></td>
+                <td>${club ? clubLinkHtml(club.id, club.name) : "—"}</td>
                 <td>${player.ovr ?? "—"}</td>
+                <td>${escapeHtml(form)}</td>
+                <td>${Math.round(player.fitness ?? 100)}%</td>
+                <td><strong>${Number(selectionScore || 0).toFixed(1)}</strong></td>
                 <td>${intl.caps || 0}${ev?.apps ? ` <span class="muted">(${ev.apps})</span>` : ""}</td>
                 <td>${intl.goals || 0}${ev?.goals ? ` <span class="muted">(+${ev.goals})</span>` : ""}</td>
                 <td>${intl.assists || 0}</td>
@@ -1395,8 +1485,23 @@ function renderNationDetail(code, competitionId = null, meta = null, record = nu
       </table>
     </div>
     <p class="hint" style="margin:0.4rem 0 0;font-size:0.8rem">${escapeHtml(
-      en ? "★ last call-up · (n) this competition" : "★ 最近一次入选 · (n) 为本赛事数据"
+      en ? "★ last match XI · (n) this competition" : "★ 最近一场首发 · (n) 为本赛事数据"
     )}</p>`;
+}
+
+function showNationModal(code, competitionId = null) {
+  if (!world || !code) return;
+  ensureInternational(world);
+  const teams = listNationalTeams(world);
+  const records = nationalRecords(world);
+  const meta = teams.find((item) => item.code === code) || null;
+  const record = records.get(code) || emptyNationRow();
+  const body = $("#modal-body");
+  if (!body) return;
+  body.innerHTML = nationDetailHtml(code, competitionId, meta, record);
+  $("#modal-card")?.classList.remove("search-modal");
+  $("#modal-card")?.classList.add("wide");
+  $("#modal").classList.remove("hidden");
 }
 
 function renderNationalTeamsPanel(competitionId = null) {
@@ -1423,28 +1528,13 @@ function renderNationalTeamsPanel(competitionId = null) {
       const recLabel = rec?.played ? `${rec.w}-${rec.d}-${rec.l}` : "—";
       return `<tr data-nation="${escapeHtml(item.code)}"${active} style="cursor:pointer${item.eligible ? "" : ";opacity:0.55"}">
         <td>${index + 1}</td>
-        <td>${nationFlag(item.code)} ${escapeHtml(nationName(item.code))}</td>
+        <td>${nationFlagHtml(item.code)}${escapeHtml(nationName(item.code, getLang()))}</td>
         <td>${item.pool}</td>
         <td>${item.eligible ? item.strength : "—"}</td>
         <td>${recLabel}</td>
       </tr>`;
     })
     .join("");
-  if (!body._bound) {
-    body._bound = true;
-    body.addEventListener("click", (ev) => {
-      const row = ev.target.closest("tr[data-nation]");
-      if (!row) return;
-      selectedNationCode = row.getAttribute("data-nation");
-      renderCompetitions();
-    });
-  }
-  renderNationDetail(
-    selectedNationCode,
-    competitionId,
-    teams.find((item) => item.code === selectedNationCode) || null,
-    records.get(selectedNationCode) || emptyNationRow()
-  );
 }
 
 /** 世界赛事 / 国家队页 */
@@ -1531,7 +1621,7 @@ function renderCompetitions() {
           : competition.stage || "—";
   const status = competition.completed ? t("intl.completed") : t("intl.inProgress");
   const champ = competition.champion
-    ? `${nationFlag(competition.champion)} ${nationName(competition.champion)}`
+    ? `${nationFlagHtml(competition.champion)}${nationName(competition.champion, getLang())}`
     : "—";
   const partN = competition.participants?.length || 0;
   sumEl.innerHTML = `<strong>${escapeHtml(en ? competition.nameEn || competition.name : competition.name)}</strong>
@@ -1605,17 +1695,6 @@ function renderCompetitions() {
     </div>`;
   }
   tablesEl.innerHTML = tablesHtml || `<p class="muted">${escapeHtml(t("intl.noComp"))}</p>`;
-  if (!tablesEl._nationBound) {
-    tablesEl._nationBound = true;
-    tablesEl.addEventListener("click", (ev) => {
-      const btn = ev.target.closest("[data-nation]");
-      if (!btn) return;
-      selectedNationCode = btn.getAttribute("data-nation");
-      renderCompetitions();
-      $("#intl-nation-detail")?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
-    });
-  }
-
   const matches = internationalMatches(world, competition.id).slice().reverse().slice(0, 40);
   matchesBody.innerHTML = matches.length
     ? matches
@@ -1639,16 +1718,6 @@ function renderCompetitions() {
         })
         .join("")
     : `<tr><td colspan="5" class="muted">${escapeHtml(t("intl.emptyMatches"))}</td></tr>`;
-  if (!matchesBody._nationBound) {
-    matchesBody._nationBound = true;
-    matchesBody.addEventListener("click", (ev) => {
-      const btn = ev.target.closest("[data-nation]");
-      if (!btn) return;
-      selectedNationCode = btn.getAttribute("data-nation");
-      renderCompetitions();
-    });
-  }
-
   if (scorersEl) {
     const leaders = internationalLeaders(world, competition.id);
     const scorers = leaders?.scorers || leaders?.goals || [];
@@ -1657,7 +1726,7 @@ function renderCompetitions() {
       ? `<ol style="margin:0;padding-left:1.2rem">${top
           .map(
             (s) =>
-              `<li>${escapeHtml(s.name || s.id)} ${nationFlag(s.nation || "")} <strong>${s.value ?? s.goals ?? 0}</strong></li>`
+              `<li>${escapeHtml(s.name || s.id)} ${s.nation ? nationFlagHtml(s.nation) : ""} <strong>${s.value ?? s.goals ?? 0}</strong></li>`
           )
           .join("")}</ol>`
       : "—";
@@ -1669,7 +1738,7 @@ function renderCompetitions() {
           .slice(0, 8)
           .map((h) => {
             const name = en ? h.nameEn || h.name : h.name;
-            const ch = h.champion ? `${nationFlag(h.champion)} ${nationName(h.champion)}` : "—";
+            const ch = h.champion ? `${nationFlagHtml(h.champion)}${nationName(h.champion, getLang())}` : "—";
             return `<li>S${h.season || "?"} ${escapeHtml(name || "")} — ${ch}</li>`;
           })
           .join("")}</ul>`
@@ -1776,8 +1845,8 @@ function renderInbox() {
           <span class="muted inbox-day">D${m.day}</span>
           <span class="inbox-status">${escapeHtml(st)}</span>
         </header>
-        <h3 class="inbox-title">${escapeHtml(m.title)}</h3>
-        ${m.body ? `<p class="inbox-body">${escapeHtml(m.body)}</p>` : ""}
+        <h3 class="inbox-title">${escapeHtml(en && m.titleEn ? m.titleEn : m.title)}</h3>
+        ${en && m.bodyEn ? `<p class="inbox-body">${escapeHtml(m.bodyEn)}</p>` : m.body ? `<p class="inbox-body">${escapeHtml(m.body)}</p>` : ""}
         <div class="inbox-actions">${actions}</div>
       </article>`;
     })
@@ -1819,8 +1888,20 @@ function renderInbox() {
 function renderTraining() {
   const club = getUserClub(world);
   if (!club) return;
+  const en = getLang() === "en";
   const t = ensureTraining(club);
   const sum = trainingSummary(club);
+  const focusCopy = {
+    balanced: ["Balanced", "General development across the squad"],
+    attacking: ["Attacking", "Finishing, passing and movement"],
+    defending: ["Defending", "Tackling, marking and shape"],
+    fitness: ["Fitness", "Stamina and physical conditioning"],
+    goalkeeping: ["Goalkeeping", "Keeper handling and reflexes"],
+    youth: ["Youth development", "Extra growth for academy players"],
+    recovery: ["Recovery", "Restore fitness and reduce injury risk"],
+    matchprep: ["Match preparation", "Prepare the squad for matchday"],
+  };
+  const intensityCopy = { light: "Light", normal: "Normal", hard: "High intensity" };
 
   const focusBox = $("#training-focus-list");
   if (focusBox) {
@@ -1829,8 +1910,8 @@ function renderTraining() {
         (f) => `<button type="button" class="training-opt${
           t.focus === f.key ? " active" : ""
         }" data-focus="${f.key}">
-          <div class="opt-title">${escapeHtml(f.label)}</div>
-          <div class="opt-desc">${escapeHtml(f.desc)}</div>
+          <div class="opt-title">${escapeHtml(en ? focusCopy[f.key]?.[0] || f.key : f.label)}</div>
+          <div class="opt-desc">${escapeHtml(en ? focusCopy[f.key]?.[1] || "" : f.desc)}</div>
         </button>`
       )
       .join("");
@@ -1839,7 +1920,7 @@ function renderTraining() {
         setTraining(club, { focus: btn.dataset.focus });
         autosave("training-focus");
         renderTraining();
-        toast(`训练重点：${TRAINING_FOCUSES[btn.dataset.focus].label}`);
+        toast(en ? `Focus: ${focusCopy[btn.dataset.focus]?.[0] || btn.dataset.focus}` : `训练重点：${TRAINING_FOCUSES[btn.dataset.focus].label}`);
       };
     });
   }
@@ -1851,7 +1932,7 @@ function renderTraining() {
         (i) => `<button type="button" class="training-opt${
           t.intensity === i.key ? " active" : ""
         }" data-intensity="${i.key}">
-          <div class="opt-title">${escapeHtml(i.label)}</div>
+          <div class="opt-title">${escapeHtml(en ? intensityCopy[i.key] || i.key : i.label)}</div>
         </button>`
       )
       .join("");
@@ -1860,7 +1941,7 @@ function renderTraining() {
         setTraining(club, { intensity: btn.dataset.intensity });
         autosave("training-intensity");
         renderTraining();
-        toast(`训练强度：${TRAINING_INTENSITIES[btn.dataset.intensity].label}`);
+        toast(en ? `Intensity: ${intensityCopy[btn.dataset.intensity] || btn.dataset.intensity}` : `训练强度：${TRAINING_INTENSITIES[btn.dataset.intensity].label}`);
       };
     });
   }
@@ -1868,10 +1949,12 @@ function renderTraining() {
   const sumEl = $("#training-summary");
   if (sumEl) {
     const coach = club.staff?.coach;
-    const coachTxt = coach ? `教练 ${coach.name}（${coach.rating}）` : "教练 —";
-    sumEl.innerHTML = `<strong>当前：</strong>${escapeHtml(sum.line)}<br>
-      <span class="muted">${escapeHtml(sum.desc)}</span><br>
-      <span class="muted">${escapeHtml(coachTxt)} · 每周结算属性成长 · 每日影响体能与伤病风险</span>`;
+    const coachTxt = coach ? `${en ? "Coach" : "教练"} ${coach.name} (${coach.rating})` : `${en ? "Coach" : "教练"} —`;
+    const currentLine = en ? `${focusCopy[sum.focus]?.[0] || sum.focus} · ${intensityCopy[sum.intensity] || sum.intensity}` : sum.line;
+    const currentDesc = en ? focusCopy[sum.focus]?.[1] || "" : sum.desc;
+    sumEl.innerHTML = `<strong>${en ? "Current:" : "当前："}</strong>${escapeHtml(currentLine)}<br>
+      <span class="muted">${escapeHtml(currentDesc)}</span><br>
+      <span class="muted">${escapeHtml(coachTxt)} · ${en ? "growth is applied weekly; fitness and injury risk update daily" : "每周结算属性成长 · 每日影响体能与伤病风险"}</span>`;
   }
 
   const players = [...(club.players || [])].sort(
@@ -1892,29 +1975,30 @@ function renderTraining() {
         .map((p) => {
           const fit = Math.round(p.fitness || 0);
           const lowCls = fit < 65 || p.injured > 0 ? " low" : "";
-          const tag = p.injured > 0 ? " 伤" : "";
+          const tag = p.injured > 0 ? (en ? " Inj" : " 伤") : "";
           return `<div class="training-fit-row${lowCls}">
             <span>${playerLinkHtml(p.id, playerDisplaySurname(p.name, p.nationality) + tag)}</span>
             <div class="bar"><i style="width:${fit}%"></i></div>
             <span class="fit-val">${fit}%</span>
           </div>`;
         })
-        .join("") || `<span class="muted">暂无球员</span>`;
+        .join("") || `<span class="muted">${en ? "No players" : "暂无球员"}</span>`;
   }
 
   const hint = $("#training-hint");
   if (hint) {
-    let tip = `平均体能 ${avg}% · 伤病 ${injured} 人 · 低体能 ${low} 人。`;
-    if (avg < 70) tip += " 建议改「恢复调整」或「轻松」强度。";
-    else if (t.intensity === "hard" && avg < 80) tip += " 高强度下体能偏紧，小心训练伤。";
-    else if (t.focus === "youth") tip += " 青训侧重时本周青训成长加快，一线队成长偏慢。";
-    else tip += " 比赛日前可切「赛前准备」。";
+    let tip = en ? `Average fitness ${avg}% · ${injured} injured · ${low} low fitness.` : `平均体能 ${avg}% · 伤病 ${injured} 人 · 低体能 ${low} 人。`;
+    if (avg < 70) tip += en ? " Consider Recovery or Light intensity." : " 建议改「恢复调整」或「轻松」强度。";
+    else if (t.intensity === "hard" && avg < 80) tip += en ? " Fitness is tight under high intensity; watch injury risk." : " 高强度下体能偏紧，小心训练伤。";
+    else if (t.focus === "youth") tip += en ? " Youth players grow faster this week; senior growth is reduced." : " 青训侧重时本周青训成长加快，一线队成长偏慢。";
+    else tip += en ? " Match preparation is useful before matchday." : " 比赛日前可切「赛前准备」。";
     hint.textContent = tip;
   }
 }
 
 function renderStaff() {
   const club = getUserClub(world);
+  const en = getLang() === "en";
   ensureStaff(club);
   if (!Array.isArray(world.staffMarket)) refreshStaffMarket(world);
 
@@ -1922,6 +2006,11 @@ function renderStaff() {
   if (!box) return;
 
   const roles = ["coach", "scout", "doctor"];
+  const roleCopy = {
+    coach: ["Coach", "Improves player development and training"],
+    scout: ["Scout", "Improves scouting knowledge and reports"],
+    doctor: ["Doctor", "Reduces injury risk and recovery time"],
+  };
   box.innerHTML = roles
     .map((role) => {
       const s = club.staff[role];
@@ -1930,21 +2019,21 @@ function renderStaff() {
         <div class="staff-card-head">
           ${staffAvatarHtml(s, 52)}
           <div>
-            <div class="role">${meta.label}</div>
+            <div class="role">${en ? roleCopy[role]?.[0] || role : meta.label}</div>
             <h3 style="margin:0.15rem 0">${escapeHtml(s.name)}</h3>
           </div>
         </div>
-        <div class="meta">能力 <strong class="${ovrClass(s.rating)}">${s.rating}</strong> · ${s.age} 岁</div>
-        <div class="meta">周薪 ${formatMoney(s.wage)}</div>
-        <p class="hint" style="margin:0.4rem 0">${meta.effect}</p>
-        <button class="btn small danger" data-fire="${role}">解约</button>
+        <div class="meta">${en ? "Ability" : "能力"} <strong class="${ovrClass(s.rating)}">${s.rating}</strong> · ${en ? `Age ${s.age}` : `${s.age} 岁`}</div>
+        <div class="meta">${en ? "Wage" : "周薪"} ${formatMoney(s.wage)}</div>
+        <p class="hint" style="margin:0.4rem 0">${en ? roleCopy[role]?.[1] || "" : meta.effect}</p>
+        <button class="btn small danger" data-fire="${role}">${en ? "Release" : "解约"}</button>
       </div>`;
     })
     .join("");
 
   box.querySelectorAll("[data-fire]").forEach((btn) => {
     btn.onclick = () => {
-      if (!confirm("解约需支付约 4 周薪水作为补偿，确认？")) return;
+      if (!confirm(en ? "Release this staff member? Compensation is about four weeks of wages." : "解约需支付约 4 周薪水作为补偿，确认？")) return;
       const res = fireStaffForUser(world, btn.dataset.fire);
       toast(res.msg);
       if (res.ok) {
@@ -1960,12 +2049,12 @@ function renderStaff() {
       const fee = Math.round(s.rating * s.rating * 8000);
       return `<tr>
         <td class="avatar-cell">${staffAvatarHtml(s, 32)} ${escapeHtml(s.name)}</td>
-        <td>${ROLES[s.role]?.label || s.role}</td>
+        <td>${en ? roleCopy[s.role]?.[0] || s.role : ROLES[s.role]?.label || s.role}</td>
         <td class="${ovrClass(s.rating)}"><strong>${s.rating}</strong></td>
         <td>${s.age}</td>
         <td>${formatMoney(s.wage)}</td>
         <td>${formatMoney(fee)}</td>
-        <td><button class="btn small primary" data-hire="${s.id}">聘请</button></td>
+        <td><button class="btn small primary" data-hire="${s.id}">${en ? "Hire" : "聘请"}</button></td>
       </tr>`;
     })
     .join("");
@@ -1984,6 +2073,7 @@ function renderStaff() {
 
 function renderMedia() {
   ensureMedia(world);
+  const en = getLang() === "en";
   const feed = $("#media-feed");
   if (!feed) return;
   const list = world.media || [];
@@ -1994,7 +2084,7 @@ function renderMedia() {
           const tone = a.tone || "neutral";
           return `<article class="media-card ${tone}">
             <div class="outlet">
-              <span>${escapeHtml(a.outlet || "媒体")}</span>
+              <span>${escapeHtml(a.outlet || (en ? "Media" : "媒体"))}</span>
               <span>S${a.season || world.season} · D${a.day ?? "—"}</span>
             </div>
             <h3>${escapeHtml(a.headline)}</h3>
@@ -2002,7 +2092,7 @@ function renderMedia() {
           </article>`;
         })
         .join("")
-    : `<p class="muted">暂无报道。比赛、转会、推进日程后会出现媒体内容。</p>`;
+    : `<p class="muted">${en ? "No stories yet. Matches, transfers and calendar progress will populate this feed." : "暂无报道。比赛、转会、推进日程后会出现媒体内容。"}</p>`;
 }
 
 function playerStats(p) {
@@ -2028,12 +2118,12 @@ function renderTopbar() {
   const club = getUserClub(world);
   const div = DIVISIONS[club.division || 3];
   const kit = ensureKit(club);
-  $("#club-name").innerHTML = `<span class="kit-chip" style="${kitBadgeStyle(club)}" title="${kit.style}"></span> ${escapeHtml(club.name)}`;
+  $("#club-name").innerHTML = `<span class="kit-chip" style="${kitBadgeStyle(club)}" title="${kit.style}"></span> ${escapeHtml(clubDisplayName(club))}`;
   const mgrAv = avatarHtml(
     { id: `mgr_${world.userClubId}_${world.managerName}`, name: world.managerName, age: 42 },
     { role: "manager", size: 28 }
   );
-  $("#manager-name").innerHTML = `${mgrAv} <span>${escapeHtml(world.managerName)} · ${div?.short || "乙级"}</span>`;
+  $("#manager-name").innerHTML = `${mgrAv} <span>${escapeHtml(world.managerName)} · ${escapeHtml(t("div." + (club.division || 3)) || div?.short || "League")}</span>`;
   $("#season-label").textContent = t("top.season", { n: world.season });
   const tw = transferWindowShort(world);
   $("#date-label").textContent = `${t("top.day", { n: world.day })} · ${tw}`;
@@ -2043,6 +2133,7 @@ function renderTopbar() {
 
 function renderDashboard() {
   const club = getUserClub(world);
+  const en = getLang() === "en";
   const next = getNextUserMatch(world);
   const box = $("#next-match");
   const playBtn = $("#btn-play-match");
@@ -2056,12 +2147,12 @@ function renderDashboard() {
     (world.fixtures.length > 0 && world.fixtures.every((f) => f.played));
 
   if (seasonDone) {
-    const divName = DIVISIONS[club.division || 3]?.name || "";
+    const divName = t("div." + (club.division || 3)) || DIVISIONS[club.division || 3]?.name || "";
     box.innerHTML = `
-      <div><strong>${world.season} 赛季已结束</strong></div>
+      <div><strong>${en ? `Season ${world.season} complete` : `${world.season} 赛季已结束`}</strong></div>
       <div class="muted" style="margin-top:0.4rem">
-        当前联赛：${divName}<br/>
-        已处理年龄 / 退役 / 升降级。进入下一赛季将按新级别生成赛程。
+        ${en ? `Current league: ${divName}` : `当前联赛：${divName}`}<br/>
+        ${en ? "Ageing, retirements, promotion and relegation are complete. The next season will use the new divisions." : "已处理年龄 / 退役 / 升降级。进入下一赛季将按新级别生成赛程。"}
       </div>
     `;
     playBtn.disabled = true;
@@ -2083,10 +2174,13 @@ function renderDashboard() {
     const ready = next.day <= world.day;
     const brief = ready ? buildBriefingForFixture(next, club) : null;
     const briefHtml = brief ? renderPrematchBriefHtml(brief, { compact: true }) : "";
+    const roundLabel = next.competition === "cup"
+      ? en ? next.roundLabelEn || "Cup" : next.roundLabel || "杯赛"
+      : en ? `Round ${next.round}` : `第 ${next.round} 轮`;
     box.innerHTML = `
-      <div><strong>${next.competition === "cup" ? next.roundLabel || "杯赛" : `第 ${next.round} 轮`}</strong> · 第 ${next.day} 天 · ${next.home === club.id ? "主场" : "客场"}</div>
+      <div><strong>${roundLabel}</strong> · ${en ? `Day ${next.day}` : `第 ${next.day} 天`} · ${next.home === club.id ? (en ? "Home" : "主场") : (en ? "Away" : "客场")}</div>
       <div style="margin-top:0.4rem;font-size:1.25rem">
-        ${clubLinkHtml(home.id, home.name)} <span class="muted">vs</span> ${clubLinkHtml(away.id, away.name)}
+        ${clubLinkHtml(home.id, clubDisplayName(home))} <span class="muted">vs</span> ${clubLinkHtml(away.id, clubDisplayName(away))}
       </div>
       <div class="muted" style="margin-top:0.35rem">
         ${ready ? (getLang() === "en" ? "Matchday · Pre-match briefing" : "可以开赛 · 赛前简报") : (getLang() === "en" ? `${next.day - world.day} day(s) to go` : `还需等待 ${next.day - world.day} 天`)}
@@ -2108,12 +2202,12 @@ function renderDashboard() {
     const mc = ensureManagerCareer(world);
     const wr = managerWinRate(mc);
     careerBox.innerHTML = `
-      <div><strong>${escapeHtml(world.managerName)}</strong> · ${mc.seasons} 赛季 · ${mc.matches} 场</div>
-      <div class="muted" style="margin-top:0.25rem">${mc.wins}胜 ${mc.draws}平 ${mc.losses}负 · 胜率 ${wr}%</div>
-      <div class="muted">${mc.titles} 冠 · ${mc.promotions} 次升级 · ${mc.cups} 杯 · 解雇 ${mc.sacked}</div>
+      <div><strong>${escapeHtml(world.managerName)}</strong> · ${en ? `${mc.seasons} seasons · ${mc.matches} matches` : `${mc.seasons} 赛季 · ${mc.matches} 场`}</div>
+      <div class="muted" style="margin-top:0.25rem">${en ? `${mc.wins}W ${mc.draws}D ${mc.losses}L · Win ${wr}%` : `${mc.wins}胜 ${mc.draws}平 ${mc.losses}负 · 胜率 ${wr}%`}</div>
+      <div class="muted">${en ? `${mc.titles} titles · ${mc.promotions} promotions · ${mc.cups} cups · ${mc.sacked} sackings` : `${mc.titles} 冠 · ${mc.promotions} 次升级 · ${mc.cups} 杯 · 解雇 ${mc.sacked}`}</div>
       ${
         mc.bestFinish
-          ? `<div class="muted">最佳：${mc.bestFinish.season} ${escapeHtml(mc.bestFinish.divName)} 第 ${mc.bestFinish.pos}</div>`
+          ? `<div class="muted">${en ? "Best: " : "最佳："}${mc.bestFinish.season} ${escapeHtml(mc.bestFinish.divName)} ${en ? `#${mc.bestFinish.pos}` : `第 ${mc.bestFinish.pos}`}</div>`
           : ""
       }
     `;
@@ -2123,19 +2217,23 @@ function renderDashboard() {
   const table = getSortedTable(world, userDiv);
   const pos = table.findIndex((r) => r.id === club.id) + 1;
   const row = table.find((r) => r.id === club.id) || { pts: 0, w: 0, d: 0, l: 0 };
-  const divName = DIVISIONS[userDiv]?.name || "";
-  const promoHint =
-    userDiv === 3
-      ? "（前 3 名升级甲级）"
-      : userDiv === 2
-        ? "（前 3 升超联 · 后 3 降乙级）"
-        : "（后 3 名降甲级）";
-  $("#my-rank").textContent = `${divName} 第 ${pos} 名 · ${row.pts} 分（${row.w}胜 ${row.d}平 ${row.l}负）${promoHint}`;
+  const divInfo = DIVISIONS[userDiv] || {};
+  const divName = t("div." + userDiv) || divInfo.name || "";
+  const ruleBits = [];
+  if (divInfo.promote) ruleBits.push(en ? `top ${divInfo.promote} promoted` : `前 ${divInfo.promote} 名升级`);
+  if (divInfo.relegate) ruleBits.push(en ? `bottom ${divInfo.relegate} relegated` : `后 ${divInfo.relegate} 名降级`);
+  const promoHint = ruleBits.length ? ` (${ruleBits.join(en ? " · " : " · ")})` : "";
+  $("#my-rank").textContent = en
+    ? `${divName} · #${pos} · ${row.pts} pts (${row.w}W ${row.d}D ${row.l}L)${promoHint}`
+    : `${divName} 第 ${pos} 名 · ${row.pts} 分（${row.w}胜 ${row.d}平 ${row.l}负）${promoHint}`;
 
   // 当前训练（概览一眼可见）
   const trainDash = document.querySelector("#training-dash");
   if (trainDash) {
-    trainDash.textContent = trainingSummary(club).line + t("dash.trainHint");
+    const training = trainingSummary(club);
+    const focusEn = { balanced: "Balanced", attacking: "Attacking", defending: "Defending", fitness: "Fitness", goalkeeping: "Goalkeeping", youth: "Youth development", recovery: "Recovery", matchprep: "Match preparation" };
+    const intensityEn = { light: "Light", normal: "Normal", hard: "High intensity" };
+    trainDash.textContent = (en ? `${focusEn[training.focus] || training.focus} · ${intensityEn[training.intensity] || training.intensity}` : training.line) + t("dash.trainHint");
   }
   // 设施摘要
   let facDash = document.querySelector("#facilities-dash");
@@ -2143,7 +2241,7 @@ function renderDashboard() {
     const trainEl = document.querySelector("#training-dash");
     if (trainEl && trainEl.parentElement) {
       const h = document.createElement("h3");
-      h.textContent = "俱乐部设施";
+      h.textContent = t("dash.facilities");
       facDash = document.createElement("div");
       facDash.id = "facilities-dash";
       facDash.className = "muted";
@@ -2154,7 +2252,10 @@ function renderDashboard() {
   }
   if (facDash) {
     ensureFacilities(club);
-    facDash.textContent = facilitySummaryLine(club) + t("dash.facHint");
+    const facilities = club.facilities || {};
+    facDash.textContent = (en
+      ? `Stadium Lv.${facilities.stadium || 1} · Training Lv.${facilities.training || 1} · Youth Lv.${facilities.youth || 1}`
+      : facilitySummaryLine(club)) + t("dash.facHint");
   }
 
   // 转会窗
@@ -2162,7 +2263,7 @@ function renderDashboard() {
   const twDash = document.querySelector("#transfer-window-dash");
   if (twDash) {
     const open = isTransferWindowOpen(world);
-    twDash.textContent = transferWindowLabel(world);
+    twDash.textContent = transferWindowLabel(world, getLang());
     twDash.className = open ? "transfer-window-box open" : "transfer-window-box closed";
   }
 
@@ -2184,16 +2285,19 @@ function renderDashboard() {
       const tone = boardTone(b);
       boardEl.className = "board-box" + (tone ? " " + tone : "");
       const played = row.played || 0;
-      const warn = !b.settled && (b.sackWarnings || 0) > 0 ? ` 警告${b.sackWarnings}/3` : "";
+      const warn = !b.settled && (b.sackWarnings || 0) > 0 ? (en ? ` Warnings ${b.sackWarnings}/3` : ` 警告${b.sackWarnings}/3`) : "";
+      const boardLine = en
+        ? `Target: top ${b.targetPos} · ${b.sacked ? "Sacked" : b.settled ? (b.status === "success" || b.status === "achieved" ? "Completed" : "Missed") : b.status}`
+        : boardStatusLine(b);
       boardEl.textContent =
-        boardStatusLine(b) +
-        (b.settled || b.sacked ? "" : ` · 现第${pos}/目标${b.targetPos} · ${played}场${warn}`);
+        boardLine +
+        (b.settled || b.sacked ? "" : en ? ` · Current #${pos}/target #${b.targetPos} · ${played} played${warn}` : ` · 现第${pos}/目标${b.targetPos} · ${played}场${warn}`);
     }
   }
   $("#news-list").innerHTML = world.news
     .slice(0, 12)
     .map((n) => `<li><strong>D${n.day}</strong> ${escapeHtml(n.text)}</li>`)
-    .join("") || "<li>暂无新闻</li>";
+    .join("") || `<li>${en ? "No news" : "暂无新闻"}</li>`;
 
   // 概览信箱摘要
   ensureInbox(world);
@@ -2209,7 +2313,7 @@ function renderDashboard() {
       const lines = top
         .map(
           (m) =>
-            `<div class="dash-inbox-row"><span class="inbox-cat mini">${escapeHtml(inboxCatLabel(m.category, en ? "en" : "zh"))}</span> ${escapeHtml(m.title)}</div>`
+            `<div class="dash-inbox-row"><span class="inbox-cat mini">${escapeHtml(inboxCatLabel(m.category, en ? "en" : "zh"))}</span> ${escapeHtml(en && m.titleEn ? m.titleEn : m.title)}</div>`
         )
         .join("");
       dashIb.innerHTML = `<div class="dash-inbox-count">${en ? `${n} pending` : `${n} 封待办`}</div>${lines}`;
@@ -2217,7 +2321,6 @@ function renderDashboard() {
   }
 
   // 更衣室氛围 + 财政 + 成就
-  const en = getLang() === "en";
   ensureSquadRelations(club);
   const atm = clubAtmosphere(club);
   const atmEl = $("#dash-atmosphere");
@@ -2260,6 +2363,7 @@ function ovrClass(n) {
 
 function renderSquad() {
   const club = getUserClub(world);
+  const en = getLang() === "en";
   // 旧存档里体能可能是浮点（训练 *0.6）；展示与存档一并收成整数
   for (const p of club.players || []) {
     if (p.fitness != null && !Number.isInteger(p.fitness)) {
@@ -2299,14 +2403,14 @@ function renderSquad() {
       const lastR = s.lastRating != null ? s.lastRating : null;
       const num = p.number != null ? p.number : "—";
       const statusBadges = [
-        xi.has(p.id) ? '<span class="badge">首发</span>' : "",
+        xi.has(p.id) ? `<span class="badge">${en ? "XI" : "首发"}</span>` : "",
         p.loan ? `<span class="badge loan" title="${escapeHtml(t("contract.loanIn") || "租借")}">${escapeHtml(t("contract.loanIn") || "租借")}</span>` : "",
-        p.injured > 0 ? '<span class="badge ATT">伤</span>' : "",
+        p.injured > 0 ? `<span class="badge ATT">${en ? "Inj" : "伤"}</span>` : "",
         (p.suspendedMatches || 0) > 0
-          ? `<span class="badge ATT" title="停赛">停${p.suspendedMatches}</span>`
+          ? `<span class="badge ATT" title="${en ? "Suspended" : "停赛"}">${en ? "Sus" : "停"}${p.suspendedMatches}</span>`
           : "",
         (p.yellowsSeason || 0) >= 4 && !(p.suspendedMatches > 0)
-          ? `<span class="badge" style="background:#e6b450;color:#111" title="累计黄牌">黄${p.yellowsSeason}</span>`
+          ? `<span class="badge" style="background:#e6b450;color:#111" title="${en ? "Season yellows" : "累计黄牌"}">${en ? "Y" : "黄"}${p.yellowsSeason}</span>`
           : "",
         p._needsRenew
           ? `<span class="badge contract-urgent" title="${escapeHtml(t("contract.needsRenew") || "待续约")}">${escapeHtml(t("contract.needsRenew") || "待续")}</span>`
@@ -2320,12 +2424,12 @@ function renderSquad() {
         ? escapeHtml(t("contract.loanIn") || "租借")
         : p._needsRenew
           ? escapeHtml(t("contract.needsRenew") || "待续约")
-          : `${p.contractYears ?? "—"}年`;
+          : `${p.contractYears ?? "—"}${en ? "y" : "年"}`;
       return `<tr class="${xi.has(p.id) ? "me" : ""} ${!isAvailable(p) ? "row-unavailable" : ""} ${needsContractAttention(p) && !p.loan ? "row-contract" : ""}">
         <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${num}</span></td>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 30)} <span>${playerLinkHtml(p.id, p.name)} ${statusBadges}</span></td>
         <td>${nationLabel(p)}</td>
-        <td><span class="badge ${p.pos}">${POS_LABEL[p.pos]}</span></td>
+        <td><span class="badge ${p.pos}">${en ? p.pos : POS_LABEL[p.pos]}</span></td>
         <td>${p.age}</td>
         <td class="${ovrClass(ovr)}"><strong>${ovr}</strong></td>
         <td class="num-stat" title="${escapeHtml(t("squad.appsTitle") || "本赛季出场")}">${apps}</td>
@@ -2339,7 +2443,7 @@ function renderSquad() {
         <td class="contract-cell">${contractCell}</td>
         <td>${formatMoney(p.value)}</td>
         <td>${formatMoney(p.wage)}</td>
-        <td><button class="btn small" data-pid="${p.id}">详情</button></td>
+        <td><button class="btn small" data-pid="${p.id}">${en ? "Info" : "详情"}</button></td>
       </tr>`;
     })
     .join("");
@@ -2349,8 +2453,9 @@ function renderSquad() {
   });
 }
 
-function showPlayerModal(playerId) {
+function showPlayerModal(playerId, context = {}) {
   const club = getUserClub(world);
+  const en = getLang() === "en";
   let player = club.players.find((p) => p.id === playerId);
   let isYouth = false;
   let fromOther = null;
@@ -2375,6 +2480,12 @@ function showPlayerModal(playerId) {
   }
   if (!player) return;
 
+  const owningClub = fromOther || world.clubs.find((item) => item.id === player.clubId) || (isYouth ? club : null);
+  const nationalCode = context.nationCode === player.nationality ? context.nationCode : null;
+  const nationalNumber = nationalCode && context.squadNumber != null ? Number(context.squadNumber) : null;
+  const displayTeam = nationalCode ? nationalTeamView(nationalCode) : owningClub;
+  let displayNumber = nationalCode ? nationalNumber : player.number;
+
   const a = player.attrs;
   const isOther = !!fromOther;
   const fogRows = scoutAttrRows(player, club, {
@@ -2383,7 +2494,10 @@ function showPlayerModal(playerId) {
   });
 
   const pot = isOther
-    ? formatScoutPotFog(player, club, { ownPlayer: false })
+    ? formatScoutPotFog(player, club, {
+        ownPlayer: false,
+        lang: getLang() === "en" ? "en" : "zh",
+      })
     : player.potential != null
       ? String(player.potential)
       : "—";
@@ -2402,24 +2516,26 @@ function showPlayerModal(playerId) {
   const curAvgR = seasonAvgRating(player);
   const historyRows = [...(player.history || [])]
     .sort((a, b) => b.season - a.season)
-    .map(
-      (h) => `<tr>
+    .map((h) => {
+      const historyClub = world.clubs.find((item) => item.id === h.clubId);
+      const historyClubHtml = historyClub
+        ? clubLinkHtml(historyClub.id, clubDisplayName(historyClub))
+        : escapeHtml(h.clubName || "—");
+      return `<tr>
         <td>${h.season}</td>
-        <td>${escapeHtml(h.clubName || "—")}</td>
+        <td>${historyClubHtml}</td>
         <td>${h.apps}</td>
         <td>${isGk ? h.cleanSheets : h.goals}</td>
         <td>${isGk ? h.goalsConceded : h.assists}</td>
         <td class="rating-cell ${ratingClass(h.avgRating)}">${formatRating(h.avgRating)}</td>
-      </tr>`
-    );
+      </tr>`;
+    });
   if (season.apps || season.goals || season.assists || season.cleanSheets || season.goalsConceded) {
-    const clubName =
-      fromOther?.name ||
-      world.clubs.find((c) => c.id === player.clubId)?.name ||
-      getUserClub(world).name;
+    const currentClub = owningClub || getUserClub(world);
+    const clubName = clubDisplayName(currentClub);
     historyRows.unshift(`<tr class="me">
       <td>${world.season}*</td>
-      <td>${escapeHtml(clubName)}</td>
+      <td>${currentClub ? clubLinkHtml(currentClub.id, clubName) : escapeHtml(clubName)}</td>
       <td>${season.apps}</td>
       <td>${isGk ? season.cleanSheets : season.goals}</td>
       <td>${isGk ? season.goalsConceded : season.assists}</td>
@@ -2428,8 +2544,8 @@ function showPlayerModal(playerId) {
   }
 
   const histHead = isGk
-    ? `<th>赛季</th><th>球队</th><th>出场</th><th>零封</th><th>失球</th><th>场均</th>`
-    : `<th>赛季</th><th>球队</th><th>出场</th><th>进球</th><th>助攻</th><th>场均</th>`;
+    ? `<th>${en ? "Season" : "赛季"}</th><th>${en ? "Club" : "球队"}</th><th>${en ? "Apps" : "出场"}</th><th>${en ? "CS" : "零封"}</th><th>${en ? "GA" : "失球"}</th><th>${en ? "Avg" : "场均"}</th>`
+    : `<th>${en ? "Season" : "赛季"}</th><th>${en ? "Club" : "球队"}</th><th>${en ? "Apps" : "出场"}</th><th>${en ? "Goals" : "进球"}</th><th>${en ? "Assists" : "助攻"}</th><th>${en ? "Avg" : "场均"}</th>`;
 
   const honorHtml = (player.honors || []).length
     ? `<div class="honor-list">${player.honors
@@ -2442,47 +2558,51 @@ function showPlayerModal(playerId) {
           </div>`
         )
         .join("")}</div>`
-    : `<p class="muted" style="margin:0">暂无荣誉，赛季末金靴/助攻王/最佳阵容/冠军等会写入此处</p>`;
+    : `<p class="muted" style="margin:0">${en ? "No honours yet. End-of-season awards and titles will appear here." : "暂无荣誉，赛季末金靴/助攻王/最佳阵容/冠军等会写入此处"}</p>`;
 
-  const kitClub = fromOther || club;
-  if (kitClub) {
-    ensureKit(kitClub);
-    ensurePlayerNumber(kitClub, player);
+  if (owningClub) {
+    ensureKit(owningClub);
+    if (!nationalCode) {
+      ensurePlayerNumber(owningClub, player);
+      displayNumber = player.number;
+    }
   }
+  if (displayTeam) ensureKit(displayTeam);
   $("#modal-card")?.classList.remove("wide", "search-modal");
   $("#modal-body").innerHTML = `
     <div class="player-modal-head">
-      ${playerAvatarHtml(player, kitClub, 64)}
-      ${kitClub ? renderKitShirt(kitClub, player.number, 56) : ""}
+      ${playerAvatarHtml(player, displayTeam, 64)}
+      ${displayTeam ? renderKitShirt(displayTeam, displayNumber, 56) : ""}
       <div>
-    <h2 style="margin:0 0 0.25rem">${escapeHtml(player.name)}${player.number != null ? ` <span class="muted">#${player.number}</span>` : ""}</h2>
+    <h2 style="margin:0 0 0.25rem">${escapeHtml(player.name)}${displayNumber != null ? ` <span class="muted">#${displayNumber}</span>` : ""}</h2>
     <p class="muted">
-      <span class="badge ${player.pos}">${POS_LABEL[player.pos]}</span>
-      · ${nationLabel(player)}
-      · ${player.age} 岁 · 能力 <strong class="${isOther ? "" : ovrClass(player.ovr)}">${escapeHtml(ovrShow)}</strong>
-      · 潜力 <strong>${escapeHtml(String(pot))}</strong>
-      ${isYouth ? ' · <span class="badge MID">青训学院</span>' : player.fromYouth ? ' · <span class="badge MID">青训</span>' : ""}
-      ${fromOther ? ` · ${escapeHtml(fromOther.name)}` : ""}
+       <span class="badge ${player.pos}">${en ? player.pos : POS_LABEL[player.pos]}</span>
+       · ${nationLabel(player)}
+       · ${en ? `Age ${player.age}` : `${player.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${isOther ? "" : ovrClass(player.ovr)}">${escapeHtml(ovrShow)}</strong>
+       · ${en ? "Potential" : "潜力"} <strong>${escapeHtml(String(pot))}</strong>
+       ${isYouth ? ` · <span class="badge MID">${en ? "Academy" : "青训学院"}</span>` : player.fromYouth ? ` · <span class="badge MID">${en ? "Youth graduate" : "青训"}</span>` : ""}
+       ${owningClub ? ` · ${clubLinkHtml(owningClub.id, clubDisplayName(owningClub))}` : ""}
+       ${nationalCode ? ` · <span class="badge">${escapeHtml(en ? "National team" : "国家队")}</span>` : ""}
       ${isOther ? ` · <span class="muted">${getLang() === "en" ? "Scout fog" : "球探可见"} L${scoutFogLevel(club)}</span>` : ""}
     </p>
       </div>
     </div>
-    <p>身价 ${fromOther ? formatScoutValue(world, player) : formatMoney(player.value)} · 周薪 ${formatMoney(player.wage)} · 体能 ${Math.round(player.fitness ?? 0)}% · 士气 ${Math.round(player.morale ?? 0)}
+    <p>${en ? "Value" : "身价"} ${fromOther ? formatScoutValue(world, player) : formatMoney(player.value)} · ${en ? "Wage" : "周薪"} ${formatMoney(player.wage)} · ${en ? "Fitness" : "体能"} ${Math.round(player.fitness ?? 0)}% · ${en ? "Morale" : "士气"} ${Math.round(player.morale ?? 0)}
       ${
         (player.suspendedMatches || 0) > 0
-          ? ` · <span class="badge ATT">停赛 ${player.suspendedMatches} 场</span>`
+          ? ` · <span class="badge ATT">${en ? `Suspended ${player.suspendedMatches}` : `停赛 ${player.suspendedMatches} 场`}</span>`
           : ""
       }
       ${
         (player.yellowsSeason || 0) > 0
-          ? ` · 赛季黄牌 ${player.yellowsSeason}`
+          ? ` · ${en ? "Season yellows" : "赛季黄牌"} ${player.yellowsSeason}`
           : ""
       }
       ${
         player.loan
           ? ` · <span class="badge loan">${escapeHtml(t("contract.loanIn") || "租借")}</span>`
           : player.contractYears != null
-            ? ` · 合同 ${player.contractYears} 年`
+            ? ` · ${en ? `Contract ${player.contractYears}y` : `合同 ${player.contractYears} 年`}`
             : ""
       }
       ${player._needsRenew ? ` · <span class="badge contract-urgent">${escapeHtml(t("contract.needsRenew") || "待续约")}</span>` : ""}
@@ -2499,46 +2619,46 @@ function showPlayerModal(playerId) {
     ${!fromOther && !isYouth ? renderPlayerTalkPanel(player) : ""}
     ${!isYouth ? renderPlayerContractActions(player, fromOther) : ""}
 
-    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">本赛季（俱乐部）</h3>
-    <p class="muted" style="margin:0">出场 ${season.apps}
+    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${en ? "This season (club)" : "本赛季（俱乐部）"}</h3>
+    <p class="muted" style="margin:0">${en ? "Apps" : "出场"} ${season.apps}
       ${
         isGk
-          ? ` · 零封 ${season.cleanSheets} · 失球 ${season.goalsConceded}`
-          : ` · 进球 ${season.goals} · 助攻 ${season.assists}`
+          ? ` · ${en ? "Clean sheets" : "零封"} ${season.cleanSheets} · ${en ? "Goals conceded" : "失球"} ${season.goalsConceded}`
+          : ` · ${en ? "Goals" : "进球"} ${season.goals} · ${en ? "Assists" : "助攻"} ${season.assists}`
       }
-      · 场均 <strong class="${ratingClass(curAvgR)}">${formatRating(curAvgR)}</strong>
+      · ${en ? "Average" : "场均"} <strong class="${ratingClass(curAvgR)}">${formatRating(curAvgR)}</strong>
       ${
         season.lastRating != null
-          ? ` · 最近 <strong class="${ratingClass(season.lastRating)}">${formatRating(season.lastRating)}</strong>`
+          ? ` · ${en ? "Latest" : "最近"} <strong class="${ratingClass(season.lastRating)}">${formatRating(season.lastRating)}</strong>`
           : ""
       }
     </p>
 
-    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">生涯总计（俱乐部）</h3>
-    <p class="muted" style="margin:0">出场 ${career.apps}
+    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${en ? "Career total (club)" : "生涯总计（俱乐部）"}</h3>
+    <p class="muted" style="margin:0">${en ? "Apps" : "出场"} ${career.apps}
       ${
         isGk
-          ? ` · 零封 ${career.cleanSheets} · 失球 ${career.goalsConceded}`
-          : ` · 进球 ${career.goals} · 助攻 ${career.assists}`
+          ? ` · ${en ? "Clean sheets" : "零封"} ${career.cleanSheets} · ${en ? "Goals conceded" : "失球"} ${career.goalsConceded}`
+          : ` · ${en ? "Goals" : "进球"} ${career.goals} · ${en ? "Assists" : "助攻"} ${career.assists}`
       }
-      <span style="opacity:0.7">（含本赛季）</span>
+      <span style="opacity:0.7">${en ? "(including this season)" : "（含本赛季）"}</span>
     </p>
 
-    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">国家队</h3>
+    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${en ? "National team" : "国家队"}</h3>
     <p class="muted" style="margin:0">
-      ${nationLabel(player)} · 出场（Caps） <strong>${intl.caps || 0}</strong>
+      ${nationLabel(player)} · ${en ? "Caps" : "出场（Caps）"} <strong>${intl.caps || 0}</strong>
       ${
         isGk
-          ? ` · 零封 ${intl.cleanSheets || 0} · 失球 ${intl.goalsConceded || 0}`
-          : ` · 进球 ${intl.goals || 0} · 助攻 ${intl.assists || 0}`
+          ? ` · ${en ? "Clean sheets" : "零封"} ${intl.cleanSheets || 0} · ${en ? "Goals conceded" : "失球"} ${intl.goalsConceded || 0}`
+          : ` · ${en ? "Goals" : "进球"} ${intl.goals || 0} · ${en ? "Assists" : "助攻"} ${intl.assists || 0}`
       }
     </p>
-    <p class="hint" style="margin:0.25rem 0 0">约每 30 天国际比赛日，优秀球员可能入选并累积数据</p>
+    <p class="hint" style="margin:0.25rem 0 0">${en ? "International breaks occur about every 30 days; selected players accumulate international stats." : "约每 30 天国际比赛日，优秀球员可能入选并累积数据"}</p>
 
-    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">个人荣誉</h3>
+    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${en ? "Honours" : "个人荣誉"}</h3>
     ${honorHtml}
 
-    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">分赛季历史</h3>
+    <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${en ? "Season history" : "分赛季历史"}</h3>
     <div class="table-wrap">
       <table style="font-size:0.85rem">
         <thead><tr>${histHead}</tr></thead>
@@ -2546,12 +2666,12 @@ function showPlayerModal(playerId) {
           ${
             historyRows.length
               ? historyRows.join("")
-              : `<tr><td colspan="5" class="muted">暂无历史，完赛并进入下一赛季后归档</td></tr>`
+              : `<tr><td colspan="5" class="muted">${en ? "No archived history yet" : "暂无历史，完赛并进入下一赛季后归档"}</td></tr>`
           }
         </tbody>
       </table>
     </div>
-    <p class="hint" style="margin-top:0.35rem">* 表示当前赛季（尚未归档）</p>
+    <p class="hint" style="margin-top:0.35rem">${en ? "* current season (not archived yet)" : "* 表示当前赛季（尚未归档）"}</p>
 
     <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${isOther ? (getLang() === "en" ? "Attributes (scout)" : "属性（球探可见）") : getLang() === "en" ? "Attributes" : "属性"}</h3>
     <div class="attrs${isOther ? " attrs-fogged" : ""}">
@@ -2586,7 +2706,7 @@ function renderPlayerTalkPanel(player) {
   const cooling = cd > (world.day || 0);
   return `<div class="player-talk-panel">
     <h3 style="margin:0.85rem 0 0.35rem;font-size:0.95rem">${en ? "Manager talk" : "主帅约谈"}</h3>
-    <p class="muted" style="margin:0 0 0.4rem">${en ? "Relation" : "关系"}：
+    <p class="muted" style="margin:0 0 0.4rem">${en ? "Relation: " : "关系："}
       <strong class="rel-${relationTone(player.relation)}">${escapeHtml(relationLabel(player.relation, en ? "en" : "zh"))}</strong>
       ${cooling ? ` · ${en ? "Cooldown until D" : "冷却至第"}${cd}${en ? "" : " 天"}` : ""}
     </p>
@@ -2708,7 +2828,7 @@ function doRenewPlayer(playerId) {
     return;
   }
   const res = renewUserPlayer(world, playerId, { years });
-  toast(res.msg);
+  toast(getLang() === "en" ? (res.ok ? `${final.player.name} renewed` : "Contract renewal failed") : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
@@ -2731,7 +2851,7 @@ function doTerminatePlayer(playerId) {
     return;
   }
   const res = terminateUserPlayer(world, playerId);
-  toast(res.msg);
+  toast(getLang() === "en" ? (res.ok ? `${prev.player.name} released` : "Player release failed") : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
@@ -2763,7 +2883,7 @@ function doLoanOut(playerId) {
     return;
   }
   const res = loanOutPlayer(world, playerId, { term });
-  toast(res.msg);
+  toast(en ? (res.ok ? `${prev.player.name} loaned out` : "Loan move failed") : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
@@ -2795,7 +2915,7 @@ function doLoanIn(playerId, fromClubId) {
     return;
   }
   const res = loanInPlayer(world, playerId, fromClubId, { term });
-  toast(res.msg);
+  toast(en ? (res.ok ? `${prev.player.name} joined on loan` : "Loan move failed") : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
@@ -2813,7 +2933,7 @@ function doRecallLoan(playerId) {
     return;
   }
   const res = recallLoan(world, playerId);
-  toast(res.msg);
+  toast(getLang() === "en" ? (res.ok ? "Player recalled" : "Recall failed") : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
@@ -2823,6 +2943,7 @@ function doRecallLoan(playerId) {
 function renderFacilities() {
   const club = getUserClub(world);
   if (!club) return;
+  const en = getLang() === "en";
   ensureFacilities(club);
   const grid = $("#facilities-grid");
   if (!grid) return;
@@ -2833,11 +2954,11 @@ function renderFacilities() {
       icon: "🏟️",
       info: stadiumInfo(club),
       effect: (i) =>
-        `容量约 ${i.capacity.toLocaleString()} · 主场收入约 ${formatMoney(i.matchday)}/场 · 周维护 ${formatMoney(i.upkeep)}`,
+        en ? `Capacity ~${i.capacity.toLocaleString()} · Matchday ~${formatMoney(i.matchday)} · Weekly upkeep ${formatMoney(i.upkeep)}` : `容量约 ${i.capacity.toLocaleString()} · 主场收入约 ${formatMoney(i.matchday)}/场 · 周维护 ${formatMoney(i.upkeep)}`,
       nextEffect: (lv) => {
         const n = STADIUM_LEVELS[lv];
         return n
-          ? `→ 容量 ${n.capacity.toLocaleString()} · 收入约 ${formatMoney(n.matchday)}`
+          ? en ? `→ Capacity ${n.capacity.toLocaleString()} · Income ~${formatMoney(n.matchday)}` : `→ 容量 ${n.capacity.toLocaleString()} · 收入约 ${formatMoney(n.matchday)}`
           : "";
       },
     },
@@ -2846,10 +2967,10 @@ function renderFacilities() {
       icon: "🏋️",
       info: trainingFacilityInfo(club),
       effect: (i) =>
-        `成长+${Math.round((i.growth || 0) * 1000) / 10}% · 恢复+${i.heal} · 伤病×${i.injuryMod} · 周维护 ${formatMoney(i.upkeep)}`,
+        en ? `Growth +${Math.round((i.growth || 0) * 1000) / 10}% · Recovery +${i.heal} · Injury ×${i.injuryMod} · Weekly upkeep ${formatMoney(i.upkeep)}` : `成长+${Math.round((i.growth || 0) * 1000) / 10}% · 恢复+${i.heal} · 伤病×${i.injuryMod} · 周维护 ${formatMoney(i.upkeep)}`,
       nextEffect: (lv) => {
         const n = TRAINING_FACILITY_LEVELS[lv];
-        return n ? `→ 成长+${Math.round(n.growth * 1000) / 10}% · 恢复+${n.heal}` : "";
+        return n ? (en ? `→ Growth +${Math.round(n.growth * 1000) / 10}% · Recovery +${n.heal}` : `→ 成长+${Math.round(n.growth * 1000) / 10}% · 恢复+${n.heal}`) : "";
       },
     },
     {
@@ -2857,10 +2978,10 @@ function renderFacilities() {
       icon: "🌱",
       info: youthFacilityInfo(club),
       effect: (i) =>
-        `容量 ${i.capacity} · 招生 ${i.intake}/期 · 成长 ${i.growth} · 周维护 ${formatMoney(i.upkeep)}`,
+        en ? `Capacity ${i.capacity} · Intake ${i.intake} · Growth ${i.growth} · Weekly upkeep ${formatMoney(i.upkeep)}` : `容量 ${i.capacity} · 招生 ${i.intake}/期 · 成长 ${i.growth} · 周维护 ${formatMoney(i.upkeep)}`,
       nextEffect: (lv) => {
         const n = YOUTH_LEVELS[lv];
-        return n ? `→ ${n.name} · 容量 ${n.capacity} · 招生 ${n.intake}` : "";
+        return n ? (en ? `→ Youth academy Lv.${lv} · Capacity ${n.capacity} · Intake ${n.intake}` : `→ ${n.name} · 容量 ${n.capacity} · 招生 ${n.intake}`) : "";
       },
     },
   ];
@@ -2880,12 +3001,12 @@ function renderFacilities() {
     .map(({ kind, icon, info, effect, nextEffect }) => {
       const lv = info.level;
       const proj = getProject(club, kind);
-      const label = FACILITY_LABELS[kind] || kind;
+      const label = en ? ({ stadium: "Stadium", training: "Training facilities", youth: "Youth facilities" }[kind] || kind) : FACILITY_LABELS[kind] || kind;
       let action = "";
       if (proj) {
         const left = Math.max(0, proj.finishDay - world.day);
         action = `<button class="btn small" disabled>${t("fac.building", { n: left })}</button>
-          <p class="hint" style="margin:0.4rem 0 0">目标 Lv.${proj.to} ${escapeHtml(proj.name)}</p>`;
+          <p class="hint" style="margin:0.4rem 0 0">${en ? "Target" : "目标"} Lv.${proj.to}${en ? "" : ` ${escapeHtml(proj.name)}`}</p>`;
       } else if (lv >= FACILITY_MAX) {
         action = `<button class="btn small" disabled>${t("fac.maxed")}</button>`;
       } else {
@@ -2903,7 +3024,7 @@ function renderFacilities() {
       }
       return `<div class="facility-card">
         <div class="facility-title">${icon} ${label}</div>
-        <div class="facility-level">Lv.${lv} · ${escapeHtml(info.name)}</div>
+        <div class="facility-level">Lv.${lv}${en ? "" : ` · ${escapeHtml(info.name)}`}</div>
         <p class="facility-effect">${escapeHtml(effect(info))}</p>
         ${action}
       </div>`;
@@ -2912,14 +3033,15 @@ function renderFacilities() {
 
   const hint = $("#facilities-hint");
   if (hint) {
-    hint.textContent =
-      facilitySummaryLine(club) +
-      " · 主场比赛自动收门票；训练等级影响日常训练与伤病。";
+    hint.textContent = en
+      ? `Stadium Lv.${club.facilities.stadium} · Training Lv.${club.facilities.training} · Youth Lv.${club.facilities.youth} · Home matches generate gate income; training level affects development and injuries.`
+      : facilitySummaryLine(club) + " · 主场比赛自动收门票；训练等级影响日常训练与伤病。";
   }
 }
 
 function renderYouth() {
   const club = getUserClub(world);
+  const en = getLang() === "en";
   ensureFacilities(club);
   const ya = ensureYouthAcademy(club);
   // 与设施同步
@@ -2934,12 +3056,12 @@ function renderYouth() {
   const proj = getProject(club, "youth");
 
   $("#youth-info").innerHTML = `
-    <div><strong>Lv.${ya.level}</strong> ${cfg.name}</div>
-    <div class="muted">容量 ${ya.players.length}/${cfg.capacity} · 每期招生 ${cfg.intake} 人</div>
-    <div class="muted">周维护费 ${formatMoney(cfg.upkeep)} · 下次招生约 ${daysLeft} 天</div>
+    <div><strong>Lv.${ya.level}</strong> ${en ? "Youth academy" : cfg.name}</div>
+    <div class="muted">${en ? `Capacity ${ya.players.length}/${cfg.capacity} · Intake ${cfg.intake}` : `容量 ${ya.players.length}/${cfg.capacity} · 每期招生 ${cfg.intake} 人`}</div>
+    <div class="muted">${en ? `Weekly upkeep ${formatMoney(cfg.upkeep)} · Next intake in ~${daysLeft} days` : `周维护费 ${formatMoney(cfg.upkeep)} · 下次招生约 ${daysLeft} 天`}</div>
     ${
       building
-        ? `<div class="muted">🚧 升级施工中 · 约第 ${proj.finishDay} 天完工</div>`
+        ? `<div class="muted">🚧 ${en ? `Upgrade in progress · completes around Day ${proj.finishDay}` : `升级施工中 · 约第 ${proj.finishDay} 天完工`}</div>`
         : ""
     }
   `;
@@ -2947,17 +3069,17 @@ function renderYouth() {
   const upBtn = $("#btn-youth-upgrade");
   if (ya.level >= 5) {
     upBtn.disabled = true;
-    upBtn.textContent = "已满级";
-    $("#youth-hint").textContent = "学院已是世界级，专心培养好苗子吧。也可在「设施」页查看球场与训练。";
+    upBtn.textContent = en ? "Max level" : "已满级";
+    $("#youth-hint").textContent = en ? "The academy is fully upgraded. Stadium and training upgrades are available on Facilities." : "学院已是世界级，专心培养好苗子吧。也可在「设施」页查看球场与训练。";
   } else if (building) {
     upBtn.disabled = true;
     const left = Math.max(0, proj.finishDay - world.day);
-    upBtn.textContent = `施工中（${left} 天）`;
-    $("#youth-hint").textContent = `正在升级至 Lv.${proj.to} ${proj.name}，完工后自动生效。`;
+    upBtn.textContent = en ? `Building (${left}d)` : `施工中（${left} 天）`;
+    $("#youth-hint").textContent = en ? `Upgrading to Lv.${proj.to}; activates automatically when complete.` : `正在升级至 Lv.${proj.to} ${proj.name}，完工后自动生效。`;
   } else {
     upBtn.disabled = false;
-    upBtn.textContent = `升级至 Lv.${nextLv}（${formatMoney(nextCost)} · 有工期）`;
-    $("#youth-hint").textContent = `下级：${YOUTH_LEVELS[nextLv].name} · 容量 ${YOUTH_LEVELS[nextLv].capacity} · 成长更快（「设施」页可一并管理球场/训练）`;
+    upBtn.textContent = en ? `Upgrade to Lv.${nextLv} (${formatMoney(nextCost)} · build time)` : `升级至 Lv.${nextLv}（${formatMoney(nextCost)} · 有工期）`;
+    $("#youth-hint").textContent = en ? `Next: capacity ${YOUTH_LEVELS[nextLv].capacity}, faster growth. Manage all facilities on the Facilities tab.` : `下级：${YOUTH_LEVELS[nextLv].name} · 容量 ${YOUTH_LEVELS[nextLv].capacity} · 成长更快（「设施」页可一并管理球场/训练）`;
   }
 
   $("#youth-count").textContent = t("youth.count", { n: ya.players.length });
@@ -2977,20 +3099,20 @@ function renderYouth() {
             <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${num}</span></td>
             <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}</span></td>
             <td>${nationLabel(p)}</td>
-            <td><span class="badge ${p.pos}">${POS_LABEL[p.pos]}</span></td>
+            <td><span class="badge ${p.pos}">${en ? p.pos : POS_LABEL[p.pos]}</span></td>
             <td>${p.age}</td>
             <td class="${ovrClass(p.ovr)}"><strong>${p.ovr}</strong></td>
             <td class="${potClass}"><strong>${pot}</strong></td>
             <td>${formatMoney(p.wage)}</td>
             <td>
-              <button class="btn small" data-player-link="${p.id}">详情</button>
-              <button class="btn small primary" data-promote="${p.id}">提拔</button>
-              <button class="btn small danger" data-release="${p.id}">释放</button>
+              <button class="btn small" data-player-link="${p.id}">${en ? "Info" : "详情"}</button>
+              <button class="btn small primary" data-promote="${p.id}">${en ? "Promote" : "提拔"}</button>
+              <button class="btn small danger" data-release="${p.id}">${en ? "Release" : "释放"}</button>
             </td>
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="9" class="muted">暂无青训球员，推进日程等待招生</td></tr>`;
+    : `<tr><td colspan="9" class="muted">${en ? "No academy players; advance the calendar for the next intake" : "暂无青训球员，推进日程等待招生"}</td></tr>`;
 
   tbody.querySelectorAll("[data-promote]").forEach((btn) => {
     btn.onclick = () => {
@@ -3004,7 +3126,7 @@ function renderYouth() {
   });
   tbody.querySelectorAll("[data-release]").forEach((btn) => {
     btn.onclick = () => {
-      if (!confirm("确认释放该青训球员？")) return;
+      if (!confirm(en ? "Release this academy player?" : "确认释放该青训球员？")) return;
       const res = releaseYouth(world, world.userClubId, btn.dataset.release);
       toast(res.msg);
       if (res.ok) {
@@ -3150,8 +3272,8 @@ function afterLineupChange(club, res) {
   if (res?.outOfPos) {
     toast(
       t("tac.outOfPos", {
-        pos: POS_LABEL[res.playerPos] || res.playerPos,
-        slot: POS_LABEL[res.slotPos] || res.slotPos,
+        pos: positionLabel(res.playerPos),
+        slot: positionLabel(res.slotPos),
       })
     );
   }
@@ -3483,7 +3605,7 @@ function renderTactics() {
       const isCore = p && p.id === coreId;
       const full = p
         ? `${shirtNo != null ? `#${shirtNo} ` : ""}${p.name} · ${roleLabel(roleId, en ? "en" : "zh")}${isCore ? (en ? " · CORE" : " · 核心") : ""}`
-        : `${POS_LABEL[slot.pos] || slot.pos}`;
+        : positionLabel(slot.pos);
       const badge =
         shirtNo != null
           ? `<span class="pitch-num" style="background:${kitBg};color:${kitNc};border-color:${kit.primary || "#fff"}">${shirtNo}</span>`
@@ -3491,7 +3613,7 @@ function renderTactics() {
       const nameText = shirtNo != null ? `#${shirtNo} ${label}` : label;
       const nameHtml = p
         ? `<button type="button" class="player-link pitch-player-link" data-player-link="${escapeHtml(p.id)}">${escapeHtml(nameText)}</button>`
-        : `<span class="pitch-empty">${escapeHtml(POS_LABEL[slot.pos] || slot.pos)}</span>`;
+        : `<span class="pitch-empty">${escapeHtml(positionLabel(slot.pos))}</span>`;
       const coreBtn = p
         ? `<button type="button" class="tac-core-btn${isCore ? " is-core" : ""}" data-core-id="${escapeHtml(p.id)}" title="${escapeHtml(
             en ? "Set as core (talisman)" : "设为核心球员"
@@ -3551,7 +3673,7 @@ function renderTactics() {
               ${av}
               <div class="tac-chip-meta">
                 <strong>${num} ${escapeHtml(playerDisplaySurname(p.name, p.nationality))}</strong>
-                <span><i class="badge ${p.pos}">${POS_LABEL[p.pos] || p.pos}</i> ${status}</span>
+                <span><i class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</i> ${status}</span>
               </div>
               <button type="button" class="btn small ghost tac-chip-info" data-player-link="${escapeHtml(p.id)}" title="${escapeHtml(getLang() === "en" ? "Profile" : "资料")}">ℹ</button>
             </div>`;
@@ -3656,9 +3778,18 @@ function collectGlobalSearchResults(query) {
   const youth = [];
 
   for (const club of world.clubs || []) {
-    const clubScore = globalSearchScore([club.name, club.short], query);
+    const clubScore = globalSearchScore(
+      [clubDisplayName(club), club.nameZh, club.nameEn, club.short],
+      query
+    );
     if (Number.isFinite(clubScore)) {
-      clubs.push({ type: "club", id: club.id, label: club.name, club, score: clubScore });
+      clubs.push({
+        type: "club",
+        id: club.id,
+        label: clubDisplayName(club),
+        club,
+        score: clubScore,
+      });
     }
     for (const player of club.players || []) {
       const score = globalSearchScore([player.name, playerDisplaySurname(player)], query);
@@ -3720,12 +3851,12 @@ function globalPlayerSearchRow(item, { academy = false } = {}) {
     ? String(player.ovr ?? playerOverall(player))
     : formatScoutOvrFog(player, getUserClub(world), { ownPlayer: false });
   const age = getLang() === "en" ? `Age ${player.age}` : `${player.age} 岁`;
-  const source = academy ? t("search.youth") : club.name;
+  const source = academy ? t("search.youth") : clubDisplayName(club);
   return `<button type="button" class="global-search-result" data-player-link="${escapeHtml(player.id)}">
     ${playerAvatarHtml(player, club, 34)}
     <span class="global-search-copy">
       <strong>${escapeHtml(player.name)}</strong>
-      <span>${escapeHtml(source)} · ${escapeHtml(POS_LABEL[player.pos] || player.pos)} · ${escapeHtml(age)}</span>
+      <span>${escapeHtml(source)} · ${escapeHtml(positionLabel(player.pos))} · ${escapeHtml(age)}</span>
     </span>
     <span class="global-search-rating">${escapeHtml(t("th.ovr"))} ${escapeHtml(ovr)}</span>
   </button>`;
@@ -3739,7 +3870,7 @@ function globalClubSearchRow(item) {
   return `<button type="button" class="global-search-result" data-club-link="${escapeHtml(club.id)}">
     <span class="kit-chip global-search-club-kit" style="${kitBadgeStyle(club)}"></span>
     <span class="global-search-copy">
-      <strong>${escapeHtml(club.name)}</strong>
+      <strong>${escapeHtml(clubDisplayName(club))}</strong>
       <span>${escapeHtml(divName)}${club.short ? ` · ${escapeHtml(club.short)}` : ""}</span>
     </span>
   </button>`;
@@ -3795,14 +3926,20 @@ function openGlobalSearch() {
 }
 
 function clubLinkHtml(clubId, label, extraClass = "") {
-  const name = label ?? world.clubs.find((c) => c.id === clubId)?.name ?? clubId;
+  const club = world.clubs.find((c) => c.id === clubId);
+  const defaultName =
+    label == null || label === club?.name || label === club?.nameZh || label === club?.nameEn;
+  const name = defaultName ? clubDisplayName(club) : label;
   return `<button type="button" class="club-link ${extraClass}" data-club-link="${escapeHtml(clubId)}">${escapeHtml(name)}</button>`;
 }
 
 /** 可点击球员名 → showPlayerModal（全局 data-player-link 委托） */
-function playerLinkHtml(playerId, label, extraClass = "") {
+function playerLinkHtml(playerId, label, extraClass = "", context = null) {
   if (!playerId) return escapeHtml(label ?? "—");
-  return `<button type="button" class="player-link ${extraClass}" data-player-link="${escapeHtml(playerId)}">${escapeHtml(label ?? "?")}</button>`;
+  const nationAttrs = context?.nationCode
+    ? ` data-player-nation="${escapeHtml(context.nationCode)}"${context.squadNumber != null ? ` data-player-number="${Number(context.squadNumber)}"` : ""}`
+    : "";
+  return `<button type="button" class="player-link ${extraClass}" data-player-link="${escapeHtml(playerId)}"${nationAttrs}>${escapeHtml(label ?? "?")}</button>`;
 }
 
 function formatFormHtml(form) {
@@ -3852,7 +3989,9 @@ function renderClubs() {
   if (q) {
     clubs = clubs.filter(
       (c) =>
-        c.name.toLowerCase().includes(q) ||
+        clubDisplayName(c).toLowerCase().includes(q) ||
+        (c.nameZh || "").toLowerCase().includes(q) ||
+        (c.nameEn || "").toLowerCase().includes(q) ||
         (c.short || "").toLowerCase().includes(q)
     );
   }
@@ -3876,7 +4015,7 @@ function renderClubs() {
           return `<tr class="${me ? "me" : ""}">
             <td>
               <span class="kit-chip" style="${kitBadgeStyle(c)}"></span>
-              ${clubLinkHtml(c.id, c.name)}${me ? " ★" : ""}
+              ${clubLinkHtml(c.id, clubDisplayName(c))}${me ? " ★" : ""}
             </td>
             <td>${escapeHtml(divName)}</td>
             <td>${info ? info.rank : "—"}</td>
@@ -3951,11 +4090,11 @@ function showClubModal(clubId) {
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 26)}
           ${playerLinkHtml(p.id, p.name)}
         </td>
-        <td><span class="badge ${p.pos}">${POS_LABEL[p.pos]}</span></td>
+        <td><span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span></td>
         <td>${p.age}</td>
         <td class="${ovrClass(p.ovr)}"><strong>${p.ovr}</strong></td>
-        <td>${isGk ? s.cleanSheets : s.goals}</td>
-        <td>${isGk ? s.goalsConceded : s.assists}</td>
+        <td title="${escapeHtml(isGk ? t("th.cs") : t("th.goals"))}">${isGk ? s.cleanSheets : s.goals}</td>
+        <td title="${escapeHtml(isGk ? t("th.ga") : t("th.assists"))}">${isGk ? s.goalsConceded : s.assists}</td>
       </tr>`;
     })
     .join("");
@@ -3980,7 +4119,7 @@ function showClubModal(clubId) {
       <span class="kit-chip large" style="${kitBadgeStyle(club)}"></span>
       ${renderKitShirt(club, null, 52)}
       <div>
-        <h2 style="margin:0 0 0.25rem">${escapeHtml(club.name)}${me ? " ★" : ""}</h2>
+        <h2 style="margin:0 0 0.25rem">${escapeHtml(clubDisplayName(club))}${me ? " ★" : ""}</h2>
         <p class="muted" style="margin:0">
           ${escapeHtml(divName)}
           ${rank ? ` · ${t("clubs.rank", { n: rank })}` : ""}
@@ -4007,7 +4146,8 @@ function showClubModal(clubId) {
               <tr>
                 <th>#</th><th>${escapeHtml(t("th.name"))}</th><th>${escapeHtml(t("th.pos"))}</th>
                 <th>${escapeHtml(t("th.age"))}</th><th>${escapeHtml(t("th.ovr"))}</th>
-                <th>${escapeHtml(t("th.goals"))}</th><th>${escapeHtml(t("th.assists"))}</th>
+                <th title="${escapeHtml(t("th.goalsCsTitle"))}">${escapeHtml(t("th.goalsCs"))}</th>
+                <th title="${escapeHtml(t("th.assistsGaTitle"))}">${escapeHtml(t("th.assistsGa"))}</th>
               </tr>
             </thead>
             <tbody>
@@ -4102,8 +4242,8 @@ function renderTable() {
           const me = r.id === world.userClubId;
           const rank = i + 1;
           let zone = "";
-          if (upN && rank <= upN) zone = ' <span class="badge MID">升级区</span>';
-          if (downN && rank > n - downN) zone = ' <span class="badge ATT">降级区</span>';
+          if (upN && rank <= upN) zone = ` <span class="badge MID">${en ? "Promotion" : "升级区"}</span>`;
+          if (downN && rank > n - downN) zone = ` <span class="badge ATT">${en ? "Relegation" : "降级区"}</span>`;
           return `<tr class="${me ? "me" : ""}">
             <td>${rank}</td>
             <td>${clubLinkHtml(r.id, r.name)}${me ? " ★" : ""}${zone}</td>
@@ -4118,12 +4258,13 @@ function renderTable() {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="10" class="muted">该级别暂无球队（请开新档体验完整三级联赛）</td></tr>`;
+    : `<tr><td colspan="10" class="muted">${en ? "No clubs in this division. Start a new save to use the complete league structure." : "该级别暂无球队（请开新档体验完整三级联赛）"}</td></tr>`;
 }
 
 function renderStats() {
   const { goals, assists, keepers, ratings } = getStatLeaders(world);
   const uid = world.userClubId;
+  const en = getLang() === "en";
 
   const goalsBody = $("#stats-goals tbody");
   goalsBody.innerHTML = goals.length
@@ -4143,7 +4284,7 @@ function renderStats() {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="7" class="muted">暂无进球数据，踢完比赛后更新</td></tr>`;
+    : `<tr><td colspan="7" class="muted">${en ? "No goals yet. This table updates after matches." : "暂无进球数据，踢完比赛后更新"}</td></tr>`;
 
   const assistsBody = $("#stats-assists tbody");
   assistsBody.innerHTML = assists.length
@@ -4163,7 +4304,7 @@ function renderStats() {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="7" class="muted">暂无助攻数据，踢完比赛后更新</td></tr>`;
+    : `<tr><td colspan="7" class="muted">${en ? "No assists yet. This table updates after matches." : "暂无助攻数据，踢完比赛后更新"}</td></tr>`;
 
   const ratingsBody = $("#stats-ratings tbody");
   if (ratingsBody) {
@@ -4181,7 +4322,7 @@ function renderStats() {
           </tr>`;
           })
           .join("")
-      : `<tr><td colspan="6" class="muted">至少 3 场出场后显示评分榜</td></tr>`;
+      : `<tr><td colspan="6" class="muted">${en ? "The ratings table appears after at least three appearances." : "至少 3 场出场后显示评分榜"}</td></tr>`;
   }
 
   const keepersBody = $("#stats-keepers tbody");
@@ -4203,23 +4344,28 @@ function renderStats() {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="8" class="muted">暂无门将数据，踢完比赛后更新</td></tr>`;
+    : `<tr><td colspan="8" class="muted">${en ? "No goalkeeper data yet. This table updates after matches." : "暂无门将数据，踢完比赛后更新"}</td></tr>`;
 }
 
 function openBuyNegotiator(playerId, fromClubId) {
+  const en = getLang() === "en";
   const deal = previewBuyDeal(world, playerId, fromClubId, 3, 1.1);
   if (!deal) {
-    toast("无法预览该交易");
+    toast(en ? "Unable to preview this deal" : "无法预览该交易");
     return;
   }
   const years = prompt(
-    `${deal.player.name}\n球探估值约 ${formatMoney(deal.price)}\n合同年限（1–5，默认 3）：`,
+    en
+      ? `${deal.player.name}\nScout estimate ${formatMoney(deal.price)}\nContract length (1–5, default 3):`
+      : `${deal.player.name}\n球探估值约 ${formatMoney(deal.price)}\n合同年限（1–5，默认 3）：`,
     "3"
   );
   if (years == null) return;
   const y = Math.max(1, Math.min(5, parseInt(years, 10) || 3));
   const wageIn = prompt(
-    `周薪倍率（0.95–1.4，默认 1.1；过低可能被拒）：\n预估周薪约 ${formatMoney(deal.newWage)}`,
+    en
+      ? `Wage multiplier (0.95–1.4, default 1.1; a low offer may be rejected):\nEstimated wage ${formatMoney(deal.newWage)}`
+      : `周薪倍率（0.95–1.4，默认 1.1；过低可能被拒）：\n预估周薪约 ${formatMoney(deal.newWage)}`,
     "1.1"
   );
   if (wageIn == null) return;
@@ -4227,13 +4373,15 @@ function openBuyNegotiator(playerId, fromClubId) {
   const finalDeal = previewBuyDeal(world, playerId, fromClubId, y, wm);
   if (
     !confirm(
-      `确认签下 ${finalDeal.player.name}？\n转会费 ${formatMoney(finalDeal.price)}\n签约奖 ${formatMoney(finalDeal.signingBonus)}\n${y} 年 · 周薪 ${formatMoney(finalDeal.newWage)}\n合计约 ${formatMoney(finalDeal.total)}`
+      en
+        ? `Sign ${finalDeal.player.name}?\nFee ${formatMoney(finalDeal.price)}\nSigning bonus ${formatMoney(finalDeal.signingBonus)}\n${y} years · wage ${formatMoney(finalDeal.newWage)}\nTotal about ${formatMoney(finalDeal.total)}`
+        : `确认签下 ${finalDeal.player.name}？\n转会费 ${formatMoney(finalDeal.price)}\n签约奖 ${formatMoney(finalDeal.signingBonus)}\n${y} 年 · 周薪 ${formatMoney(finalDeal.newWage)}\n合计约 ${formatMoney(finalDeal.total)}`
     )
   ) {
     return;
   }
   const res = buyPlayer(world, playerId, fromClubId, { years: y, wageMult: wm });
-  toast(res.msg);
+  toast(en ? (res.ok ? `${finalDeal.player.name} signed` : "Transfer failed") : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
@@ -4245,7 +4393,7 @@ function renderTransfer() {
   const open = isTransferWindowOpen(world);
   const statusEl = $("#transfer-window-status");
   if (statusEl) {
-    statusEl.textContent = transferWindowLabel(world);
+    statusEl.textContent = transferWindowLabel(world, getLang());
     statusEl.className = open ? "transfer-window-box open" : "transfer-window-box closed";
   }
 
@@ -4289,7 +4437,7 @@ function renderTransfer() {
           if (p) {
             rows.push(
               `<div class="scout-watch-row">${playerAvatarHtml(p, c, 26)} ${playerLinkHtml(p.id, p.name)}
-                <span class="badge ${p.pos}">${POS_LABEL[p.pos] || p.pos}</span>
+                <span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span>
                 <span class="muted">${escapeHtml(c.short || c.name)} · ${formatScoutOvr(world, p)} · ${formatScoutValue(world, p)}</span>
               </div>`
             );
@@ -4308,29 +4456,29 @@ function renderTransfer() {
   if (poachEl) {
     const bids = pendingPoachBids(world);
     if (!bids.length) {
-      poachEl.innerHTML = `<p class="muted" style="margin:0">暂无来自其他俱乐部的报价</p>`;
+      poachEl.innerHTML = `<p class="muted" style="margin:0">${enTr ? "No offers from other clubs." : "暂无来自其他俱乐部的报价"}</p>`;
     } else {
       poachEl.innerHTML = bids
         .map(
           (b) => `<div class="poach-row">
           <div>
-            <strong>${escapeHtml(b.buyerName)}</strong> 报价
-            <strong>${formatMoney(b.fee)}</strong> 求购
+            <strong>${escapeHtml(clubNameById(b.buyerId, b.buyerName))}</strong> ${enTr ? "offers" : "报价"}
+            <strong>${formatMoney(b.fee)}</strong> ${enTr ? "for" : "求购"}
             <strong>${playerLinkHtml(b.playerId, b.playerName)}</strong>
-            <span class="muted">（${b.pos} · ${b.ovr} · 剩 ${Math.max(0, b.expiresDay - world.day)} 天）</span>
+            <span class="muted">${enTr ? "(" : "（"}${escapeHtml(positionLabel(b.pos))} · ${b.ovr} · ${enTr ? `${Math.max(0, b.expiresDay - world.day)} days left` : `剩 ${Math.max(0, b.expiresDay - world.day)} 天`}${enTr ? ")" : "）"}</span>
           </div>
           <div class="poach-actions">
-            <button class="btn small primary" data-poach-accept="${b.id}" ${!open ? "disabled" : ""}>接受</button>
-            <button class="btn small" data-poach-reject="${b.id}">拒绝</button>
+            <button class="btn small primary" data-poach-accept="${b.id}" ${!open ? "disabled" : ""}>${enTr ? "Accept" : "接受"}</button>
+            <button class="btn small" data-poach-reject="${b.id}">${enTr ? "Reject" : "拒绝"}</button>
           </div>
         </div>`
         )
         .join("");
       poachEl.querySelectorAll("[data-poach-accept]").forEach((btn) => {
         btn.onclick = () => {
-          if (!confirm("确认接受报价并放走球员？")) return;
+          if (!confirm(enTr ? "Accept the offer and sell this player?" : "确认接受报价并放走球员？")) return;
           const res = acceptPoachBid(world, btn.dataset.poachAccept);
-          toast(res.msg);
+          toast(enTr ? (res.ok ? "Offer accepted" : "Unable to accept offer") : res.msg);
           if (res.ok) {
             saveGame(world);
             refreshAll();
@@ -4340,7 +4488,7 @@ function renderTransfer() {
       poachEl.querySelectorAll("[data-poach-reject]").forEach((btn) => {
         btn.onclick = () => {
           const res = rejectPoachBid(world, btn.dataset.poachReject);
-          toast(res.msg);
+          toast(enTr ? (res.ok ? "Offer rejected" : "Unable to reject offer") : res.msg);
           if (res.ok) {
             saveGame(world);
             refreshAll();
@@ -4375,11 +4523,11 @@ function renderTransfer() {
       return `<tr>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}</span></td>
         <td>${nationLabel(p)}</td>
-        <td><span class="badge ${p.pos}">${POS_LABEL[p.pos]}</span></td>
+        <td><span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span></td>
         <td class="${ovrClass(p.ovr)}">${ovrTxt}</td>
         <td>${p.age}</td>
         <td>${clubLinkHtml(club.id, club.short)}</td>
-        <td title="真实身价仅作参考区间">${valTxt}</td>
+        <td title="${escapeHtml(en ? "Estimated value range" : "真实身价仅作参考区间")}">${valTxt}</td>
         <td class="tr-actions">
           <button class="btn small" data-player-link="${p.id}">${en ? "Info" : "详情"}</button>
           <button class="btn small primary" data-buy="${p.id}" data-from="${club.id}" ${
@@ -4409,7 +4557,7 @@ function renderTransfer() {
       return `<tr>
       <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}${onLoan ? ` <span class="badge loan">${en ? "loan" : "租"}</span>` : ""}</span></td>
       <td>${nationLabel(p)}</td>
-      <td><span class="badge ${p.pos}">${POS_LABEL[p.pos]}</span></td>
+      <td><span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span></td>
       <td class="${ovrClass(p.ovr)}">${p.ovr}</td>
       <td>${formatMoney(p.value)}</td>
       <td class="tr-actions">
@@ -4429,7 +4577,7 @@ function renderTransfer() {
     b.onclick = () => {
       if (!confirm(en ? "Sell this player?" : "确认出售该球员？")) return;
       const res = sellPlayer(world, b.dataset.sell);
-      toast(res.msg);
+      toast(en ? (res.ok ? "Player sold" : "Sale failed") : res.msg);
       if (res.ok) {
         saveGame(world);
         refreshAll();
@@ -4470,7 +4618,7 @@ function renderContractsLoansPanel() {
           return `<div class="cl-row">
             <div class="cl-main">
               <strong>${playerLinkHtml(p.id, p.name)}</strong>
-              <span class="badge ${p.pos}">${POS_LABEL[p.pos]}</span>
+              <span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span>
               <span class="muted">${p.ovr} · ${p.contractYears ?? 0}${en ? "y" : "年"} · ${formatMoney(p.wage)}</span>
               <span class="badge contract-short">${escapeHtml(tag)}</span>
             </div>
@@ -4494,7 +4642,7 @@ function renderContractsLoansPanel() {
           (l) => `<div class="cl-row">
           <div class="cl-main">
             <strong>${playerLinkHtml(l.playerId, l.playerName)}</strong>
-            <span class="muted">→ ${escapeHtml(l.toName)} · ${escapeHtml(l.untilLabel)}</span>
+            <span class="muted">→ ${escapeHtml(l.toName)} · ${escapeHtml(en ? (l.untilDay >= 9999 ? "End of season" : `D${l.untilDay}`) : l.untilLabel)}</span>
           </div>
           <div class="cl-actions">
             <button type="button" class="btn small" data-cl-recall="${l.playerId}">${escapeHtml(t("contract.recall") || (en ? "Recall" : "召回"))}</button>
@@ -4510,7 +4658,7 @@ function renderContractsLoansPanel() {
           (l) => `<div class="cl-row">
           <div class="cl-main">
             <strong>${playerLinkHtml(l.playerId, l.playerName)}</strong>
-            <span class="muted">${en ? "from" : "来自"} ${escapeHtml(l.fromName)} · ${escapeHtml(l.untilLabel)}</span>
+            <span class="muted">${en ? "from" : "来自"} ${escapeHtml(l.fromName)} · ${escapeHtml(en ? (l.untilDay >= 9999 ? "End of season" : `D${l.untilDay}`) : l.untilLabel)}</span>
           </div>
         </div>`
         )
@@ -4549,6 +4697,14 @@ function renderContractsLoansPanel() {
 function fixtureKey(f) {
   if (!f) return "";
   return `${f.home}|${f.away}|${f.day}|${f.round ?? ""}|${f.roundLabel || ""}`;
+}
+
+function fixtureRoundDisplay(fixture) {
+  if (!fixture) return "—";
+  if (getLang() !== "en") return fixture.roundLabel || `第 ${fixture.round} 轮`;
+  return fixture.competition === "cup"
+    ? fixture.roundLabelEn || "Cup"
+    : `Round ${fixture.round}`;
 }
 
 function findFixtureByKey(key) {
@@ -4797,8 +4953,8 @@ function onAdvance() {
   const { userMatches } = res;
   if (userMatches && userMatches.length) {
     pendingMatch = userMatches[0];
-    const label = pendingMatch.roundLabel || `第 ${pendingMatch.round} 轮`;
-    toast(`${label} · 比赛日到了！`);
+    const label = fixtureRoundDisplay(pendingMatch);
+    toast(getLang() === "en" ? `${label} · Matchday` : `${label} · 比赛日到了！`);
   } else if (world.seasonOver) {
     toast(t("toast.seasonEndNews"));
     if (world.sacked) handleSacked({ sacked: true, msg: world.sackedReason });
@@ -4834,18 +4990,18 @@ function onAdvanceToMatchday() {
     return;
   }
   if (!res.ok && !res.days) {
-    toast(res.msg || "无法推进");
+    toast(getLang() === "en" ? "Unable to advance the calendar" : res.msg || "无法推进");
     return;
   }
   if (res.userMatches && res.userMatches.length) {
     pendingMatch = res.userMatches[0];
-    const label = pendingMatch.roundLabel || `第 ${pendingMatch.round} 轮`;
-    toast(`推进 ${res.days} 天 · ${label}`);
+    const label = fixtureRoundDisplay(pendingMatch);
+    toast(getLang() === "en" ? `Advanced ${res.days} day(s) · ${label}` : `推进 ${res.days} 天 · ${label}`);
   } else if (world.seasonOver) {
-    toast(`推进 ${res.days} 天 · 赛季结束`);
+    toast(getLang() === "en" ? `Advanced ${res.days} day(s) · season complete` : `推进 ${res.days} 天 · 赛季结束`);
     if (world.sacked) handleSacked({ sacked: true, msg: world.sackedReason });
   } else {
-    toast(res.msg || `推进 ${res.days} 天`);
+    toast(getLang() === "en" ? `Advanced ${res.days} day(s)` : res.msg || `推进 ${res.days} 天`);
   }
   autosave("advance-matchday");
   refreshAll();
@@ -4863,7 +5019,9 @@ function onAdvanceToSeasonEnd() {
   }
   if (
     !confirm(
-      "将自动推进日程，直到赛季结束；途中遇到我方比赛会停下。\n（不会跳过你的比赛）\n确定？"
+      getLang() === "en"
+        ? "Advance automatically toward the end of the season. The calendar will stop at your next match and will not skip it. Continue?"
+        : "将自动推进日程，直到赛季结束；途中遇到我方比赛会停下。\n（不会跳过你的比赛）\n确定？"
     )
   ) {
     return;
@@ -4874,20 +5032,20 @@ function onAdvanceToSeasonEnd() {
     return;
   }
   if (!res.ok && !res.days) {
-    toast(res.msg || "无法推进");
+    toast(getLang() === "en" ? "Unable to advance the calendar" : res.msg || "无法推进");
     if (res.userMatches?.length) pendingMatch = res.userMatches[0];
     refreshAll();
     return;
   }
   if (res.userMatches && res.userMatches.length) {
     pendingMatch = res.userMatches[0];
-    const label = pendingMatch.roundLabel || `第 ${pendingMatch.round} 轮`;
-    toast(`${res.msg || `推进 ${res.days} 天`} · ${label}`);
+    const label = fixtureRoundDisplay(pendingMatch);
+    toast(getLang() === "en" ? `Advanced ${res.days} day(s) · ${label}` : `${res.msg || `推进 ${res.days} 天`} · ${label}`);
   } else if (world.seasonOver) {
-    toast(res.msg || `推进 ${res.days} 天 · 赛季结束`);
+    toast(getLang() === "en" ? `Advanced ${res.days} day(s) · season complete` : res.msg || `推进 ${res.days} 天 · 赛季结束`);
     if (world.sacked) handleSacked({ sacked: true, msg: world.sackedReason });
   } else {
-    toast(res.msg || `推进 ${res.days} 天`);
+    toast(getLang() === "en" ? `Advanced ${res.days} day(s)` : res.msg || `推进 ${res.days} 天`);
   }
   autosave("advance-season-end");
   refreshAll();
@@ -5310,7 +5468,11 @@ async function driveMatchEvent(ev, snap, { live = true } = {}) {
     }
     if (ev.type === "context") {
       const ctx = $("#match-context");
-      if (ctx) ctx.textContent = (ev.text || "").replace(/^情境：/, "");
+      if (ctx) {
+        ctx.textContent = localizeMatchEvent(ev)
+          .replace(/^Context:\s*/, "")
+          .replace(/^情境：/, "");
+      }
     }
     if (ev.type === "ht") setMatchLiveState("ht");
     if (ev.type === "ft") setMatchLiveState("ft");
@@ -5383,7 +5545,7 @@ function renderPrematchBriefHtml(brief, opts = {}) {
     chips.push(`<span class="brief-chip warn">${en ? "Underdogs" : "实力偏弱"}</span>`);
   if (brief.boardLabel)
     chips.push(
-      `<span class="brief-chip board">${en ? "Board" : "董事会"}: ${escapeHtml(brief.boardLabel)}</span>`
+      `<span class="brief-chip board">${en ? `Board: top ${world.board?.targetPos ?? "—"}` : `董事会: ${escapeHtml(brief.boardLabel)}`}</span>`
     );
 
   const rows = [];
@@ -5646,7 +5808,7 @@ function setupMatchScoreboard(home, away, fixture) {
   ensureKit(away);
   const setName = (id, club) => {
     const el = $(id);
-    if (el) el.textContent = club.name;
+    if (el) el.textContent = clubDisplayName(club);
   };
   const setShort = (id, club) => {
     const el = $(id);
@@ -5976,7 +6138,11 @@ async function runMatch(mode) {
       const ctxEv = matchState.events.find((e) => e.type === "context");
       if (ctxEv) {
         const ctx = $("#match-context");
-        if (ctx) ctx.textContent = ctxEv.text.replace(/^情境：/, "");
+        if (ctx) {
+          ctx.textContent = localizeMatchEvent(ctxEv)
+            .replace(/^Context:\s*/, "")
+            .replace(/^情境：/, "");
+        }
       }
     }
 
@@ -6039,8 +6205,8 @@ function openHalfTimePanel() {
   const htScoreEl = $("#match-ht-score");
   if (htScoreEl) {
     htScoreEl.textContent = t("match.htScore", {
-      home: matchState.home.name,
-      away: matchState.away.name,
+      home: clubDisplayName(matchState.home),
+      away: clubDisplayName(matchState.away),
       hg: matchState.hg,
       ag: matchState.ag,
       max: matchState.maxSubs,
@@ -6171,7 +6337,7 @@ function renderHtRoleEditors() {
         .join("");
       const name = p ? escapeHtml(playerDisplaySurname(p.name, p.nationality) || p.name) : "—";
       return `<label class="ht-role-edit">
-        <span class="ht-role-edit-pos">${escapeHtml(POS_LABEL[slot.pos] || slot.pos)}</span>
+        <span class="ht-role-edit-pos">${escapeHtml(positionLabel(slot.pos))}</span>
         <span class="ht-role-edit-name">${name}</span>
         <select data-ht-role-slot="${i}">${opts}</select>
       </label>`;
@@ -6246,7 +6412,7 @@ function renderHtTips() {
   const parts = [];
   if (tips.scoreTip) {
     parts.push(
-      `<div class="ht-tip score"><strong>${en ? "Score" : "比分"}</strong> ${escapeHtml(tips.scoreTip)}</div>`
+      `<div class="ht-tip score"><strong>${en ? "Score" : "比分"}</strong> ${escapeHtml(en ? localizeHalfTimeScoreTip(tips.scoreTip) : tips.scoreTip)}</div>`
     );
   }
   if (tips.avgFit != null) {
@@ -6315,7 +6481,7 @@ function renderHtFitnessBars() {
       if (fit < 50) cls += " critical";
       else if (fit < 62) cls += " low";
       else if (fit < 75) cls += " mid";
-      const pos = POS_LABEL[p.pos] || p.pos || "";
+      const pos = positionLabel(p.pos);
       return `<div class="${cls}" title="${escapeHtml(p.name)} ${fit}%">
         <span class="ht-fit-pos">${escapeHtml(pos)}</span>
         <span class="ht-fit-name">${playerLinkHtml(p.id, p.name)}</span>
@@ -6441,14 +6607,14 @@ function renderHtSubSelects() {
     .filter((p) => !pendingOut.has(p.id))
     .map(
       (p) =>
-        `<option value="${p.id}">${POS_LABEL[p.pos] || p.pos} ${p.name} · ${p.ovr} · 体${Math.round(p.fitness ?? 0)}</option>`
+        `<option value="${p.id}">${escapeHtml(positionLabel(p.pos))} ${escapeHtml(p.name)} · ${p.ovr} · ${getLang() === "en" ? "Fit" : "体"}${Math.round(p.fitness ?? 0)}</option>`
     )
     .join("");
   inSel.innerHTML = bench
     .filter((p) => !pendingIn.has(p.id))
     .map(
       (p) =>
-        `<option value="${p.id}">${POS_LABEL[p.pos] || p.pos} ${p.name} · ${p.ovr} · 体${Math.round(p.fitness ?? 0)}</option>`
+        `<option value="${p.id}">${escapeHtml(positionLabel(p.pos))} ${escapeHtml(p.name)} · ${p.ovr} · ${getLang() === "en" ? "Fit" : "体"}${Math.round(p.fitness ?? 0)}</option>`
     )
     .join("");
 }
@@ -6939,6 +7105,15 @@ function appendMatchEvent(ev, opts = {}) {
   log.scrollTop = log.scrollHeight;
 }
 
+function localizeHalfTimeScoreTip(text) {
+  const map = {
+    "落后：可加强压迫或换进攻点": "Trailing: press higher or introduce another attacking option",
+    "领先：注意控场与体能": "Leading: manage possession and fitness",
+    "平局：可微调节奏寻找突破": "Level: adjust the tempo to find a breakthrough",
+  };
+  return map[text] || text || "";
+}
+
 /** 关键比赛事件中英切换（原文仍为中文引擎产出，EN 做简单映射） */
 function localizeMatchEvent(ev) {
   if (!ev?.text) return "";
@@ -6987,6 +7162,7 @@ function renderCareer() {
   if (!el || !world) return;
   const mc = ensureManagerCareer(world);
   const club = getUserClub(world);
+  const en = getLang() === "en";
   ensureClubHonors(club);
   const wr = managerWinRate(mc);
   const trophies = (mc.trophies || [])
@@ -7010,28 +7186,28 @@ function renderCareer() {
   el.innerHTML = `
     <div class="grid-2">
       <div class="card">
-        <h2 data-i18n="career.manager">${getLang() === "en" ? "Manager career" : "经理生涯"}</h2>
-        <p><strong>${escapeHtml(world.managerName)}</strong> · ${escapeHtml(club.name)}</p>
+        <h2 data-i18n="career.manager">${en ? "Manager career" : "经理生涯"}</h2>
+        <p><strong>${escapeHtml(world.managerName)}</strong> · ${escapeHtml(clubDisplayName(club))}</p>
         <ul class="career-stats">
-          <li>${getLang() === "en" ? "Seasons" : "执教赛季"}：${mc.seasons}</li>
-          <li>${getLang() === "en" ? "Record" : "战绩"}：${mc.wins}W ${mc.draws}D ${mc.losses}L（${mc.matches}）· ${wr}%</li>
-          <li>GF/GA：${mc.goalsFor || 0} / ${mc.goalsAgainst || 0}</li>
-          <li>${getLang() === "en" ? "Titles / promos / cups" : "冠军 / 升级 / 杯赛"}：${mc.titles} / ${mc.promotions} / ${mc.cups}</li>
-          <li>${getLang() === "en" ? "Sacked" : "被解雇"}：${mc.sacked}</li>
+          <li>${en ? "Seasons" : "执教赛季"}${en ? ": " : "："}${mc.seasons}</li>
+          <li>${en ? "Record" : "战绩"}${en ? ": " : "："}${mc.wins}W ${mc.draws}D ${mc.losses}L${en ? ` (${mc.matches})` : `（${mc.matches}）`} · ${wr}%</li>
+          <li>GF/GA${en ? ": " : "："}${mc.goalsFor || 0} / ${mc.goalsAgainst || 0}</li>
+          <li>${en ? "Titles / promos / cups" : "冠军 / 升级 / 杯赛"}${en ? ": " : "："}${mc.titles} / ${mc.promotions} / ${mc.cups}</li>
+          <li>${en ? "Sacked" : "被解雇"}${en ? ": " : "："}${mc.sacked}</li>
           <li>${
             mc.bestFinish
-              ? `${getLang() === "en" ? "Best" : "最佳"}：${mc.bestFinish.season} ${escapeHtml(mc.bestFinish.divName)} #${mc.bestFinish.pos}`
-              : getLang() === "en"
+              ? `${en ? "Best" : "最佳"}${en ? ": " : "："}${mc.bestFinish.season} ${escapeHtml(mc.bestFinish.divName)} #${mc.bestFinish.pos}`
+              : en
                 ? "Best finish: —"
                 : "最佳名次：—"
           }</li>
         </ul>
-        <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${getLang() === "en" ? "Trophy cabinet" : "荣誉柜"}</h3>
-        <div class="honor-list">${trophies || `<p class="muted">${getLang() === "en" ? "No trophies yet" : "暂无奖杯"}</p>`}</div>
+        <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${en ? "Trophy cabinet" : "荣誉柜"}</h3>
+        <div class="honor-list">${trophies || `<p class="muted">${en ? "No trophies yet" : "暂无奖杯"}</p>`}</div>
       </div>
       <div class="card">
-        <h2 data-i18n="career.club">${getLang() === "en" ? "Club honours" : "俱乐部荣誉墙"}</h2>
-        <div class="honor-list">${clubHonors || `<p class="muted">${getLang() === "en" ? "Win a title or promote to fill the wall" : "夺冠或升级后写入此处"}</p>`}</div>
+        <h2 data-i18n="career.club">${en ? "Club honours" : "俱乐部荣誉墙"}</h2>
+        <div class="honor-list">${clubHonors || `<p class="muted">${en ? "Win a title or earn promotion to fill this wall" : "夺冠或升级后写入此处"}</p>`}</div>
       </div>
     </div>
   `;
@@ -7053,7 +7229,7 @@ function maybeShowSeasonSummary() {
       <p class="muted">${escapeHtml(s.clubName)} · ${escapeHtml(s.divName)}</p>
       <p style="font-size:1.35rem;margin:0.5rem 0"><strong>#${s.pos}</strong> · ${s.pts} pts · ${s.w}W ${s.d}D ${s.l}L · ${s.gf}:${s.ga}</p>
       ${trop ? `<ul class="season-trop-list">${trop}</ul>` : `<p class="muted">${getLang() === "en" ? "No new silverware" : "本季无新奖杯"}</p>`}
-      <p class="muted" style="margin-top:0.75rem">${getLang() === "en" ? "Career" : "生涯"}：${s.career?.seasons || 0} seasons · ${s.career?.titles || 0} titles · ${s.career?.promotions || 0} promos</p>
+      <p class="muted" style="margin-top:0.75rem">${getLang() === "en" ? "Career: " : "生涯："}${s.career?.seasons || 0} seasons · ${s.career?.titles || 0} titles · ${s.career?.promotions || 0} promos</p>
       <button type="button" class="btn primary" id="btn-close-season-summary">${getLang() === "en" ? "Continue" : "继续"}</button>
     </div>
   `;
@@ -7137,7 +7313,10 @@ window.addEventListener("vc-prefs-change", () => {
   fillClubSelect();
   fillDivisionSelects();
   refreshSlotUI();
-  if (world) refreshAll();
+  if (world) {
+    applyWorldClubBranding(world, clubBrandingById, getLang());
+    refreshAll();
+  }
 });
 initStart();
 fillDivisionSelects(START_DIVISION);

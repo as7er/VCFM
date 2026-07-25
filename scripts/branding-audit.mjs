@@ -116,6 +116,14 @@ legacyWorld.table = Object.fromEntries(
 );
 const preservedEnglishFixtures = legacyWorld.fixtures.map((fixture) => fixture.id);
 assert.equal(ensureWorldClubTemplates(legacyWorld, "zh"), 128);
+const expandedFirstTeam = legacyWorld.clubs.flatMap((club) => club.players);
+assert.deepEqual(
+  Object.fromEntries([18, 19, 20].map((ovr) => [ovr, expandedFirstTeam.filter((player) => player.ovr === ovr).length])),
+  { 18: 110, 19: 24, 20: 2 },
+  "old saves expanded to five countries must be recalibrated as one world"
+);
+assert.equal(legacyWorld.abilityDistributionVersion, 1, "expanded old saves store the ability distribution version");
+assert.equal(ensureWorldClubTemplates(legacyWorld, "zh"), 0, "club expansion is idempotent");
 const addedLegacyFixtures = ensureWorldLeagueFixtures(legacyWorld);
 assert.equal(legacyWorld.clubs.length, 188);
 assert.equal(addedLegacyFixtures.length, 1920);

@@ -87,8 +87,10 @@ export function ensureIntl(p) {
   return p.intl;
 }
 
-export function nationName(code) {
-  return NATIONALITIES.find((n) => n.code === code)?.name || code || "—";
+export function nationName(code, lang = "zh") {
+  const nation = NATIONALITIES.find((n) => n.code === code);
+  if (!nation) return code || "—";
+  return lang === "en" ? nation.nameEn || nation.name || code : nation.name || nation.nameEn || code;
 }
 
 export function nationFlag(code) {
@@ -112,16 +114,137 @@ function playersByNation(world) {
   return map;
 }
 
-function pickXi(list) {
-  const candidates = list
-    .map((x) => x.player)
-    .filter((p) => (p.injured || 0) <= 0)
-    .sort((a, b) => (b.ovr || 0) - (a.ovr || 0) || (b.potential || 0) - (a.potential || 0));
+function bounded(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function latestLineupIds(world, code) {
+  const latestMatch = [...(world.international?.matches || [])]
+    .reverse()
+    .find((match) => match.home === code || match.away === code);
+  const side = latestMatch?.home === code ? "home" : "away";
+  return new Set(latestMatch?.lineups?.[side] || []);
+}
+
+function nationalAvailable(player) {
+  return (player?.injured || 0) <= 0 && (player?.intlSuspendedMatches || 0) <= 0;
+}
+
+/**
+ * 现实征召评分：能力为主体，赛季表现、出场率、体能和国家队连续性影响边缘竞争。
+ * 分数沿用 1–20 能力尺度，便于解释；俱乐部停赛不会错误延伸到国家队。
+ */
+export function nationalCallupScore(world, player, club = null, latestIds = null) {
+  if (!player) return 0;
+  const stats = player.stats || {};
+  const apps = Math.max(0, Number(stats.apps) || 0);
+  const avgRating = apps > 0 && (stats.ratingSum || 0) > 0 ? stats.ratingSum / apps : null;
+  const lastRating = stats.lastRating != null && Number.isFinite(Number(stats.lastRating)) ? Number(stats.lastRating) : null;
+  const fitness = Number(player.fitness ?? 100);
+  const morale = Number(player.morale ?? 70);
+  const intl = player.intl || {};
+  const resolvedClub = club || (world.clubs || []).find((item) => item.id === player.clubId) || null;
+  const clubPlayed = Number(world.table?.[resolvedClub?.id]?.played) || 0;
+  const recent = latestIds || latestLineupIds(world, player.nationality);
+
+  let score = Number(player.ovr) || 10;
+  if (avgRating != null && apps >= 3) score += bounded((avgRating - 6.6) * 0.55, -0.8, 0.9);
+  if (lastRating != null) score += bounded((lastRating - 6.5) * 0.18, -0.35, 0.45);
+  if (clubPlayed >= 4) {
+    const appearanceRate = bounded(apps / clubPlayed, 0, 1);
+    score += bounded((appearanceRate - 0.55) * 0.8, -0.45, 0.35);
+  }
+  score += bounded((fitness - 82) / 45, -1.15, 0.4);
+  score += bounded((morale - 70) / 120, -0.25, 0.25);
+  score += Math.min(0.15, (Number(intl.caps) || 0) * 0.006);
+  if (recent.has(player.id)) score += 0.2;
+
+  if ((player.age || 25) <= 23 && (player.potential || 0) > (player.ovr || 0)) {
+    score += Math.min(0.24, ((player.potential || 0) - (player.ovr || 0)) * 0.08);
+  }
+
+  if (apps > 0) {
+    if (player.pos === "GK") {
+      const cleanRate = (Number(stats.cleanSheets) || 0) / apps;
+      const concededRate = (Number(stats.goalsConceded) || 0) / apps;
+      score += bounded(cleanRate * 0.22 - Math.max(0, concededRate - 1.4) * 0.08, -0.25, 0.25);
+    } else if (player.pos === "ATT") {
+      score += Math.min(0.35, ((Number(stats.goals) || 0) * 0.25 + (Number(stats.assists) || 0) * 0.1) / apps);
+    } else if (player.pos === "MID") {
+      score += Math.min(0.3, ((Number(stats.goals) || 0) * 0.1 + (Number(stats.assists) || 0) * 0.2) / apps);
+    } else if (player.pos === "DEF") {
+      score += Math.min(0.18, ((Number(stats.cleanSheets) || 0) / apps) * 0.18);
+    }
+  }
+  return Math.round(score * 100) / 100;
+}
+
+function callupCandidates(world, code, list) {
+  const latestIds = latestLineupIds(world, code);
+  return list
+    .filter(({ player }) => nationalAvailable(player))
+    .map((entry) => ({ ...entry, selectionScore: nationalCallupScore(world, entry.player, entry.club, latestIds) }))
+    .sort(
+      (a, b) =>
+        b.selectionScore - a.selectionScore ||
+        (b.player.ovr || 0) - (a.player.ovr || 0) ||
+        (b.player.potential || 0) - (a.player.potential || 0) ||
+        a.player.id.localeCompare(b.player.id)
+    );
+}
+
+function pickSquadEntries(world, code, list, limit = 23) {
+  const candidates = callupCandidates(world, code, list);
+  const selected = [];
+  const take = (pos, count) => {
+    for (const entry of candidates) {
+      if (selected.length >= limit || selected.filter((item) => item.player.pos === pos).length >= count) break;
+      if (entry.player.pos === pos && !selected.includes(entry)) selected.push(entry);
+    }
+  };
+  take("GK", 3);
+  take("DEF", 8);
+  take("MID", 7);
+  take("ATT", 5);
+  for (const entry of candidates) {
+    if (selected.length >= limit) break;
+    if (!selected.includes(entry)) selected.push(entry);
+  }
+  return selected;
+}
+
+const NATIONAL_NUMBER_PREFERENCES = Object.freeze({
+  GK: [1, 12, 23],
+  DEF: [2, 3, 4, 5, 13, 14, 15, 16],
+  MID: [6, 8, 10, 17, 18, 20, 21],
+  ATT: [7, 9, 11, 19, 22],
+});
+
+function assignNationalNumbers(entries) {
+  const used = new Set();
+  const posIndex = { GK: 0, DEF: 0, MID: 0, ATT: 0 };
+  return entries.map((entry) => {
+    const prefs = NATIONAL_NUMBER_PREFERENCES[entry.player.pos] || [];
+    let number = prefs[posIndex[entry.player.pos] || 0] || null;
+    posIndex[entry.player.pos] = (posIndex[entry.player.pos] || 0) + 1;
+    if (!number || used.has(number)) {
+      number = Array.from({ length: 23 }, (_, index) => index + 1).find((candidate) => !used.has(candidate)) || null;
+    }
+    if (number) used.add(number);
+    return { ...entry, squadNumber: number };
+  });
+}
+
+function pickXi(world, code, list) {
+  const candidates = pickSquadEntries(world, code, list)
+    .slice()
+    .sort((a, b) => b.selectionScore - a.selectionScore || (b.player.ovr || 0) - (a.player.ovr || 0));
   const picked = [];
   const take = (pos, count) => {
-    for (const p of candidates) {
+    for (const entry of candidates) {
       if (picked.length >= 11 || picked.filter((x) => x.pos === pos).length >= count) break;
-      if (p.pos === pos && !picked.includes(p)) picked.push(p);
+      const player = entry.player;
+      if (player.pos === pos && !picked.includes(player)) picked.push(player);
     }
   };
   // 尽量组成可用阵型，再用综合能力补足人数。
@@ -129,11 +252,15 @@ function pickXi(list) {
   take("DEF", 4);
   take("MID", 3);
   take("ATT", 3);
-  for (const p of candidates) {
+  for (const entry of candidates) {
     if (picked.length >= 11) break;
-    if (!picked.includes(p)) picked.push(p);
+    if (!picked.includes(entry.player)) picked.push(entry.player);
   }
   return picked;
+}
+
+export function nationalStartingXi(world, code) {
+  return pickXi(world, code, playersByNation(world).get(code) || []);
 }
 
 /**
@@ -144,10 +271,11 @@ export function listNationalTeams(world) {
   const byNation = playersByNation(world);
   const teams = NATIONALITIES.map((nation) => {
     const list = byNation.get(nation.code) || [];
-    const xi = pickXi(list);
+    const xi = pickXi(world, nation.code, list);
     return {
       code: nation.code,
       name: nation.name,
+      nameEn: nation.nameEn,
       flag: nation.flag,
       pool: list.length,
       xiSize: xi.length,
@@ -209,51 +337,28 @@ export function nationalRecord(world, code, competitionId = null) {
 /** 最新国家队名单：按能力挑选约 23 人，并尽量保持各位置数量。 */
 export function nationalSquad(world, code, limit = 23) {
   const entries = playersByNation(world).get(code) || [];
-  const latestMatch = [...(world.international?.matches || [])]
-    .reverse()
-    .find((match) => match.home === code || match.away === code);
-  const latestSide = latestMatch?.home === code ? "home" : "away";
-  const latestIds = new Set(latestMatch?.lineups?.[latestSide] || []);
-  const candidates = entries
-    .filter(({ player }) => (player.injured || 0) <= 0)
-    .sort(
-      ({ player: a }, { player: b }) =>
-        Number(latestIds.has(b.id)) - Number(latestIds.has(a.id)) ||
-        (b.ovr || 0) - (a.ovr || 0) ||
-        (b.potential || 0) - (a.potential || 0) ||
-        a.id.localeCompare(b.id)
-    );
-  const selected = [];
-  const take = (pos, count) => {
-    for (const entry of candidates) {
-      if (selected.length >= limit || selected.filter((item) => item.player.pos === pos).length >= count) break;
-      if (entry.player.pos === pos && !selected.includes(entry)) selected.push(entry);
-    }
-  };
-  take("GK", 3);
-  take("DEF", 8);
-  take("MID", 7);
-  take("ATT", 5);
-  for (const entry of candidates) {
-    if (selected.length >= limit) break;
-    if (!selected.includes(entry)) selected.push(entry);
-  }
+  const latestIds = latestLineupIds(world, code);
+  const selected = assignNationalNumbers(pickSquadEntries(world, code, entries, limit));
   return selected.map((entry) => ({ ...entry, lastCalledUp: latestIds.has(entry.player.id) }));
 }
 
-function xiStrength(xi) {
+export function xiStrength(xi) {
   if (!xi.length) return 0;
   return xi.reduce((sum, p) => sum + (p.ovr || 10), 0) / xi.length;
 }
 
-function nationStrength(list) {
-  return xiStrength(pickXi(list));
+function nationStrength(world, code, list) {
+  return xiStrength(pickXi(world, code, list));
 }
 
-function selectParticipants(entries, count, filter = () => true, required = []) {
+function selectParticipants(world, entries, count, filter = () => true, required = []) {
   const eligible = [...entries]
-    .filter(([code, list]) => filter(code) && list.length >= 6 && pickXi(list).length >= 6)
-    .sort((a, b) => nationStrength(b[1]) - nationStrength(a[1]) || a[0].localeCompare(b[0]))
+    .filter(([code, list]) => filter(code) && list.length >= 6 && pickXi(world, code, list).length >= 6)
+    .sort(
+      (a, b) =>
+        nationStrength(world, b[0], b[1]) - nationStrength(world, a[0], a[1]) ||
+        a[0].localeCompare(b[0])
+    )
     .map(([code]) => code);
   const selected = required.filter((code) => eligible.includes(code));
   return [...selected, ...eligible.filter((code) => !selected.includes(code))].slice(0, count);
@@ -323,7 +428,10 @@ function ensureSeriesCompetition(world, entries) {
   const id = `intl_series_${world.season}`;
   let series = state.competitions[id];
   if (!series) {
-    series = createSeries(world, entries.filter(([, list]) => list.length >= 6).map(([code]) => code));
+    series = createSeries(
+      world,
+      entries.filter(([code, list]) => pickXi(world, code, list).length >= 6).map(([code]) => code)
+    );
     state.competitions[id] = series;
   }
   return series;
@@ -365,13 +473,13 @@ function ensureSeasonCompetition(world) {
   // 世界杯 32 队 / 8 组；欧锦赛 16 队 / 4 组
   if (isWorldYear) {
     if (!state.competitions[worldId]?.completed) {
-      const participants = selectParticipants(entries, 32, () => true, ["ENG", "ESP", "ITA", "GER", "FRA"]);
+      const participants = selectParticipants(world, entries, 32, () => true, ["ENG", "ESP", "ITA", "GER", "FRA"]);
       if (participants.length >= 32) competition = createTournament(world, "world", participants, 8);
       else if (participants.length >= 16) competition = createTournament(world, "world", participants.slice(0, 16), 4);
     }
   } else if (isEuropeYear) {
     if (!state.competitions[europeId]?.completed) {
-      const participants = selectParticipants(entries, 16, (code) => EUROPEAN_CODES.has(code), ["ENG", "ESP", "ITA", "GER", "FRA"]);
+      const participants = selectParticipants(world, entries, 16, (code) => EUROPEAN_CODES.has(code), ["ENG", "ESP", "ITA", "GER", "FRA"]);
       if (participants.length >= 16) competition = createTournament(world, "europe", participants, 4);
       else if (participants.length >= 8) competition = createTournament(world, "europe", participants.slice(0, 8), 2);
     }
@@ -552,12 +660,8 @@ function addNationResult(competition, home, away, ga, gb) {
 }
 
 function simIntlMatch(xiA, xiB) {
-  const str = (xi) => {
-    if (!xi.length) return 40;
-    return xi.reduce((s, p) => s + (p.ovr || 10), 0) / xi.length;
-  };
-  const sa = str(xiA);
-  const sb = str(xiB);
+  const sa = xiStrength(xiA) || 10;
+  const sb = xiStrength(xiB) || 10;
   const xgA = Math.max(0.3, (sa / Math.max(sb, 1)) * 1.2);
   const xgB = Math.max(0.3, (sb / Math.max(sa, 1)) * 1.2);
   const rollGoals = (xg) => {
@@ -619,8 +723,8 @@ function playerById(world, id) {
 
 function recordMatch(world, competition, codeA, codeB, roundLabel, knockout = false) {
   const entries = playersByNation(world);
-  const xiA = pickXi(entries.get(codeA) || []);
-  const xiB = pickXi(entries.get(codeB) || []);
+  const xiA = pickXi(world, codeA, entries.get(codeA) || []);
+  const xiB = pickXi(world, codeB, entries.get(codeB) || []);
   const result = simIntlMatch(xiA, xiB);
   const match = {
     id: uid("intl_match"),
@@ -726,7 +830,9 @@ function knockoutRound(world, competition) {
 }
 
 function seriesRound(world, competition, entries) {
-  const codes = shuffle(entries.filter(([, list]) => list.length >= 6).map(([code]) => code));
+  const codes = shuffle(
+    entries.filter(([code, list]) => pickXi(world, code, list).length >= 6).map(([code]) => code)
+  );
   for (let i = 0; i + 1 < codes.length; i += 2) {
     recordMatch(world, competition, codes[i], codes[i + 1], "国际比赛日");
   }
@@ -777,7 +883,7 @@ function appendInternationalNews(world, competition, matches) {
 export function runInternationalBreak(world) {
   const state = ensureInternational(world);
   const byNation = playersByNation(world);
-  const nations = [...byNation.entries()].filter(([, list]) => list.length >= 6);
+  const nations = [...byNation.entries()].filter(([code, list]) => pickXi(world, code, list).length >= 6);
   world.lastIntlDay = world.day;
   if (nations.length < 2) return { matches: 0, callups: [] };
 

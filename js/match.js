@@ -332,6 +332,14 @@ function recomputeSides(state) {
   awayAtk *= aCoach;
   awayDef *= aCoach;
 
+  // 1–20 总评会压缩顶层差距；温和放大双方实际首发（含体能/士气）的相对优势。
+  // 只强化已有能力差，不读取俱乐部名望或现实映射档案，且上下限避免悬殊比分失控。
+  const lineupEdge = clamp(Math.pow(hs / Math.max(as, 1), 0.65), 0.88, 1.14);
+  homeAtk *= lineupEdge;
+  homeDef *= lineupEdge;
+  awayAtk /= lineupEdge;
+  awayDef /= lineupEdge;
+
   // 主场
   homeAtk *= 1.06;
   homeDef *= 1.04;

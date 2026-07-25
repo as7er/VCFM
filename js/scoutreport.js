@@ -56,6 +56,56 @@ const ATTR_LABELS_EN = {
   kicking: "Kicking",
 };
 
+const TIER_LABELS_EN = {
+  high: "High",
+  mid: "Medium",
+  low: "Low",
+  weak: "Weak",
+};
+
+const SCOUT_TAGS_EN = {
+  高潜新星: "High-potential prospect",
+  经验老将: "Experienced veteran",
+  进球手: "Goalscorer",
+  创造者: "Creator",
+  门线可靠: "Reliable shot-stopper",
+  士气偏低: "Low morale",
+  合同将尽: "Contract expiring",
+  近期体能一般: "Fitness concern",
+  全面型: "All-rounder",
+};
+
+const SCOUT_RISKS_EN = {
+  "年龄偏大，转售价值可能下滑": "Older player; resale value may decline",
+  "短约，卖家可能坐地起价或球员自由身": "Short contract; the seller may demand more or risk losing him for free",
+  目前伤缺: "Currently injured",
+  成长空间有限: "Limited room for development",
+  "球探等级一般，数据区间较宽、属性多不可见": "Limited scouting quality; estimates are broad and many attributes remain hidden",
+};
+
+const SCOUT_RECOMMENDATIONS_EN = {
+  强烈推荐跟进: "Strongly recommended for further scouting",
+  性价比可关注: "Worth monitoring as a value option",
+  "谨慎，短约过渡即可": "Proceed with caution; suitable only as a short-term option",
+  "中性评价，按需求补强": "Neutral assessment; sign only if the squad needs this profile",
+};
+
+const OPPONENT_TIPS_EN = {
+  "对方偏进攻，注意身后空当": "They lean attacking; watch the space behind the defence",
+  "对方偏进攻/反击，边后卫勿压太上": "They favour attacks and counters; keep the full-backs disciplined",
+  "对方可能收缩或控球消耗，耐心拆防": "They may sit deep or retain possession; be patient when breaking them down",
+  "高位压迫迹象：出球要干净，少回传门将": "Signs of a high press; circulate cleanly and avoid unnecessary back-passes to the goalkeeper",
+  "定位球有威胁，禁区盯人要死": "They are dangerous from set pieces; mark tightly in the box",
+  "对方定位球防守一般，可多争角球": "Their set-piece defending looks average; look to win corners",
+  "情报有限，开场观察再调": "Information is limited; observe the opening phase before adjusting",
+};
+
+function opponentTipEn(text) {
+  if (OPPONENT_TIPS_EN[text]) return OPPONENT_TIPS_EN[text];
+  const mark = String(text || "").match(/^重点盯防 (.+)$/);
+  return mark ? `Mark ${mark[1]} closely` : text;
+}
+
 function staffRatingSafe(club, role) {
   try {
     return staffRating(club, role);
@@ -161,10 +211,12 @@ export function scoutAttrRows(player, userClub, { ownPlayer = false, lang = "zh"
 
   return showKeys.map((k) => {
     const fogged = fogAttrValue(a[k], fog, `${player?.id}_${k}`);
+    const text = lang === "en" && fogged.tier ? TIER_LABELS_EN[fogged.tier] : fogged.text;
     return {
       key: k,
       label: labels[k] || k,
       ...fogged,
+      text,
     };
   });
 }
@@ -180,15 +232,15 @@ export function formatScoutOvrFog(player, userClub, { ownPlayer = false } = {}) 
   return `${Math.max(1, c - band)}–${Math.min(20, c + band)}`;
 }
 
-export function formatScoutPotFog(player, userClub, { ownPlayer = false } = {}) {
+export function formatScoutPotFog(player, userClub, { ownPlayer = false, lang = "zh" } = {}) {
   if (ownPlayer) return player.potential != null ? String(player.potential) : "—";
   const fog = scoutFogLevel(userClub);
   const pot = player.potential != null ? player.potential : player.ovr || 10;
   if (fog >= 3) return String(pot);
   if (fog <= 0) {
-    if (pot >= 16) return "高";
-    if (pot >= 13) return "中高";
-    return "一般";
+    if (pot >= 16) return lang === "en" ? "High" : "高";
+    if (pot >= 13) return lang === "en" ? "Medium-high" : "中高";
+    return lang === "en" ? "Average" : "一般";
   }
   const band = fog === 2 ? 1 : 2;
   return `${Math.max(1, pot - band)}–${Math.min(20, pot + band)}`;
@@ -283,8 +335,17 @@ export function formatScoutReportHtml(rep, formatMoney, lang = "zh") {
 
   const attrHtml = (rep.attrs || [])
     .slice(0, 8)
-    .map((a) => `<span class="scout-attr-chip"><em>${a.label}</em> ${a.text}</span>`)
+    .map((a) => {
+      const label = en ? ATTR_LABELS_EN[a.key] || a.label : a.label;
+      const value = en && a.tier ? TIER_LABELS_EN[a.tier] || a.text : a.text;
+      return `<span class="scout-attr-chip"><em>${escapeHtmlLite(label)}</em> ${escapeHtmlLite(value)}</span>`;
+    })
     .join("");
+  const tags = (rep.tags || []).map((tag) => (en ? SCOUT_TAGS_EN[tag] || tag : tag));
+  const recommendation = en
+    ? SCOUT_RECOMMENDATIONS_EN[rep.recommendation] || rep.recommendation
+    : rep.recommendation;
+  const risks = (rep.risks || []).map((risk) => (en ? SCOUT_RISKS_EN[risk] || risk : risk));
 
   return `
     <div class="scout-report">
@@ -298,11 +359,11 @@ export function formatScoutReportHtml(rep, formatMoney, lang = "zh") {
         · ${en ? "POT" : "潜力"} ${rep.potLo}–${rep.potHi}
       </p>
       ${attrHtml ? `<div class="scout-attr-row">${attrHtml}</div>` : ""}
-      <p class="scout-tags">${rep.tags.map((t) => `<span class="badge">${t}</span>`).join(" ")}</p>
-      <p class="muted" style="margin:0.35rem 0 0"><strong>${en ? "Note:" : "建议："}</strong>${rep.recommendation}</p>
+      <p class="scout-tags">${tags.map((tag) => `<span class="badge">${escapeHtmlLite(tag)}</span>`).join(" ")}</p>
+      <p class="muted" style="margin:0.35rem 0 0"><strong>${en ? "Note: " : "建议："}</strong>${escapeHtmlLite(recommendation)}</p>
       ${
-        rep.risks.length
-          ? `<ul class="scout-risks">${rep.risks.map((r) => `<li>${r}</li>`).join("")}</ul>`
+        risks.length
+          ? `<ul class="scout-risks">${risks.map((risk) => `<li>${escapeHtmlLite(risk)}</li>`).join("")}</ul>`
           : ""
       }
     </div>
@@ -516,7 +577,7 @@ export function formatOpponentReportHtml(rep, { lang = "zh", compact = false } =
     .join("");
   const tips = (rep.tips || [])
     .slice(0, compact ? 2 : 4)
-    .map((t) => `<li>${escapeHtmlLite(t)}</li>`)
+    .map((tip) => `<li>${escapeHtmlLite(en ? opponentTipEn(tip) : tip)}</li>`)
     .join("");
 
   return `<div class="opp-report ${compact ? "compact" : "full"}">
@@ -592,6 +653,8 @@ export function opponentReportLogLines(rep, lang = "zh") {
       ? `Set pieces: atk ${rep.setPieces.attackBandEn} · def ${rep.setPieces.defenseBandEn}`
       : `定位球：攻 ${rep.setPieces.attackBand} · 防 ${rep.setPieces.defenseBand}`
   );
-  if (rep.tips?.[0]) lines.push(en ? `Tip: ${rep.tips[0]}` : `提示：${rep.tips[0]}`);
+  if (rep.tips?.[0]) {
+    lines.push(en ? `Tip: ${opponentTipEn(rep.tips[0])}` : `提示：${rep.tips[0]}`);
+  }
   return lines;
 }

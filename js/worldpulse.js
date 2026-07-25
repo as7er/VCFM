@@ -87,7 +87,9 @@ function completeScoutMission(world, mission) {
       category: "scout",
       priority: 1,
       title: "球探任务结束：暂无亮点",
+      titleEn: "Scout mission complete: no standout targets",
       body: "本次出行未发现值得跟进的目标。",
+      bodyEn: "The scouting trip found no targets worth pursuing.",
       dedupeKey: `sm_done_${mission.id}`,
       actions: [{ id: "ack", label: "知道了", labelEn: "OK" }],
     });
@@ -100,10 +102,14 @@ function completeScoutMission(world, mission) {
   const hits = pool.slice(0, 3);
   world.scoutWatch = world.scoutWatch || [];
   const lines = [];
+  const linesEn = [];
   for (const { p, c } of hits) {
     if (!world.scoutWatch.includes(p.id)) world.scoutWatch.unshift(p.id);
     lines.push(
       `· ${p.name}（${c.short || c.name} · ${p.pos} · ${p.age} 岁 · 能力约 ${p.ovr}/潜 ${p.potential || "?"} · 估值约 ${formatMoney(p.value || estimateValue(p))}）`
+    );
+    linesEn.push(
+      `· ${p.name} (${c.short || c.nameEn || c.name} · ${p.pos} · age ${p.age} · ability about ${p.ovr}/potential ${p.potential || "?"} · value about ${formatMoney(p.value || estimateValue(p))})`
     );
   }
   if (world.scoutWatch.length > 30) world.scoutWatch.length = 30;
@@ -111,7 +117,9 @@ function completeScoutMission(world, mission) {
     category: "scout",
     priority: 2,
     title: `球探回报：发现 ${hits.length} 名目标`,
+    titleEn: `Scout report: ${hits.length} target(s) found`,
     body: `已自动加入关注列表。\n${lines.join("\n")}`,
+    bodyEn: `Added to the watchlist automatically.\n${linesEn.join("\n")}`,
     dedupeKey: `sm_done_${mission.id}`,
     ref: { kind: "scout_report", playerIds: hits.map((h) => h.p.id) },
     actions: [
