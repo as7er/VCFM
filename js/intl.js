@@ -95,7 +95,7 @@ export function nationFlag(code) {
   return NATIONALITIES.find((n) => n.code === code)?.flag || "";
 }
 
-function emptyNationRow() {
+export function emptyNationRow() {
   return { played: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 };
 }
 
@@ -136,6 +136,76 @@ function pickXi(list) {
   return picked;
 }
 
+/**
+ * 全部国家队一览：人才池、实力、是否可参赛。
+ * 实力取当前可出场 11 人平均能力；池子不足 6 人视为不可组队。
+ */
+export function listNationalTeams(world) {
+  const byNation = playersByNation(world);
+  const teams = NATIONALITIES.map((nation) => {
+    const list = byNation.get(nation.code) || [];
+    const xi = pickXi(list);
+    return {
+      code: nation.code,
+      name: nation.name,
+      flag: nation.flag,
+      pool: list.length,
+      xiSize: xi.length,
+      strength: Math.round(xiStrength(xi) * 10) / 10,
+      eligible: list.length >= 6 && xi.length >= 6,
+    };
+  });
+  return teams.sort(
+    (a, b) =>
+      Number(b.eligible) - Number(a.eligible) ||
+      b.strength - a.strength ||
+      b.pool - a.pool ||
+      a.code.localeCompare(b.code)
+  );
+}
+
+function accumulateNationRow(row, gf, ga) {
+  row.played++;
+  row.gf += gf || 0;
+  row.ga += ga || 0;
+  if (gf > ga) {
+    row.w++;
+    row.pts += 3;
+  } else if (gf < ga) {
+    row.l++;
+  } else {
+    row.d++;
+    row.pts++;
+  }
+  row.gd = row.gf - row.ga;
+}
+
+/**
+ * 一次扫描算出所有国家的累计战绩（全历史或指定赛事）。
+ * 需要多国战绩时用它，避免按国家反复扫描比赛列表。
+ */
+export function nationalRecords(world, competitionId = null) {
+  const matches = competitionId
+    ? internationalMatches(world, competitionId)
+    : world.international?.matches || [];
+  const rows = new Map();
+  const rowFor = (code) => {
+    let row = rows.get(code);
+    if (!row) rows.set(code, (row = emptyNationRow()));
+    return row;
+  };
+  for (const match of matches) {
+    accumulateNationRow(rowFor(match.home), match.homeGoals, match.awayGoals);
+    accumulateNationRow(rowFor(match.away), match.awayGoals, match.homeGoals);
+  }
+  return rows;
+}
+
+/** 某国在国际赛事中的累计战绩（全历史或指定赛事）。 */
+export function nationalRecord(world, code, competitionId = null) {
+  return nationalRecords(world, competitionId).get(code) || emptyNationRow();
+}
+
 /** 最新国家队名单：按能力挑选约 23 人，并尽量保持各位置数量。 */
 export function nationalSquad(world, code, limit = 23) {
   const entries = playersByNation(world).get(code) || [];
@@ -171,10 +241,13 @@ export function nationalSquad(world, code, limit = 23) {
   return selected.map((entry) => ({ ...entry, lastCalledUp: latestIds.has(entry.player.id) }));
 }
 
-function nationStrength(list) {
-  const xi = pickXi(list);
+function xiStrength(xi) {
   if (!xi.length) return 0;
   return xi.reduce((sum, p) => sum + (p.ovr || 10), 0) / xi.length;
+}
+
+function nationStrength(list) {
+  return xiStrength(pickXi(list));
 }
 
 function selectParticipants(entries, count, filter = () => true, required = []) {
@@ -258,6 +331,27 @@ function ensureSeriesCompetition(world, entries) {
 
 function ensureSeasonCompetition(world) {
   const state = world.international;
+  const isWorldYear = Number(world.season) % 4 === 2;
+  const isEuropeYear = Number(world.season) % 4 === 0;
+  const worldId = `intl_world_${world.season}`;
+  const europeId = `intl_europe_${world.season}`;
+
+  // 未开赛的旧档小规模赛事可就地升级到新规模（已有赛果的不动）
+  const upgradeUnused = (id, minTeams) => {
+    const existing = state.competitions[id];
+    if (
+      existing &&
+      !existing.completed &&
+      (existing.fixtureIds?.length || 0) === 0 &&
+      (existing.participants?.length || 0) < minTeams
+    ) {
+      delete state.competitions[id];
+      if (state.activeCompetitionId === id) state.activeCompetitionId = null;
+    }
+  };
+  if (isWorldYear) upgradeUnused(worldId, 32);
+  else if (isEuropeYear) upgradeUnused(europeId, 16);
+
   const current = Object.values(state.competitions).find(
     (competition) => competition.season === world.season && !competition.completed
   );
@@ -267,20 +361,19 @@ function ensureSeasonCompetition(world) {
   }
 
   const entries = [...playersByNation(world).entries()];
-  const isWorldYear = Number(world.season) % 4 === 2;
-  const isEuropeYear = Number(world.season) % 4 === 0;
-  const worldId = `intl_world_${world.season}`;
-  const europeId = `intl_europe_${world.season}`;
   let competition = null;
+  // 世界杯 32 队 / 8 组；欧锦赛 16 队 / 4 组
   if (isWorldYear) {
     if (!state.competitions[worldId]?.completed) {
-      const participants = selectParticipants(entries, 16, () => true, ["ENG", "ESP", "ITA", "GER", "FRA"]);
-      if (participants.length >= 16) competition = createTournament(world, "world", participants, 4);
+      const participants = selectParticipants(entries, 32, () => true, ["ENG", "ESP", "ITA", "GER", "FRA"]);
+      if (participants.length >= 32) competition = createTournament(world, "world", participants, 8);
+      else if (participants.length >= 16) competition = createTournament(world, "world", participants.slice(0, 16), 4);
     }
   } else if (isEuropeYear) {
     if (!state.competitions[europeId]?.completed) {
-      const participants = selectParticipants(entries, 8, (code) => EUROPEAN_CODES.has(code), ["ENG", "ESP", "ITA", "GER", "FRA"]);
-      if (participants.length >= 8) competition = createTournament(world, "europe", participants, 2);
+      const participants = selectParticipants(entries, 16, (code) => EUROPEAN_CODES.has(code), ["ENG", "ESP", "ITA", "GER", "FRA"]);
+      if (participants.length >= 16) competition = createTournament(world, "europe", participants, 4);
+      else if (participants.length >= 8) competition = createTournament(world, "europe", participants.slice(0, 8), 2);
     }
   }
   if (!competition) competition = ensureSeriesCompetition(world, entries);
@@ -402,11 +495,33 @@ function playerSnapshot(player) {
 function roundLabelEn(label) {
   const group = String(label).match(/^小组赛 第(\d+)轮$/);
   if (group) return `Group stage · Matchday ${group[1]}`;
+  if (label === "十六强") return "Round of 16";
   if (label === "四分之一决赛") return "Quarter-finals";
   if (label === "半决赛") return "Semi-finals";
   if (label === "决赛") return "Final";
   if (label === "国际比赛日") return "International matchday";
   return label;
+}
+
+function knockoutRoundLabel(stage) {
+  if (stage === "R16") return "十六强";
+  if (stage === "QF") return "四分之一决赛";
+  if (stage === "SF") return "半决赛";
+  return "决赛";
+}
+
+/** 按晋级队数决定淘汰赛起点：16→十六强，8→四分之一，4→半决赛。 */
+function initialKnockoutStage(pairCount) {
+  if (pairCount >= 8) return "R16";
+  if (pairCount >= 4) return "QF";
+  return "SF";
+}
+
+function nextKnockoutStage(winnerCount) {
+  if (winnerCount <= 2) return "F";
+  if (winnerCount <= 4) return "SF";
+  if (winnerCount <= 8) return "QF";
+  return "R16";
 }
 
 function addNationResult(competition, home, away, ga, gb) {
@@ -569,18 +684,14 @@ function groupRound(world, competition) {
     const rows = internationalTable(competition, group.teams);
     qualifiers.push(rows[0]?.id, rows[1]?.id);
   }
+  // 交叉对阵：A1-B2、B1-A2… 避免同组提前相遇
   const pairs = [];
-  if (competition.key === "world") {
-    for (let i = 0; i < qualifiers.length; i += 4) {
-      pairs.push([qualifiers[i], qualifiers[i + 3]], [qualifiers[i + 2], qualifiers[i + 1]]);
-    }
-  } else {
-    for (let i = 0; i < qualifiers.length; i += 2) {
-      pairs.push([qualifiers[i], qualifiers[i + 1]]);
-    }
+  for (let i = 0; i < qualifiers.length; i += 4) {
+    pairs.push([qualifiers[i], qualifiers[i + 3]], [qualifiers[i + 2], qualifiers[i + 1]]);
   }
+  const validPairs = pairs.filter((p) => p[0] && p[1]);
   competition.stage = "knockout";
-  competition.knockout = { stage: competition.key === "world" ? "QF" : "SF", pairs: pairs.filter((p) => p[0] && p[1]) };
+  competition.knockout = { stage: initialKnockoutStage(validPairs.length), pairs: validPairs };
 }
 
 function knockoutRound(world, competition) {
@@ -588,8 +699,7 @@ function knockoutRound(world, competition) {
   if (!knockout?.pairs?.length) return;
   const winners = [];
   for (const [home, away] of knockout.pairs) {
-    const label = knockout.stage === "QF" ? "四分之一决赛" : knockout.stage === "SF" ? "半决赛" : "决赛";
-    const match = recordMatch(world, competition, home, away, label, true);
+    const match = recordMatch(world, competition, home, away, knockoutRoundLabel(knockout.stage), true);
     winners.push(winnerOf(match));
   }
   if (knockout.stage === "F") {
@@ -608,13 +718,11 @@ function knockoutRound(world, competition) {
     }
     return;
   }
-  if (winners.length === 2) {
-    competition.knockout = { stage: "F", pairs: [[winners[0], winners[1]]] };
-  } else {
-    const pairs = [];
-    for (let i = 0; i < winners.length; i += 2) pairs.push([winners[i], winners[i + 1]]);
-    competition.knockout = { stage: "SF", pairs };
+  const pairs = [];
+  for (let i = 0; i < winners.length; i += 2) {
+    if (winners[i] && winners[i + 1]) pairs.push([winners[i], winners[i + 1]]);
   }
+  competition.knockout = { stage: nextKnockoutStage(winners.length), pairs };
 }
 
 function seriesRound(world, competition, entries) {
