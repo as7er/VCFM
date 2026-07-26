@@ -4030,6 +4030,51 @@ html[data-theme="light"] .fm-com-log .event.ft {
   width: min(620px, 100%);
 }
 
+.player-browse-nav {
+  position: sticky;
+  top: -1.25rem;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.55rem;
+  margin: -1.25rem -1.4rem 0.9rem;
+  padding: 0.7rem 3.2rem 0.7rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(10px);
+}
+.player-browse-back {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.player-browse-position {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.player-browse-controls {
+  display: inline-flex;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .player-browse-nav {
+    grid-template-columns: minmax(0, 1fr) auto;
+    top: -1rem;
+    margin: -1rem -1rem 0.8rem;
+    padding: 0.65rem 2.7rem 0.65rem 0.75rem;
+  }
+  .player-browse-position { display: none; }
+  .player-browse-controls .btn { padding-inline: 0.45rem; }
+}
+
 .global-search-shell {
   padding-right: 1.4rem;
 }
@@ -5111,18 +5156,21 @@ html[data-theme="light"] .cl-row {
 }
 .scout-attr-chip {
   display: inline-flex;
-  gap: 0.25rem;
+  gap: 0.3rem;
   align-items: baseline;
-  padding: 0.12rem 0.4rem;
-  border-radius: 6px;
-  font-size: 0.72rem;
+  padding: 0.18rem 0.48rem;
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.35;
   background: rgba(15, 23, 42, 0.45);
-  border: 1px solid rgba(148, 163, 184, 0.25);
+  border: 1px solid rgba(148, 163, 184, 0.38);
 }
 .scout-attr-chip em {
   font-style: normal;
-  color: var(--muted);
-  font-weight: 600;
+  color: #cbd5e1;
+  font-weight: 700;
 }
 .attrs-fogged .attr-row span:last-child {
   font-variant-numeric: tabular-nums;
@@ -5702,6 +5750,15 @@ html[data-theme="light"] .badge.GK { background: rgba(161, 98, 7, 0.12); color: 
 html[data-theme="light"] .badge.DEF { background: rgba(37, 99, 235, 0.12); color: var(--primary); }
 html[data-theme="light"] .badge.MID { background: rgba(15, 138, 79, 0.12); color: var(--good); }
 html[data-theme="light"] .badge.ATT { background: rgba(201, 42, 54, 0.12); color: var(--bad); }
+html[data-theme="light"] .scout-attr-chip {
+  background: #e8edf4;
+  border-color: #b8c3d1;
+  color: #0f172a;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+html[data-theme="light"] .scout-attr-chip em {
+  color: #475569;
+}
 html[data-theme="light"] .news-list li,
 html[data-theme="light"] .prematch-brief,
 html[data-theme="light"] .facility-card,

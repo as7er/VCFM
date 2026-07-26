@@ -69,6 +69,8 @@ assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.id)).size, 188);
 assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.nameEn)).size, 188);
 assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.nameZh)).size, 188);
 assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.shortName)).size, 188);
+assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.city.en.toLowerCase())).size, 188);
+assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.city.zh)).size, 188);
 
 for (const club of CLUB_TEMPLATES) {
   const league = DIVISIONS[club.leagueId];
@@ -76,6 +78,7 @@ for (const club of CLUB_TEMPLATES) {
   assert.equal(league.countryId, club.countryId, `${club.id} country/league match`);
   assert.equal(club.countryCode, COUNTRIES[club.countryId].countryCode);
   assert.ok(isValidShortName(club.shortName), `${club.id} short name`);
+  assert.equal(club.short, club.city.zh, `${club.id} readable default short name`);
   assert.ok(isCssColor(club.colors.primary), `${club.id} primary color`);
   assert.ok(isCssColor(club.colors.secondary), `${club.id} secondary color`);
   assert.notEqual(club.colors.primary, club.colors.secondary, `${club.id} distinct colors`);
@@ -207,6 +210,10 @@ assert.equal(loaded.fixtures.length, originalFixtureCount);
 assert.deepEqual(loaded.fixtures.map((fixture) => `${fixture.home}|${fixture.away}`), fixtureRefsBefore);
 assert.deepEqual(Object.keys(loaded.table).sort(), originalTableKeys);
 assert.equal(loaded.clubs[0].name, clubBrandingById[loaded.clubs[0].id].nameZh);
+assert.equal(loaded.clubs[0].short, clubBrandingById[loaded.clubs[0].id].displayShortZh);
+applyWorldClubBranding(loaded, clubBrandingById, "en");
+assert.equal(loaded.clubs[0].short, clubBrandingById[loaded.clubs[0].id].displayShortEn);
+applyWorldClubBranding(loaded, clubBrandingById, "zh");
 assert.equal(ensureKit(loaded.clubs[0]).primary, clubBrandingById[loaded.clubs[0].id].kit.primary);
 assert.equal(loaded.transferHistory[0].fromClubId, "vcc");
 assert.equal(loaded.transferHistory[0].toClubId, "harbor");

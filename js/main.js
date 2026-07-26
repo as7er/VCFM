@@ -31,10 +31,14 @@ import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { getMatchView, destroyMatchView } from "./matchview.js?v=146";
 import { nationFlagHtml } from "./flags.js?v=146";
-import { applyWorldClubBranding, localizedClubName } from "./branding.js";
+import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 
 function clubDisplayName(club) {
   return localizedClubName(club, getLang()) || club?.name || "—";
+}
+
+function clubDisplayShortName(club) {
+  return localizedClubShortName(club, getLang()) || clubDisplayName(club);
 }
 
 function clubNameById(clubId, fallback = "—") {
@@ -1266,9 +1270,15 @@ function bindMainOnce() {
     if (playerLink) {
       e.preventDefault();
       e.stopPropagation();
+      const sourceWrap = playerLink.closest(".table-wrap");
       showPlayerModal(playerLink.dataset.playerLink, {
         nationCode: playerLink.dataset.playerNation || null,
         squadNumber: playerLink.dataset.playerNumber ? Number(playerLink.dataset.playerNumber) : null,
+        browseType: playerLink.dataset.playerBrowse || null,
+        browseId: playerLink.dataset.playerBrowseId || null,
+        competitionId: playerLink.dataset.playerCompetition || null,
+        returnScrollTop: sourceWrap?.scrollTop || 0,
+        returnModalScrollTop: $("#modal-card")?.scrollTop || 0,
       });
     }
   });
@@ -1283,6 +1293,19 @@ function bindMainOnce() {
       e.preventDefault();
       closeModal();
       return;
+    }
+    if (
+      modalOpen &&
+      activePlayerBrowseContext &&
+      (e.key === "ArrowLeft" || e.key === "ArrowRight")
+    ) {
+      const tag = e.target?.tagName?.toLowerCase();
+      const typing = e.target?.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
+      if (!typing) {
+        e.preventDefault();
+        navigatePlayerBrowse(e.key === "ArrowLeft" ? -1 : 1);
+        return;
+      }
     }
     if (!$("#screen-main")?.classList.contains("active")) return;
     const tag = e.target?.tagName?.toLowerCase();
@@ -1384,6 +1407,8 @@ function refreshAll() {
 
 /** 世界赛事页当前选中的国家队 code */
 let selectedNationCode = null;
+/** 从俱乐部/国家队名单进入球员资料时，保留连续浏览与返回上下文。 */
+let activePlayerBrowseContext = null;
 
 function nationCellHtml(code, clickable = true) {
   const label = `${nationFlagHtml(code)}${escapeHtml(nationName(code, getLang()))}`;
@@ -1468,7 +1493,13 @@ function nationDetailHtml(code, competitionId = null, meta = null, record = null
                   player.id,
                   player.name || "—",
                   "",
-                  { nationCode: code, squadNumber }
+                  {
+                    nationCode: code,
+                    squadNumber,
+                    browseType: "nation",
+                    browseId: code,
+                    competitionId,
+                  }
                 )}${mark}</span></td>
                 <td>${club ? clubLinkHtml(club.id, club.name) : "—"}</td>
                 <td>${player.ovr ?? "—"}</td>
@@ -1491,6 +1522,7 @@ function nationDetailHtml(code, competitionId = null, meta = null, record = null
 
 function showNationModal(code, competitionId = null) {
   if (!world || !code) return;
+  activePlayerBrowseContext = null;
   ensureInternational(world);
   const teams = listNationalTeams(world);
   const records = nationalRecords(world);
@@ -2480,6 +2512,9 @@ function showPlayerModal(playerId, context = {}) {
   }
   if (!player) return;
 
+  const browseContext = resolvePlayerBrowseContext(player.id, context);
+  activePlayerBrowseContext = browseContext;
+
   const owningClub = fromOther || world.clubs.find((item) => item.id === player.clubId) || (isYouth ? club : null);
   const nationalCode = context.nationCode === player.nationality ? context.nationCode : null;
   const nationalNumber = nationalCode && context.squadNumber != null ? Number(context.squadNumber) : null;
@@ -2570,6 +2605,7 @@ function showPlayerModal(playerId, context = {}) {
   if (displayTeam) ensureKit(displayTeam);
   $("#modal-card")?.classList.remove("wide", "search-modal");
   $("#modal-body").innerHTML = `
+    ${playerBrowseNavHtml(browseContext)}
     <div class="player-modal-head">
       ${playerAvatarHtml(player, displayTeam, 64)}
       ${displayTeam ? renderKitShirt(displayTeam, displayNumber, 56) : ""}
@@ -2692,10 +2728,113 @@ function showPlayerModal(playerId, context = {}) {
     </div>
   `;
   $("#modal").classList.remove("hidden");
+  $("#modal-card").scrollTop = 0;
+  bindPlayerBrowseControls();
   if (!isYouth) {
     bindPlayerContractActions(player, fromOther);
-    bindPlayerTalkActions(player, fromOther);
+    bindPlayerTalkActions(player, fromOther, browseContext);
   }
+}
+
+function playerBrowseItems(context) {
+  if (!world || !context?.browseType || !context?.browseId) return [];
+  const shared = {
+    browseType: context.browseType,
+    browseId: context.browseId,
+    competitionId: context.competitionId || null,
+    returnScrollTop: Number(context.returnScrollTop || 0),
+    returnModalScrollTop: Number(context.returnModalScrollTop || 0),
+  };
+  if (context.browseType === "club") {
+    const sourceClub = world.clubs.find((item) => item.id === context.browseId);
+    if (!sourceClub) return [];
+    return [...(sourceClub.players || [])]
+      .sort((a, b) => (b.ovr || 0) - (a.ovr || 0))
+      .slice(0, 16)
+      .map((item) => ({ player: item, context: { ...shared } }));
+  }
+  if (context.browseType === "nation") {
+    return nationalSquad(world, context.browseId).map(({ player: item, squadNumber }) => ({
+      player: item,
+      context: {
+        ...shared,
+        nationCode: context.browseId,
+        squadNumber,
+      },
+    }));
+  }
+  return [];
+}
+
+function resolvePlayerBrowseContext(playerId, context = {}) {
+  const items = playerBrowseItems(context);
+  const index = items.findIndex((item) => item.player.id === playerId);
+  if (index < 0) return null;
+  return {
+    ...items[index].context,
+    playerId,
+    index,
+    total: items.length,
+  };
+}
+
+function playerBrowseNavHtml(context) {
+  if (!context) return "";
+  const en = getLang() === "en";
+  const isClub = context.browseType === "club";
+  const sourceClub = isClub ? world.clubs.find((item) => item.id === context.browseId) : null;
+  const sourceName = isClub
+    ? clubDisplayName(sourceClub)
+    : nationName(context.browseId, getLang());
+  const backText = en ? `Back to ${sourceName}` : `返回${sourceName}名单`;
+  return `<nav class="player-browse-nav" aria-label="${escapeHtml(en ? "Squad player navigation" : "球队球员连续浏览")}">
+    <button type="button" class="btn small player-browse-back" data-player-browse-back title="${escapeHtml(backText)}">← ${escapeHtml(backText)}</button>
+    <span class="player-browse-position">${context.index + 1} / ${context.total}</span>
+    <span class="player-browse-controls">
+      <button type="button" class="btn small" data-player-browse-step="-1" ${context.index <= 0 ? "disabled" : ""} title="${escapeHtml(en ? "Previous player (Left arrow)" : "上一位球员（←）")}">← ${escapeHtml(en ? "Previous" : "上一位")}</button>
+      <button type="button" class="btn small" data-player-browse-step="1" ${context.index >= context.total - 1 ? "disabled" : ""} title="${escapeHtml(en ? "Next player (Right arrow)" : "下一位球员（→）")}">${escapeHtml(en ? "Next" : "下一位")} →</button>
+    </span>
+  </nav>`;
+}
+
+function navigatePlayerBrowse(delta) {
+  const current = activePlayerBrowseContext;
+  if (!current) return;
+  const items = playerBrowseItems(current);
+  const currentIndex = items.findIndex((item) => item.player.id === current.playerId);
+  if (currentIndex < 0) return;
+  const target = items[currentIndex + delta];
+  if (!target) return;
+  showPlayerModal(target.player.id, target.context);
+}
+
+function restorePlayerBrowseParent(context) {
+  if (!context) return false;
+  activePlayerBrowseContext = null;
+  if (context.browseType === "club") {
+    showClubModal(context.browseId);
+  } else if (context.browseType === "nation") {
+    showNationModal(context.browseId, context.competitionId || null);
+  } else {
+    return false;
+  }
+  requestAnimationFrame(() => {
+    const card = $("#modal-card");
+    if (card) card.scrollTop = Number(context.returnModalScrollTop || 0);
+    const firstTableWrap = $("#modal-body")?.querySelector(".table-wrap");
+    if (firstTableWrap) firstTableWrap.scrollTop = Number(context.returnScrollTop || 0);
+  });
+  return true;
+}
+
+function bindPlayerBrowseControls() {
+  const body = $("#modal-body");
+  body?.querySelector("[data-player-browse-back]")?.addEventListener("click", () => {
+    restorePlayerBrowseParent(activePlayerBrowseContext);
+  });
+  body?.querySelectorAll("[data-player-browse-step]").forEach((button) => {
+    button.addEventListener("click", () => navigatePlayerBrowse(Number(button.dataset.playerBrowseStep || 0)));
+  });
 }
 
 function renderPlayerTalkPanel(player) {
@@ -2727,7 +2866,7 @@ function relationTone(rel) {
   return "neutral";
 }
 
-function bindPlayerTalkActions(player, fromOther) {
+function bindPlayerTalkActions(player, fromOther, browseContext = null) {
   if (fromOther || !player) return;
   document.querySelectorAll("[data-talk]").forEach((btn) => {
     btn.onclick = () => {
@@ -2735,7 +2874,7 @@ function bindPlayerTalkActions(player, fromOther) {
       toast(res.msg);
       if (res.ok) {
         saveGame(world);
-        showPlayerModal(player.id);
+        showPlayerModal(player.id, browseContext || {});
         refreshAll();
       }
     };
@@ -3747,6 +3886,8 @@ function bindTacticsRoleSelects() {
 }
 
 function closeModal() {
+  if (restorePlayerBrowseParent(activePlayerBrowseContext)) return;
+  activePlayerBrowseContext = null;
   $("#modal")?.classList.add("hidden");
   $("#modal-card")?.classList.remove("wide", "search-modal");
 }
@@ -3944,6 +4085,7 @@ function renderGlobalSearchResults(rawQuery) {
 
 function openGlobalSearch() {
   if (!world || !$("#screen-main")?.classList.contains("active")) return;
+  activePlayerBrowseContext = null;
   const card = $("#modal-card");
   card?.classList.remove("wide");
   card?.classList.add("search-modal");
@@ -3963,10 +4105,17 @@ function openGlobalSearch() {
 
 function clubLinkHtml(clubId, label, extraClass = "") {
   const club = world.clubs.find((c) => c.id === clubId);
+  const fullName = clubDisplayName(club);
   const defaultName =
     label == null || label === club?.name || label === club?.nameZh || label === club?.nameEn;
-  const name = defaultName ? clubDisplayName(club) : label;
-  return `<button type="button" class="club-link ${extraClass}" data-club-link="${escapeHtml(clubId)}">${escapeHtml(name)}</button>`;
+  const codeName = label === club?.shortName || label === club?.shortCode;
+  const name = defaultName
+    ? fullName
+    : codeName
+      ? clubDisplayShortName(club)
+      : label;
+  const title = name !== fullName ? ` title="${escapeHtml(fullName)}" aria-label="${escapeHtml(fullName)}"` : "";
+  return `<button type="button" class="club-link ${extraClass}" data-club-link="${escapeHtml(clubId)}"${title}>${escapeHtml(name)}</button>`;
 }
 
 /** 可点击球员名 → showPlayerModal（全局 data-player-link 委托） */
@@ -3975,7 +4124,10 @@ function playerLinkHtml(playerId, label, extraClass = "", context = null) {
   const nationAttrs = context?.nationCode
     ? ` data-player-nation="${escapeHtml(context.nationCode)}"${context.squadNumber != null ? ` data-player-number="${Number(context.squadNumber)}"` : ""}`
     : "";
-  return `<button type="button" class="player-link ${extraClass}" data-player-link="${escapeHtml(playerId)}"${nationAttrs}>${escapeHtml(label ?? "?")}</button>`;
+  const browseAttrs = context?.browseType && context?.browseId
+    ? ` data-player-browse="${escapeHtml(context.browseType)}" data-player-browse-id="${escapeHtml(context.browseId)}"${context.competitionId ? ` data-player-competition="${escapeHtml(context.competitionId)}"` : ""}`
+    : "";
+  return `<button type="button" class="player-link ${extraClass}" data-player-link="${escapeHtml(playerId)}"${nationAttrs}${browseAttrs}>${escapeHtml(label ?? "?")}</button>`;
 }
 
 function formatFormHtml(form) {
@@ -4068,6 +4220,7 @@ function renderClubs() {
 
 function showClubModal(clubId) {
   if (!world || !clubId) return;
+  activePlayerBrowseContext = null;
   const club = world.clubs.find((c) => c.id === clubId);
   if (!club) return;
 
@@ -4124,7 +4277,7 @@ function showClubModal(clubId) {
       return `<tr>
         <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${p.number ?? "—"}</span></td>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 26)}
-          ${playerLinkHtml(p.id, p.name)}
+          ${playerLinkHtml(p.id, p.name, "", { browseType: "club", browseId: club.id })}
         </td>
         <td><span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span></td>
         <td>${p.age}</td>
@@ -4143,9 +4296,9 @@ function showClubModal(clubId) {
     const awayCls = f.away === club.id ? "me-side" : "";
     return `<tr>
       <td>D${f.day}</td>
-      <td class="${homeCls}">${escapeHtml(home?.short || home?.name || "?")}</td>
+      <td class="${homeCls}">${home ? clubLinkHtml(home.id, home.short) : "?"}</td>
       <td>${score}</td>
-      <td class="${awayCls}">${escapeHtml(away?.short || away?.name || "?")}</td>
+      <td class="${awayCls}">${away ? clubLinkHtml(away.id, away.short) : "?"}</td>
       <td>${f.competition === "cup" ? escapeHtml(f.roundLabel || t("match.cup")) : `R${f.round || ""}`}</td>
     </tr>`;
   };

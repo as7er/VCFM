@@ -144,13 +144,24 @@ export function localizedClubName(club, lang = "zh") {
   return localizedName({ nameZh: club.nameZh || club.name, nameEn: club.nameEn || club.name }, lang);
 }
 
+/** Readable localized short name; the four-letter shortName remains an internal/crest code. */
+export function localizedClubShortName(club, lang = "zh") {
+  if (!club) return "";
+  const branding = club.branding || {};
+  const city = club.city || {};
+  const readable = lang === "en"
+    ? branding.displayShortEn || branding.cityEn || city.en
+    : branding.displayShortZh || branding.cityZh || city.zh;
+  return readable || localizedClubName(club, lang);
+}
+
 /** Apply the latest display name without touching historical IDs or results. */
 export function applyClubBranding(club, branding, lang = "zh") {
   if (!club || !branding) return club;
   club.nameEn = branding.nameEn;
   club.nameZh = branding.nameZh;
   club.shortName = branding.shortName;
-  club.short = branding.shortName;
+  club.shortCode = branding.shortName;
   club.countryId = branding.countryId;
   club.countryCode = branding.countryCode;
   club.leagueId = club.division || branding.leagueId;
@@ -164,6 +175,7 @@ export function applyClubBranding(club, branding, lang = "zh") {
     crest: { ...branding.crest },
   };
   club.name = localizedClubName(club, lang);
+  club.short = localizedClubShortName(club, lang);
   return club;
 }
 
