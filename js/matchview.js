@@ -282,7 +282,7 @@ export class MatchView {
    */
   applySimSnapshot(sim, opts = {}) {
     if (!this._built || !sim?.players?.length) return false;
-    console.log('[DEBUG applySimSnapshot] Called with sim:', !!sim, 'players:', sim?.players?.length);
+    console.log('[DEBUG applySimSnapshot] Called with sim:', !!sim, 'players:', sim?.players?.length, 'ball:', sim.ball ? `(${sim.ball.x.toFixed(1)}, ${sim.ball.y.toFixed(1)})` : 'null');
     this.simDrive = true;
     this.scriptLock = false;
     this.flight = null;
@@ -5105,6 +5105,7 @@ export class MatchView {
 
     // —— 真空间投影：位置由 playSimTimeline 写入；软跟镜 + Canvas ——
     if (this.simDrive && (livePlay || staged) && !this.frozen) {
+      console.log('[DEBUG update SimEngine path] Rendering', this.players.length, 'players, ball at', this.ball.x.toFixed(1), this.ball.y.toFixed(1));
       for (const pl of this.players) {
         if (pl.el.classList.contains("sent-off")) continue;
         this._applyPlayer(pl);
