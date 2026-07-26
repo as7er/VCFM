@@ -1187,6 +1187,7 @@ export class MatchView {
     this.directorBias = 0.5;
     this.frozen = false;
     this.scriptLock = false;
+    this.simDrive = false;  // 重置 SimEngine 模式，使用导演 AI
     this.aftermathUntil = 0;
     this.camMode = "wide";
     this._clearFocus?.();
@@ -5095,17 +5096,6 @@ export class MatchView {
     // scriptLock：关键事件预演，只朝脚本目标跑，不跑自由 AI
     // pre / idle / pause：钉阵型；UI frozen：冻结当前帧
 
-    // DEBUG: 开球后记录一次状态
-    if (!this._debugLogged && livePlay) {
-      console.log('[Update] First livePlay frame:');
-      console.log('  livePlay:', livePlay);
-      console.log('  simDrive:', this.simDrive);
-      console.log('  frozen:', this.frozen);
-      console.log('  scriptLock:', this.scriptLock);
-      console.log('  FSM:', this.fsm.describe());
-      this._debugLogged = true;
-    }
-
     // —— 真空间投影：位置由 playSimTimeline 写入；软跟镜 + Canvas ——
     if (this.simDrive && (livePlay || staged) && !this.frozen) {
       for (const pl of this.players) {
@@ -5560,12 +5550,7 @@ export class MatchView {
       const homeId0 = fixture?.home || this.home?.id;
       switch (ev.type) {
         case "kickoff":
-          console.log('[Kickoff] Before transition:', this.fsm.describe());
           this.fsm.transition('PLAYING', 'FREE_PLAY');
-          console.log('[Kickoff] After transition:', this.fsm.describe());
-          console.log('[Kickoff] canAIAct:', this.fsm.canAIAct());
-          console.log('[Kickoff] simDrive:', this.simDrive);
-          console.log('[Kickoff] frozen:', this.frozen);
           this.frozen = false;
           this.setBanner(ev.text || "Kick-off", "info");
           this.setCaption(ev.text || "Kick-off", "info", 1400);
