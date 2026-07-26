@@ -39,6 +39,11 @@ export class MatchViewFSM {
     const oldState = this.state;
     const oldSubState = this.subState;
 
+    // 幂等操作：允许转换到同一状态（例如重新 build 时）
+    if (oldState === newState && oldSubState === newSubState) {
+      return true;
+    }
+
     // 验证转换合法性
     if (!this._isValidTransition(oldState, oldSubState, newState, newSubState)) {
       console.warn(`[FSM] Invalid transition: ${oldState}${oldSubState ? `.${oldSubState}` : ''} -> ${newState}${newSubState ? `.${newSubState}` : ''}`);
