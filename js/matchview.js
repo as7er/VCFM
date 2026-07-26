@@ -22,7 +22,6 @@ import {
   autoLineup,
   assignPlayersToFormationSlots,
 } from "./models.js";
-import { MatchViewFSM } from "./matchview-fsm.js";
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
