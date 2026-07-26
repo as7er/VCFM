@@ -1177,7 +1177,8 @@ async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighl
     }
 
     if (onEvent) {
-      const snap = liveSnap(state, minute, null);
+      const simFrame = state.simEng?.snapshot() || null;
+      const snap = liveSnap(state, minute, simFrame);
       const recent = state.events.slice(mark);
       for (const ev of recent) {
         await onEvent(ev, snap);
