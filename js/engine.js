@@ -120,6 +120,13 @@ import {
   assertTransferOpen,
 } from "./transfers.js";
 import {
+  analyzeSquadBalance,
+  canSellPosition,
+  shouldBuyPosition,
+  selectPlayerToSell as selectPlayerToSellSmart,
+  selectPositionToBuy,
+} from "./squad-balance.js";
+import {
   ensureFacilities,
   startFacilityUpgrade,
   upgradeYouthAcademy,
@@ -1163,6 +1170,7 @@ function transferBetween(world, buyer, seller, player) {
 
 /**
  * AI 转会：窗内约每 3 天；按短板/年龄结构买卖，可能挖用户队。
+ * v153: 增强阵容平衡检查，避免8后卫3前锋等失衡情况。
  */
 export function processAiTransfers(world) {
   if (world.seasonOver || world.sacked) return [];
@@ -1185,20 +1193,14 @@ export function processAiTransfers(world) {
     const needCash = club.money < 350000 || club.players.length >= 26;
     const tooOld = avgAge >= 29 && club.players.length > 16;
 
-    // 卖：最弱、高龄低潜、或套现
+    // 卖：优先卖出过剩位置的最弱球员（而非全队最弱）
     if (needCash || tooOld || chance(0.15)) {
-      const sellable = club.players
-        .slice()
-        .filter((p) => {
-          if (p.pos === "GK" && posCount(club.players, "GK") <= 1) return false;
-          return true;
-        })
-        .sort((a, b) => {
-          const sa = (a.ovr || 0) - (a.age >= 32 ? 3 : 0) + ((a.potential || a.ovr) < a.ovr ? -1 : 0);
-          const sb = (b.ovr || 0) - (b.age >= 32 ? 3 : 0) + ((b.potential || b.ovr) < b.ovr ? -1 : 0);
-          return sa - sb;
-        });
-      const victim = sellable[0];
+      // 使用阵容平衡系统选择卖出球员
+      const victim = selectPlayerToSellSmart(club.players, (p, players) => {
+        const posCount = players.filter((x) => x.pos === p.pos).length;
+        if (p.pos === "GK" && posCount <= 1) return false;
+        return true;
+      });
       if (victim && club.players.length > 15) {
         const buyers = world.clubs
           .filter(
@@ -1245,21 +1247,18 @@ export function processAiTransfers(world) {
       }
     }
 
-    // 买：补短板，优先同级或更强联赛中性价比
+    // 买：使用阵容平衡系统确定需要补强的位置
+    const needPos = selectPositionToBuy(club.players, club.money);
+    if (!needPos || club.money < 150000 || club.players.length >= 27) continue;
+
+    // 同时检查：如果该位置已经够用，也跳过（双重保险）
     const counts = {
       GK: posCount(club.players, "GK"),
       DEF: posCount(club.players, "DEF"),
       MID: posCount(club.players, "MID"),
       ATT: posCount(club.players, "ATT"),
     };
-    let needPos = null;
-    if (counts.GK < 2) needPos = "GK";
-    else {
-      const order = ["DEF", "MID", "ATT"].sort((a, b) => counts[a] - counts[b]);
-      if (counts[order[0]] < 5) needPos = order[0];
-      else if (chance(0.2)) needPos = order[0]; // 偶发升级阵容
-    }
-    if (!needPos || club.money < 150000 || club.players.length >= 27) continue;
+    if (!shouldBuyPosition(club.players, needPos)) continue;
 
     const minOvr = Math.max(6, Math.floor((club.power || 50) / 8) - 1);
     const candidates = [];
