@@ -91,13 +91,81 @@ export class DirectorScript {
    * @param {object} config - GOAL_NARRATIVE 或自定义配置
    * @param {object} context - { matchView, eventData }
    */
-  constructor(config, context) {
+  constructor(config, context = {}) {
     this.config = config;
     this.context = context;
     this.currentPhaseIndex = 0;
     this.phaseStartTime = 0;
+    this.elapsed = 0;
+    this.phaseElapsed = 0;
     this.paused = false;
     this.aborted = false;
+  }
+
+  /**
+   * 推进时间（每帧调用）
+   * @param {number} dt - 增量时间（秒）
+   */
+  tick(dt) {
+    if (dt < 0) dt = 0;
+    if (this.paused) return;
+
+    const { phases } = this.config;
+    if (!phases || this.currentPhaseIndex >= phases.length) {
+      this.aborted = true;
+      return;
+    }
+
+    this.elapsed += dt;
+    this.phaseElapsed += dt;
+
+    // 处理阶段切换
+    while (this.currentPhaseIndex < phases.length) {
+      const currentPhase = phases[this.currentPhaseIndex];
+
+      if (this.phaseElapsed >= currentPhase.duration) {
+        this.phaseElapsed -= currentPhase.duration;
+        this.currentPhaseIndex++;
+      } else {
+        break;
+      }
+    }
+
+    // 检查是否完成所有阶段
+    if (this.currentPhaseIndex >= phases.length) {
+      this.aborted = true;
+    }
+  }
+
+  /**
+   * 获取当前阶段
+   * @returns {object|null}
+   */
+  currentPhase() {
+    const { phases } = this.config;
+    if (!phases || this.currentPhaseIndex >= phases.length) {
+      return null;
+    }
+    return phases[this.currentPhaseIndex];
+  }
+
+  /**
+   * 获取当前阶段进度 (0-1)
+   * @returns {number}
+   */
+  phaseProgress() {
+    const phase = this.currentPhase();
+    if (!phase) return 1;
+    return Math.min(this.phaseElapsed / phase.duration, 1);
+  }
+
+  /**
+   * 脚本是否完成
+   * @returns {boolean}
+   */
+  isComplete() {
+    const { phases } = this.config;
+    return !phases || this.currentPhaseIndex >= phases.length || this.aborted;
   }
 
   /**

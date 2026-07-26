@@ -15,6 +15,7 @@
 import { FORMATIONS, playerDisplaySurname } from "./data.js";
 import { MatchViewFSM } from "./matchview-fsm.js";
 import { coordSystem } from "./matchview-coords.js";
+import { GOAL_NARRATIVE, DirectorScript } from "./matchview-director.js";
 import {
   ensureKit,
   getLineupPlayers,
@@ -6413,6 +6414,20 @@ export class MatchView {
     this.fsm.transition('GOAL_SEQUENCE', 'BUILDUP');
     this.camMode = "follow";
     this.camBoostUntil = performance.now() + 3200;
+
+    // 创建 DirectorScript 实例
+    const narrative = GOAL_NARRATIVE.rewatch;
+    this._goalScript = new DirectorScript(narrative, {
+      attHome,
+      team,
+      scorerId: scorer.id,
+      assistId: assister?.id || null,
+      start,
+      mid: { x: scorer.x, y: scorer.y },
+      mouth,
+      lang,
+    });
+
     this._goalBeat = {
       t: 0,
       attHome,
@@ -6432,93 +6447,143 @@ export class MatchView {
     const g = this._goalBeat;
     if (!g || g.done) return false;
     g.t += Math.max(0.008, dt);
+
+    const script = this._goalScript;
+    if (!script) return false;
+
+    script.tick(dt);
+    const phase = script.currentPhase();
+    if (!phase) {
+      g.done = true;
+      this._goalBeat = null;
+      this._goalScript = null;
+      return false;
+    }
+
     const scorer = this.players.find((p) => p.id === g.scorerId);
     const assister = g.assistId
       ? this.players.find((p) => p.id === g.assistId)
       : null;
     const en = g.lang === "en";
 
-    // 0–0.85s 助攻传球
-    if (g.t < 0.85) {
-      const u = clamp(g.t / 0.85, 0, 1);
-      const e = u * u * (3 - 2 * u);
-      this.ball.x = lerp(g.start.x, g.mid.x, e);
-      this.ball.y = lerp(g.start.y, g.mid.y, e);
-      this.ball.z = Math.sin(u * Math.PI) * 1.8;
-      this.ballState = "flight";
-      this.carrier = null;
-      for (const pl of this.players) pl.el.classList.remove("has-ball");
-      if (assister) assister.el.classList.add("highlight");
-      if (scorer) scorer.el.classList.add("highlight");
-      if (g.t > 0.05 && g.t < 0.2) {
-        this.setCaption?.(en ? "Assist…" : "助攻传球…", "shot", 0);
-      }
-    }
-    // 0.85–1.25s 接球停一下
-    else if (g.t < 1.25) {
-      if (scorer) {
-        this.ball.x = scorer.x + Math.cos(scorer.heading || 0) * 1.1;
-        this.ball.y = scorer.y + Math.sin(scorer.heading || 0) * 1.1;
-        this.ball.z = 0;
-        this.carrier = scorer;
+    // 根据当前阶段执行对应的动画
+    switch (phase.name) {
+      case 'setup':
+        // 准备阶段：保持初始位置
+        break;
+
+      case 'pass':
+        // 传球阶段
+        {
+          const u = clamp(script.phaseProgress(), 0, 1);
+          const e = u * u * (3 - 2 * u);
+          this.ball.x = lerp(g.start.x, g.mid.x, e);
+          this.ball.y = lerp(g.start.y, g.mid.y, e);
+          this.ball.z = Math.sin(u * Math.PI) * 1.8;
+          this.ballState = "flight";
+          this.carrier = null;
+          for (const pl of this.players) pl.el.classList.remove("has-ball");
+          if (assister) assister.el.classList.add("highlight");
+          if (scorer) scorer.el.classList.add("highlight");
+          if (u > 0.1 && u < 0.4) {
+            this.setCaption?.(en ? "Assist…" : "助攻传球…", "shot", 0);
+          }
+        }
+        break;
+
+      case 'receive':
+        // 接球阶段
+        if (scorer) {
+          this.ball.x = scorer.x + Math.cos(scorer.heading || 0) * 1.1;
+          this.ball.y = scorer.y + Math.sin(scorer.heading || 0) * 1.1;
+          this.ball.z = 0;
+          this.carrier = scorer;
+          for (const pl of this.players) pl.el.classList.remove("has-ball");
+          scorer.el.classList.add("has-ball", "highlight", "scorer");
+          this._setFocus([scorer], 2000);
+        }
+        this.ballState = "held";
+        break;
+
+      case 'shot':
+        // 起脚射门阶段
+        {
+          const nm = scorer?.name || "";
+          this.setCaption?.(
+            nm ? (en ? `${nm} shoots!` : `${nm} 射门!`) : en ? "Shot!" : "射门!",
+            "shot",
+            0
+          );
+          if (scorer) {
+            for (const pl of this.players) {
+              pl.el.classList.remove("has-ball");
+              if (pl === scorer) pl.el.classList.add("highlight", "scorer");
+            }
+          }
+        }
+        break;
+
+      case 'flight':
+        // 球飞行阶段
+        {
+          const u = clamp(script.phaseProgress(), 0, 1);
+          const e = u * u * (3 - 2 * u);
+          const from = g.mid;
+          this.ball.x = lerp(from.x, g.mouth.gx, e);
+          this.ball.y = lerp(from.y, g.mouth.gy, e);
+          this.ball.z = Math.sin(u * Math.PI) * (2.2 + (1 - u) * 1.5);
+          this.ballState = "shot";
+          this.carrier = null;
+          for (const pl of this.players) {
+            pl.el.classList.remove("has-ball");
+            if (pl === scorer) pl.el.classList.add("highlight", "scorer");
+          }
+        }
+        break;
+
+      case 'net':
+        // 入网阶段
+        {
+          const u = clamp(script.phaseProgress(), 0, 1);
+          if (u > 0.3 && !g._net) {
+            g._net = true;
+            this._goalNetEffect(g.mouth.gx, g.mouth.gy, g.attHome);
+            this.setBanner?.(en ? "⚽ GOAL" : "⚽ 进球", "goal");
+          }
+          this.ball.x = g.mouth.gx;
+          this.ball.y = g.mouth.gy;
+          this.ball.z = 0.2;
+          this.ballState = "free";
+          this.carrier = null;
+          for (const pl of this.players) pl.el.classList.remove("has-ball");
+        }
+        break;
+
+      case 'celebrate':
+        // 庆祝阶段
+        this.ball.x = g.mouth.gx;
+        this.ball.y = g.mouth.gy;
+        this.ball.z = 0.2;
+        this.ballState = "free";
+        this.carrier = null;
         for (const pl of this.players) pl.el.classList.remove("has-ball");
-        scorer.el.classList.add("has-ball", "highlight", "scorer");
-        this._setFocus([scorer], 2000);
-      }
-      this.ballState = "held";
-      if (g.t < 0.95) {
-        const nm = scorer?.name || "";
-        this.setCaption?.(
-          nm ? (en ? `${nm} shoots!` : `${nm} 射门!`) : en ? "Shot!" : "射门!",
-          "shot",
-          0
-        );
-      }
+        if (!g._cele) {
+          g._cele = true;
+          if (scorer) this._beginVisualCelebrate(scorer, { playerId: scorer.id });
+        }
+        break;
     }
-    // 1.25–2.35s 射门入网
-    else if (g.t < 2.35) {
-      const u = clamp((g.t - 1.25) / 1.1, 0, 1);
-      const e = u * u * (3 - 2 * u);
-      const from = g.mid;
-      this.ball.x = lerp(from.x, g.mouth.gx, e);
-      this.ball.y = lerp(from.y, g.mouth.gy, e);
-      this.ball.z = Math.sin(u * Math.PI) * (2.2 + (1 - u) * 1.5);
-      this.ballState = "shot";
-      this.carrier = null;
-      for (const pl of this.players) {
-        pl.el.classList.remove("has-ball");
-        if (pl === scorer) pl.el.classList.add("highlight", "scorer");
-      }
-      if (!g._net && u > 0.92) {
-        g._net = true;
-        this._goalNetEffect(g.mouth.gx, g.mouth.gy, g.attHome);
-        this.setBanner?.(en ? "⚽ GOAL" : "⚽ 进球", "goal");
-      }
-    }
-    // 2.35s+ 定格球在网内 → 切庆祝
-    else {
-      this.ball.x = g.mouth.gx;
-      this.ball.y = g.mouth.gy;
-      this.ball.z = 0.2;
-      this.ballState = "free";
-      this.carrier = null;
-      for (const pl of this.players) pl.el.classList.remove("has-ball");
-      if (!g._cele) {
-        g._cele = true;
-        if (scorer) this._beginVisualCelebrate(scorer, { playerId: scorer.id });
-      }
-      // 叙事结束，庆祝继续由 _celebrate 接管
-      if (g.t > 2.55) {
-        g.done = true;
-        this._goalBeat = null;
-      }
-    }
+
     this.ball.tx = this.ball.x;
     this.ball.ty = this.ball.y;
     this._pushBallTrail();
     this._applyBall();
-    // 射门段加强橙黄轨迹
-    if (g.t >= 1.25 && g.t < 2.4) this.ballState = "shot";
+
+    // 射门和飞行阶段加强橙黄轨迹
+    if (phase.name === 'shot' || phase.name === 'flight' || phase.name === 'net') {
+      this.ballState = "shot";
+    }
+
     return !g.done;
   }
 
