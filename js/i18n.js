@@ -270,6 +270,8 @@ const dict = {
     "train.focusHint": "每日推进时生效；高强度更易成长也更易受伤。教练能力影响成长与恢复。",
     "train.intensity": "训练强度",
     "train.fitness": "阵容体能一览",
+    "train.prep": "赛前备战",
+    "train.prepHint": "针对下一场比赛的短期加成；调整后需间隔 3 天才能再次更改。",
 
     // tactics
     "tac.formation": "阵型",
@@ -752,6 +754,8 @@ const dict = {
     "train.focusHint": "Applies each day. Higher intensity grows faster but risks injury. Coach rating matters.",
     "train.intensity": "Intensity",
     "train.fitness": "Squad fitness",
+    "train.prep": "Match preparation",
+    "train.prepHint": "Short-term boost for your next match. Once changed, you must wait 3 days before switching again.",
 
     "tac.formation": "Formation",
     "tac.style": "Tactics",

@@ -209,6 +209,11 @@ import {
   isAvailable,
 } from "./engine.js";
 import {
+  TRAINING_MODES,
+  ensureTrainingBoost,
+  setTrainingMode,
+} from "./training-boost.js";
+import {
   ensureInternational,
   listInternationalCompetitions,
   internationalMatches,
@@ -2258,6 +2263,96 @@ function renderTraining() {
     else tip += en ? " Match preparation is useful before matchday." : " 比赛日前可切「赛前准备」。";
     hint.textContent = tip;
   }
+
+  renderTrainingPrep(club, en);
+}
+
+/** 赛前备战：训练模式短期加成（影响下一场比赛） */
+const PREP_MODE_ICONS = {
+  balanced: "⚖️",
+  attack: "⚽",
+  defense: "🛡️",
+  fitness: "💪",
+  morale: "😊",
+  setpiece: "🎯",
+};
+
+function renderTrainingPrep(club, en) {
+  const boost = ensureTrainingBoost(club);
+  const modeBox = $("#training-mode-list");
+  if (modeBox) {
+    modeBox.innerHTML = Object.entries(TRAINING_MODES)
+      .map(
+        ([key, m]) => `<button type="button" class="training-opt${
+          boost.mode === key ? " active" : ""
+        }" data-prep-mode="${key}">
+          <div class="opt-title">${PREP_MODE_ICONS[key] || ""} ${escapeHtml(
+            en ? m.labelEn : m.label
+          )}</div>
+          <div class="opt-desc">${escapeHtml(en ? m.descEn : m.desc)}</div>
+        </button>`
+      )
+      .join("");
+    modeBox.querySelectorAll("[data-prep-mode]").forEach((btn) => {
+      btn.onclick = () => {
+        const r = setTrainingMode(club, btn.dataset.prepMode, world.day);
+        const msg = en ? r.msgEn || r.msg : r.msg;
+        if (!r.ok) {
+          toast(msg);
+          return;
+        }
+        autosave("training-prep-mode");
+        renderTraining();
+        toast(msg);
+      };
+    });
+  }
+
+  const sumEl = $("#training-mode-summary");
+  if (!sumEl) return;
+  const cur = TRAINING_MODES[boost.mode] || TRAINING_MODES.balanced;
+
+  // 效果与代价明细
+  const effects = [];
+  const pct = (v) => `${v > 0 ? "+" : ""}${v}%`;
+  if (cur.attacking) effects.push(en ? `Attack ${pct(cur.attacking)}` : `进攻 ${pct(cur.attacking)}`);
+  if (cur.defending) effects.push(en ? `Defence ${pct(cur.defending)}` : `防守 ${pct(cur.defending)}`);
+  if (cur.setpiece) effects.push(en ? `Set pieces ${pct(cur.setpiece)}` : `定位球 ${pct(cur.setpiece)}`);
+  if (cur.fitness) effects.push(en ? `Fitness ${cur.fitness > 0 ? "+" : ""}${cur.fitness}` : `体能 ${cur.fitness > 0 ? "+" : ""}${cur.fitness}`);
+  if (cur.morale) effects.push(en ? `Morale ${cur.morale > 0 ? "+" : ""}${cur.morale}` : `士气 ${cur.morale > 0 ? "+" : ""}${cur.morale}`);
+  if (cur.injury) effects.push(en ? `Injury risk ${pct(Math.round(cur.injury * 100))}` : `受伤风险 ${pct(Math.round(cur.injury * 100))}`);
+
+  // 冷却状态
+  const sinceChange = world.day - (boost.lastChanged || 0);
+  const wait = boost.lastChanged > 0 ? Math.max(0, 3 - sinceChange) : 0;
+  const cdLine = wait > 0
+    ? en ? `Can switch again in ${wait} day(s)` : `${wait} 天后可再次调整`
+    : en ? "Ready to switch" : "可随时调整";
+
+  // 下场对手
+  const next = getNextUserMatch(world);
+  let oppLine = "";
+  if (next) {
+    const oppId = next.home === club.id ? next.away : next.home;
+    const opp = world.clubs.find((c) => c.id === oppId);
+    if (opp) {
+      const atHome = next.home === club.id;
+      const oppOvr = opp.players?.length
+        ? Math.round(opp.players.reduce((s, p) => s + (p.ovr || 0), 0) / opp.players.length)
+        : null;
+      oppLine = en
+        ? `Next: ${opp.name} (${atHome ? "H" : "A"}${oppOvr ? `, avg OVR ${oppOvr}` : ""})`
+        : `下场对手：${opp.name}（${atHome ? "主" : "客"}场${oppOvr ? `，平均能力 ${oppOvr}` : ""}）`;
+    }
+  }
+
+  sumEl.innerHTML = `<strong>${en ? "Current:" : "当前："}</strong>${escapeHtml(
+    `${PREP_MODE_ICONS[boost.mode] || ""} ${en ? cur.labelEn : cur.label}`
+  )}<br>
+    <span class="muted">${escapeHtml(
+      effects.length ? effects.join(" · ") : en ? "No special bonus" : "无特殊加成"
+    )}</span><br>
+    <span class="muted">${escapeHtml(cdLine)}${oppLine ? ` · ${escapeHtml(oppLine)}` : ""}</span>`;
 }
 
 function renderStaff() {
@@ -5408,6 +5503,149 @@ function rebuildGoalReplaysFromFixture(fixture) {
 }
 
 // ---------- Day / Match ----------
+/**
+ * 把 advanceDay() 返回的事件转成可展示的行
+ * @returns {Array<{day:number, icon:string, text:string, priority:number}>}
+ */
+function advanceEventLines(events) {
+  if (!Array.isArray(events) || !events.length) return [];
+  const en = getLang() === "en";
+  const lines = [];
+  for (const ev of events) {
+    if (!ev || !ev.type) continue;
+    const day = ev.day ?? world?.day ?? 0;
+    switch (ev.type) {
+      case "transfer_window": {
+        const map = {
+          summer_open: en ? "Summer transfer window is open" : "夏季转会窗开启",
+          winter_open: en ? "Winter transfer window is open" : "冬季转会窗开启",
+          closed: en ? "Transfer window has closed" : "转会窗已关闭",
+        };
+        lines.push({ day, icon: "📅", text: map[ev.phase] || (en ? "Transfer window update" : "转会窗变动"), priority: 3 });
+        break;
+      }
+      case "board_warning":
+        lines.push({
+          day,
+          icon: "⚠️",
+          text: en
+            ? `Board warning ${ev.warnings}/${ev.maxWarnings}`
+            : `董事会警告 ${ev.warnings}/${ev.maxWarnings}`,
+          priority: 4,
+        });
+        break;
+      case "player_unhappy":
+        lines.push({
+          day,
+          icon: "💬",
+          text: en ? `${ev.player} wants a word` : `${ev.player} 要求与你谈话`,
+          priority: 3,
+        });
+        break;
+      case "facility_completed": {
+        const name =
+          ev.facility === "stadium"
+            ? en ? "Stadium" : "球场"
+            : ev.facility === "training"
+              ? en ? "Training ground" : "训练场"
+              : en ? "Facility" : "设施";
+        lines.push({ day, icon: "🏟️", text: en ? `${name} upgrade completed` : `${name}扩建完工`, priority: 3 });
+        break;
+      }
+      case "injury_wave":
+        lines.push({
+          day,
+          icon: "🚑",
+          text: en ? `${ev.count} players in the treatment room` : `伤病潮：${ev.count} 人在治疗中`,
+          priority: 3,
+        });
+        break;
+      case "youth_recruitment":
+        lines.push({
+          day,
+          icon: "🎓",
+          text: en
+            ? `Youth intake: ${ev.count} newcomer(s)${ev.avgPotential ? `, avg potential ${ev.avgPotential}` : ""}`
+            : `青训招募 ${ev.count} 名新人${ev.avgPotential ? `，平均潜力 ${ev.avgPotential}` : ""}`,
+          priority: 2,
+        });
+        break;
+      case "loan_returned":
+        lines.push({
+          day,
+          icon: "🔁",
+          text: en ? `${ev.count} loanee(s) returned` : `${ev.count} 名租借球员归队`,
+          priority: 2,
+        });
+        break;
+      case "international_break":
+        lines.push({
+          day,
+          icon: "🌍",
+          text: en ? "International break" : "国际比赛日",
+          priority: 2,
+        });
+        break;
+      case "key_matches":
+        for (const m of ev.matches || []) {
+          lines.push({
+            day,
+            icon: m.derby ? "🔥" : "⚽",
+            text: `${m.home} ${m.homeGoals}-${m.awayGoals} ${m.away}${
+              m.derby ? (en ? " (derby)" : "（德比）") : ""
+            }`,
+            priority: 1,
+          });
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return lines;
+}
+
+/** 多日推进后的关键事件摘要弹窗 */
+function showAdvanceSummary(events, days) {
+  const lines = advanceEventLines(events);
+  if (!lines.length) return false;
+  const body = $("#modal-body");
+  const modal = $("#modal");
+  if (!body || !modal) return false;
+  const en = getLang() === "en";
+  // 高优先级在前，同级按发生日期
+  const sorted = [...lines].sort(
+    (a, b) => b.priority - a.priority || a.day - b.day
+  );
+  const shown = sorted.slice(0, 40);
+  const hidden = sorted.length - shown.length;
+  body.innerHTML = `
+    <h3 style="margin:0 0 0.6rem">${escapeHtml(
+      en ? `Key events over ${days} day(s)` : `推进 ${days} 天的关键事件`
+    )}</h3>
+    <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0.35rem">
+      ${shown
+        .map(
+          (l) => `<li style="display:flex;gap:0.5rem;align-items:baseline">
+        <span style="opacity:0.6;min-width:3.2rem;font-variant-numeric:tabular-nums">D${l.day}</span>
+        <span>${l.icon}</span>
+        <span>${escapeHtml(l.text)}</span>
+      </li>`
+        )
+        .join("")}
+    </ul>
+    ${
+      hidden > 0
+        ? `<p class="hint" style="margin:0.6rem 0 0">${escapeHtml(
+            en ? `+${hidden} more event(s)` : `另有 ${hidden} 条事件`
+          )}</p>`
+        : ""
+    }`;
+  $("#modal-card")?.classList.remove("wide", "search-modal");
+  modal.classList.remove("hidden");
+  return true;
+}
+
 function onAdvance() {
   if (world.sacked) {
     handleSacked({ sacked: true, msg: world.sackedReason || "你已被解雇" });
@@ -5453,15 +5691,31 @@ function onAdvance() {
     toast(t("toast.seasonEndNews"));
     if (world.sacked) handleSacked({ sacked: true, msg: world.sackedReason });
   } else {
-    const n = pendingInboxCount(world);
-    if (n > 0) {
-      const urgent = listInbox(world, { pendingOnly: true, limit: 8 }).filter((m) => (m.priority || 1) >= 3);
-      if (urgent.length) {
-        toast(
-          getLang() === "en"
-            ? `Inbox: ${n} pending (${urgent.length} urgent)`
-            : `信箱有 ${n} 封待办（含 ${urgent.length} 封紧急）`
-        );
+    // 单日推进用轻提示而非弹窗：优先播报高优先级事件，其次才是信箱
+    const en = getLang() === "en";
+    const evLines = advanceEventLines(res.events).sort(
+      (a, b) => b.priority - a.priority
+    );
+    const top = evLines[0];
+    if (top && top.priority >= 3) {
+      const more =
+        evLines.length > 1
+          ? en
+            ? ` (+${evLines.length - 1})`
+            : `（另有 ${evLines.length - 1} 条）`
+          : "";
+      toast(`${top.icon} ${top.text}${more}`);
+    } else {
+      const n = pendingInboxCount(world);
+      if (n > 0) {
+        const urgent = listInbox(world, { pendingOnly: true, limit: 8 }).filter((m) => (m.priority || 1) >= 3);
+        if (urgent.length) {
+          toast(
+            en
+              ? `Inbox: ${n} pending (${urgent.length} urgent)`
+              : `信箱有 ${n} 封待办（含 ${urgent.length} 封紧急）`
+          );
+        }
       }
     }
   }
@@ -5499,6 +5753,8 @@ function onAdvanceToMatchday() {
   }
   autosave("advance-matchday");
   refreshAll();
+  // 多日推进：用摘要弹窗交代这段时间发生了什么
+  showAdvanceSummary(res.events, res.days);
 }
 
 /** 推进到赛季末：遇我方比赛停下（无「连推 N 天」） */
@@ -5543,6 +5799,7 @@ function onAdvanceToSeasonEnd() {
   }
   autosave("advance-season-end");
   refreshAll();
+  showAdvanceSummary(res.events, res.days);
 }
 
 function syncMatchSpeedUI() {

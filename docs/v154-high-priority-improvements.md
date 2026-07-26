@@ -304,22 +304,38 @@ const mods = trainingBoostToMatchMods(boost);
 
 ## 集成检查清单
 
-### 后续集成工作（需要界面支持）
+> 状态更新（v154.1）：以下集成工作已完成，细节见 CHANGELOG.md 的 v154.1 章节。
+> v154 提交本身留下了两处阻断性错误（`match.js` 导入不存在的函数、
+> `engine.js` 残留代码片段），当时游戏无法启动，已一并修复。
 
 #### 1. 比赛日收入动态化
-- [ ] `js/match.js` - 在 `simulateMatch()` 中传递 `formBonus` 和 `seasonPhaseBonus` 给 `matchdayIncome()`
-- [ ] 财务报表显示收入加成明细
+- [x] `js/match.js` - 在结算处传递 `formBonus` 和 `seasonPhaseBonus` 给 `matchdayIncome()`
+- [x] `js/facilities.js` - 补上文档承诺的 2.5 倍单场票房上限
+- [ ] 财务报表显示收入加成明细（目前只结算总额，未逐项拆解）
 
 #### 2. 推进日事件反馈
-- [ ] `js/main.js` - 在推进后展示 `events` 摘要
-- [ ] 设计事件摘要UI（弹窗或通知条）
-- [ ] 事件图标与本地化文本
+- [x] `js/main.js` - `advanceEventLines()` 事件文案与图标（中英）
+- [x] `showAdvanceSummary()` 摘要弹窗（多日推进 / 推进到赛季末）
+- [x] 单日推进走轻提示，避免每日弹窗打扰
+- [x] `js/engine.js` - `advanceToSeasonEnd()` 补上事件累积；事件补 `day` 字段
 
 #### 3. 训练短期加成
-- [ ] 训练页面集成模式选择器
-- [ ] 比赛准备页面显示当前加成
-- [ ] `js/sim/engine.js` - 应用 `trainingBoostToMatchMods()` 到比赛引擎
-- [ ] 比赛后重置 `boostedMatch` 标记
+- [x] `js/training-boost.js` - 补齐 `applyMatchPrepBonus()` / `resetMatchPrepCounter()`
+- [x] 训练页面集成模式选择器（含效果代价明细、冷却、下场对手）
+- [x] `js/match.js` - 攻防加成按 `attacking`/`defending` 分别修正，代价一并计入
+- [x] `js/match.js` - `prepInjuryMod()` 接入三处伤病判定
+- [x] 比赛后重置 `boostedMatch` 标记
+
+### 关键设计约束（改动时勿踩）
+
+**`applyMatchPrepBonus()` 必须幂等。** `recomputeSides()` 在单场比赛内有 16 处调用
+（换人、战术调整、中场、红牌等）。若按"首次调用后清零"实现，加成会在第一次
+换人后凭空消失。"每场只生效一次"由赛后的 `resetMatchPrepCounter()` 保证，
+不是由调用计数保证。
+
+**`matchday-income.js` 的 `calculateMatchdayBonus()` 不能与 `matchdayIncome()` 叠加。**
+两者都计算德比、杯赛阶段、争冠/保级加成，叠加会重复计算。与 `matchdayIncome()`
+配合时只使用正交的 `getFormBonus()` 和 `getSeasonPhaseBonus()`。
 
 ---
 
