@@ -1437,7 +1437,7 @@ html[data-theme="light"] .fm-scoreboard {
   min-width: 1.2ch;
   text-align: center;
   text-shadow: 0 0 24px rgba(61, 214, 140, 0.25);
-  margin: 0 -0.3rem;
+  margin: 0 -0.8rem;
 }
 .fm-sb-center {
   display: flex;
