@@ -362,8 +362,8 @@ function processYouthDay(world) {
       club.money -= cfg.upkeep;
     }
 
-    // 约每 30 天招生（球探提升潜力）
-    if (ya.daysSinceIntake >= 30) {
+    // 约每 60 天招生（球探提升潜力），更符合现实青训周期
+    if (ya.daysSinceIntake >= 60) {
       ya.daysSinceIntake = 0;
       const free = cfg.capacity - ya.players.length;
       const n = Math.min(cfg.intake, Math.max(0, free));
@@ -493,9 +493,9 @@ export function advanceDay(world) {
   // 青训
   processYouthDay(world);
 
-  // 国际比赛日（约每 30 天）
+  // 国际比赛日（约每 50 天，更贴近现实频率）
   if (!world.lastIntlDay) world.lastIntlDay = 0;
-  if (world.day - world.lastIntlDay >= 30 && !world.seasonOver) {
+  if (world.day - world.lastIntlDay >= 50 && !world.seasonOver) {
     runInternationalBreak(world);
   }
 

@@ -1823,6 +1823,8 @@ export function generateFixtures(clubIds) {
   const fixtures = [];
   let day = 3; // 赛季第 3 天开打
   let round = 1;
+  const DAYS_BETWEEN_ROUNDS = 6; // 改为6天间隔，更紧凑的赛程
+
   for (const pairs of single) {
     for (const p of pairs) {
       fixtures.push({
@@ -1838,7 +1840,7 @@ export function generateFixtures(clubIds) {
       });
     }
     round++;
-    day += 7;
+    day += DAYS_BETWEEN_ROUNDS;
   }
   // 下半程换主客
   const firstHalfCount = fixtures.length;
@@ -1855,10 +1857,10 @@ export function generateFixtures(clubIds) {
       played: false,
       events: [],
     });
-    // 同一轮多场同一天；每轮结束后 +7
+    // 同一轮多场同一天；每轮结束后间隔
     if ((i + 1) % (clubIds.length / 2) === 0) {
       round++;
-      day += 7;
+      day += DAYS_BETWEEN_ROUNDS;
     }
   }
 
@@ -1878,7 +1880,7 @@ export function generateFixtures(clubIds) {
       out.push({ ...f, round: rn, day: d });
     }
     rn++;
-    d += 7;
+    d += DAYS_BETWEEN_ROUNDS;
   }
   return out;
 }

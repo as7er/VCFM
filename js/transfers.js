@@ -3,13 +3,13 @@
  * 窗口外禁止买卖与 AI 转会（自由球员签约同样受限）
  */
 
-/** 夏窗：第 1 天起，默认 35 天 */
+/** 夏窗：第 1 天起，延长至 50 天（更接近现实的2个月） */
 const SUMMER_START = 1;
-const SUMMER_END = 35;
+const SUMMER_END = 50;
 
-/** 冬窗：约第 120–145 天（联赛中段） */
-const WINTER_START = 120;
-const WINTER_END = 145;
+/** 冬窗：约第 130–160 天（联赛中后段），延长至 30 天 */
+const WINTER_START = 130;
+const WINTER_END = 160;
 
 export function ensureTransferWindow(world) {
   if (!world) return null;

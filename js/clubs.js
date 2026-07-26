@@ -161,7 +161,7 @@ function buildBranding(base, renamed, division, countryId) {
   };
 }
 
-/** 超联 20 — 顶级都会 / 豪门气质（英超量级虚构名） */
+/** 超联 18 — 顶级都会 / 豪门气质（德甲/法甲量级，18队34轮更合理） */
 const D1 = [
   ["vcc", "Vanguard City", "Vanguard", 82, 55_000_000],
   ["harbor", "Harbourgate Athletic", "Harbour", 80, 48_000_000],
@@ -181,11 +181,10 @@ const D1 = [
   ["summit", "Summit United", "Summit", 70, 20_000_000],
   ["legend", "Legendale FC", "Legendale", 70, 19_500_000],
   ["prime", "Primrose City", "Primrose", 69, 19_000_000],
-  ["galaxy", "Galeway United", "Galeway", 69, 18_500_000],
-  ["zenith", "Zenith Borough", "Zenith", 68, 18_000_000],
+  // 删除最后2队以达到18队（galaxy 和 zenith）
 ];
 
-/** 甲级 20 — 中游工业城 / 海滨镇气质（英冠量级虚构名） */
+/** 甲级 18 — 中游工业城 / 海滨镇气质（二级联赛，18队更合理） */
 const D2 = [
   ["eagle", "Eaglecliff United", "Eaglecliff", 67, 14_000_000],
   ["forest", "Greenwood Rovers", "Greenwood", 66, 13_000_000],
@@ -205,11 +204,10 @@ const D2 = [
   ["coral", "Coral Bay FC", "Coral Bay", 59, 7_200_000],
   ["pioneer", "Pioneer Athletic", "Pioneer", 58, 7_000_000],
   ["comet", "Cometbury Town", "Cometbury", 58, 6_800_000],
-  ["bastion", "Bastion United", "Bastion", 57, 6_500_000],
-  ["mirage", "Mirage Town", "Mirage", 57, 6_200_000],
+  // 删除最后2队以达到18队（bastion 和 mirage）
 ];
 
-/** 乙级 20（开局可选）— 小镇 / 码头 / 矿区气质（英甲量级虚构名） */
+/** 乙级 18（开局可选）— 小镇 / 码头 / 矿区气质（三级联赛，18队更合理） */
 const D3 = [
   ["sunset", "Westend Town", "Westend", 55, 3_800_000],
   ["mill", "Millford United", "Millford", 54, 3_500_000],
@@ -229,8 +227,7 @@ const D3 = [
   ["slate", "Slateford Town", "Slateford", 47, 1_800_000],
   ["willow", "Willowdale FC", "Willowdale", 47, 1_750_000],
   ["brook", "Brookside Athletic", "Brookside", 46, 1_700_000],
-  ["anchor", "Anchorage FC", "Anchorage", 46, 1_650_000],
-  ["hearth", "Hearthfield Town", "Hearthfield", 45, 1_600_000],
+  // 删除最后2队以达到18队（anchor 和 hearth）
 ];
 
 const ENG_D1_BRANDS = [
@@ -252,8 +249,7 @@ const ENG_D1_BRANDS = [
   ["Fairhaven Rovers", "费尔黑文流浪者"],
   ["Wynthorpe Borough", "温索普自治镇"],
   ["Rosewick City", "罗斯维克城"],
-  ["Coldmere Athletic", "科尔德米尔竞技"],
-  ["Elmstead Vale", "埃尔姆斯特德谷"],
+  // 删除最后2个品牌以匹配18队
 ];
 
 const ENG_D2_BRANDS = [
@@ -275,8 +271,7 @@ const ENG_D2_BRANDS = [
   ["Coralwick Town", "珊瑚维克镇"],
   ["Pioneerford City", "拓荒福德城"],
   ["Starling Vale", "椋鸟谷"],
-  ["Graniteby Athletic", "花岗比竞技"],
-  ["Larkspur Borough", "飞燕草自治镇"],
+  // 删除最后2个品牌以匹配18队
 ];
 
 const ENG_D3_BRANDS = [
@@ -298,8 +293,7 @@ const ENG_D3_BRANDS = [
   ["Willowfen Rovers", "柳沼流浪者"],
   ["Brookmere City", "布鲁克米尔城"],
   ["Anchorleigh Athletic", "安克利竞技"],
-  ["Hearthmoor Borough", "炉原自治镇"],
-  ["Dunridge Wanderers", "邓里奇漫游者"],
+  // 删除最后2个品牌以匹配18队
 ];
 
 function pack(list, renamedList, division, countryId = "crownland") {
@@ -388,6 +382,7 @@ const SOLARA_TOP = [
   "Costa Alba FC", "Sierra Dorada", "Maravilla SC", "Rio Claro Athletic",
   "Estrella Roja", "Campo Verde", "Torreluna FC", "Bahia Serena",
   "Alcazar Nova", "Villasol United", "Cobre Vista", "Mirador CF",
+  "Puerta Dorada", "Marina Sol",
 ];
 
 const SOLARA_SECOND = [
@@ -395,6 +390,7 @@ const SOLARA_SECOND = [
   "Roca Blanca", "Nueva Espera", "Arco del Mar", "Santa Vega",
   "Fuente Oro", "Brisa Norte", "Olivar FC", "Canto Claro",
   "Arena Sur", "Lago Rojo", "Camino Unido", "Sol del Este",
+  "Valle Tranquilo", "Colina Dorada",
 ];
 
 const EISENMARK_TOP = [
@@ -402,6 +398,7 @@ const EISENMARK_TOP = [
   "Stahlheim Union", "Nordfels 09", "Waldkirch SC", "Blauwerk FC",
   "Rotental 08", "Bergwacht", "Lindenbruck", "Hafenkrone",
   "Silbersee", "Donnerfeld", "Morgenstadt", "Westtor SV",
+  "Blauental", "Goldstadt",
 ];
 
 const EISENMARK_SECOND = [
@@ -409,6 +406,7 @@ const EISENMARK_SECOND = [
   "Tannenfels", "Hochbruck", "Eisental", "Sudtor 05",
   "Nebelstadt", "Hammersee", "Weissburg", "Rotbruck",
   "Feldkrone", "Adlerhain", "Werkstadt", "Mondtal SC",
+  "Berghafen", "Dunkelwald",
 ];
 
 const BELLADORO_TOP = [
@@ -416,6 +414,7 @@ const BELLADORO_TOP = [
   "Rosalba 1912", "Montechiaro", "Rivabella", "Aquila Nera",
   "Stella Marina", "Fortuna Verde", "Torriano", "Lago Azzurro",
   "Borgo Sole", "Granvista", "Virtu Bellena", "Pietraluna",
+  "Castelmonte", "Luna Nova",
 ];
 
 const BELLADORO_SECOND = [
@@ -423,6 +422,7 @@ const BELLADORO_SECOND = [
   "Alba Nuova", "Portoforte", "Vigna d'Oro", "Serradoro",
   "Pontechiaro", "Rocca Nova", "Campo Fiore", "Valle Serena",
   "Marevento", "Luna Calcio", "Ferrovia AC", "Orizzonte",
+  "Monte Azzurro", "Costa Verde",
 ];
 
 const LUMERA_TOP = [
@@ -430,6 +430,7 @@ const LUMERA_TOP = [
   "Rochebleue", "Port-Lumiere", "Ciel Rouge FC", "Grandval Athletic",
   "Bois d'Argent", "Vallonne SC", "Marais Royal", "Etoile d'Azur",
   "Couronne FC", "Riveneuve", "Montfleur", "Nordlac",
+  "Montargent", "Valciel",
 ];
 
 const LUMERA_SECOND = [
@@ -437,26 +438,28 @@ const LUMERA_SECOND = [
   "Chateau-Lune", "Fontelune", "Aigle Blanc", "Verteville",
   "Port d'Aube", "Lac d'Or", "Vieux Marche", "Haute-Rive",
   "Moulin Vert", "Cote Claire", "Jardin FC", "Plein-Ciel",
+  "Fontnoble", "Valdore SC",
 ];
 
 // 匿名现实竞争曲线：只保存联赛席位层级，不保存或展示现实俱乐部身份。
 // 顶部断层、争冠集团和中下游密度分别贴近五国当代联赛生态。
+// 调整为18队以匹配德甲/法甲现实，提供更合理的34轮双循环赛制。
 const TOP_REALITY_CURVES = Object.freeze({
   ESP: {
-    power: [82, 81, 77, 76, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63],
-    money: [56, 54, 38, 34, 30, 27, 25, 23, 21, 20, 19, 18, 17, 16, 15, 14].map((n) => n * 1_000_000),
+    power: [82, 81, 77, 76, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61],
+    money: [56, 54, 38, 34, 30, 27, 25, 23, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12].map((n) => n * 1_000_000),
   },
   GER: {
-    power: [82, 78, 77, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63],
-    money: [52, 40, 36, 32, 29, 27, 25, 23, 21, 20, 19, 18, 17, 16, 15, 14].map((n) => n * 1_000_000),
+    power: [82, 78, 77, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61],
+    money: [52, 40, 36, 32, 29, 27, 25, 23, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12].map((n) => n * 1_000_000),
   },
   ITA: {
-    power: [79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64],
-    money: [45, 43, 40, 37, 34, 31, 28, 25, 23, 21, 19, 18, 17, 16, 15, 14].map((n) => n * 1_000_000),
+    power: [79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62],
+    money: [45, 43, 40, 37, 34, 31, 28, 25, 23, 21, 19, 18, 17, 16, 15, 14, 13, 12].map((n) => n * 1_000_000),
   },
   FRA: {
-    power: [81, 76, 75, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61],
-    money: [50, 34, 30, 27, 24, 22, 20, 18, 17, 16, 15, 14, 13, 12, 11, 10].map((n) => n * 1_000_000),
+    power: [81, 76, 75, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61, 60, 59],
+    money: [50, 34, 30, 27, 24, 22, 20, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8].map((n) => n * 1_000_000),
   },
 });
 
@@ -477,6 +480,8 @@ const ESP_TOP_BRANDS = [
   ["Luzmar Atlético", "卢兹马尔竞技"],
   ["Ribera Clara CF", "克拉拉河岸足球会"],
   ["Solcanto Unión", "索尔坎托联盟"],
+  ["Puerta Sol Deportivo", "太阳门体育"],
+  ["Marina Alta CF", "上滨足球会"],
 ];
 
 const ESP_SECOND_BRANDS = [
@@ -496,6 +501,8 @@ const ESP_SECOND_BRANDS = [
   ["Monte Rojo CF", "红山足球会"],
   ["Pradera Sol Deportivo", "阳光草原体育"],
   ["Canto del Mar Unión", "海歌联盟"],
+  ["Valle Tranquilo CF", "宁静谷足球会"],
+  ["Colina Dorada Unión", "金丘联盟"],
 ];
 
 const GER_TOP_BRANDS = [
@@ -515,6 +522,8 @@ const GER_TOP_BRANDS = [
   ["Eintracht Brückenau", "布吕肯瑙团结队"],
   ["Fortuna Tannengrund", "坦嫩格伦德福图纳"],
   ["FC Kupferhain", "库普费尔海恩足球会"],
+  ["SV Blauental", "布劳恩塔尔体育会"],
+  ["VfR Goldstadt", "戈尔德施塔特竞技协会"],
 ];
 
 const GER_SECOND_BRANDS = [
@@ -534,6 +543,8 @@ const GER_SECOND_BRANDS = [
   ["Eintracht Adlerhain", "阿德勒海恩团结队"],
   ["Fortuna Werkental", "韦尔克塔尔福图纳"],
   ["FC Mondtal", "蒙德塔尔足球会"],
+  ["SV Berghafen", "贝格哈芬体育会"],
+  ["VfR Dunkelwald", "邓克尔瓦尔德竞技协会"],
 ];
 
 const ITA_TOP_BRANDS = [
@@ -553,6 +564,8 @@ const ITA_TOP_BRANDS = [
   ["Unione Marisole", "马里索莱联盟"],
   ["Virtus Collechiaro", "科莱基亚罗维尔图斯"],
   ["Rocca Verde FC", "罗卡韦尔德足球会"],
+  ["Castelmonte Calcio", "卡斯特尔蒙特足球会"],
+  ["AC Lunanova", "卢纳诺瓦竞技"],
 ];
 
 const ITA_SECOND_BRANDS = [
@@ -572,6 +585,8 @@ const ITA_SECOND_BRANDS = [
   ["Calcio San Virello", "圣维雷洛足球会"],
   ["Unione Castelrosa", "卡斯特尔罗萨联盟"],
   ["Virtus Campolago", "坎波拉戈维尔图斯"],
+  ["AC Monteazzurro", "蒙特阿祖罗竞技"],
+  ["FC Costaverde", "科斯塔韦尔德足球会"],
 ];
 
 const FRA_TOP_BRANDS = [
@@ -591,6 +606,8 @@ const FRA_TOP_BRANDS = [
   ["AS Rivemont", "里夫蒙体育会"],
   ["Olympique Boisclair", "布瓦克莱尔奥林匹克"],
   ["Racing Auriville", "奥里维尔竞速会"],
+  ["Union Montargent", "蒙塔让联盟"],
+  ["Stade Valciel", "瓦尔希耶尔体育会"],
 ];
 
 const FRA_SECOND_BRANDS = [
@@ -610,6 +627,8 @@ const FRA_SECOND_BRANDS = [
   ["Union Boisroux", "布瓦鲁联盟"],
   ["Stade Rivazur", "里瓦祖尔体育会"],
   ["FC Hautebrise", "欧特布里兹足球会"],
+  ["AS Fontnoble", "丰诺布勒体育会"],
+  ["Olympique Valdore", "瓦尔多雷奥林匹克"],
 ];
 
 export const CLUB_TEMPLATES = [
