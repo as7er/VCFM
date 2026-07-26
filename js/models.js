@@ -624,7 +624,41 @@ export function ensurePlayerHistory(p) {
     }
   }
   if (!Array.isArray(p.history)) p.history = [];
+  if (!p.leagueStats || typeof p.leagueStats !== "object" || Array.isArray(p.leagueStats)) {
+    p.leagueStats = {};
+  }
   return p;
+}
+
+/**
+ * 本赛季按国内联赛独立记账。旧档首次访问时将现有总联赛数据归入当时所在联赛；
+ * 之后跨联赛转会会写入新的 division 桶，不污染此前赛事的数据。
+ */
+export function ensureLeagueStats(p, division, clubId = null) {
+  ensurePlayerHistory(p);
+  const key = String(Number(division) || 3);
+  if (p.leagueStatsVersion !== 1) {
+    const current = p.stats || emptyMatchStats();
+    const hasData =
+      (current.apps || 0) > 0 ||
+      (current.goals || 0) > 0 ||
+      (current.assists || 0) > 0 ||
+      (current.cleanSheets || 0) > 0 ||
+      (current.goalsConceded || 0) > 0 ||
+      (current.ratingSum || 0) > 0;
+    p.leagueStats = hasData ? { [key]: { ...emptyMatchStats(), ...current, clubId } } : {};
+    p.leagueStatsVersion = 1;
+  }
+  if (!p.leagueStats[key]) {
+    p.leagueStats[key] = { ...emptyMatchStats(), clubId };
+  } else {
+    const empty = emptyMatchStats();
+    for (const statKey of Object.keys(empty)) {
+      if (p.leagueStats[key][statKey] == null) p.leagueStats[key][statKey] = empty[statKey];
+    }
+    if (clubId) p.leagueStats[key].clubId = clubId;
+  }
+  return p.leagueStats[key];
 }
 
 /**
@@ -674,6 +708,8 @@ export function archiveAndResetSeasonStats(p, season, clubId, clubName) {
   }
 
   p.stats = emptyMatchStats();
+  p.leagueStats = {};
+  p.leagueStatsVersion = 1;
   p.fitness = Math.min(100, Math.max(80, p.fitness || 90));
   p.injured = 0;
 }
@@ -682,6 +718,8 @@ export function archiveAndResetSeasonStats(p, season, clubId, clubName) {
 export function resetSeasonStats(p) {
   ensurePlayerHistory(p);
   p.stats = emptyMatchStats();
+  p.leagueStats = {};
+  p.leagueStatsVersion = 1;
   p.fitness = Math.min(100, Math.max(80, p.fitness || 90));
   p.injured = 0;
 }
@@ -754,6 +792,9 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     fromYouth: isYouth,
     // 本赛季数据
     stats: emptyMatchStats(),
+    // 本赛季国内联赛分赛事数据：{ [divisionId]: stats + clubId }
+    leagueStats: {},
+    leagueStatsVersion: 1,
     // 生涯总计（跨赛季累计）
     career: emptyMatchStats(),
     // 分赛季历史 [{ season, clubId, clubName, apps, goals, ... }]

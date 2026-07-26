@@ -12,6 +12,7 @@ import {
   ensureCorePlayer,
   formatMoney,
   ensurePlayerHistory,
+  ensureLeagueStats,
   roleDefForPlayer,
   teamRoleMods,
 } from "./models.js";
@@ -681,8 +682,13 @@ function addGoal(state, minute, club, xi, { penalty = false } = {}) {
   else state.ag++;
   // 个人赛季数据只计联赛（数据榜 / 阵容赛季列）
   if (!state.isCup) {
+    const scorerLeague = ensureLeagueStats(scorer, club.division, club.id);
     ensureStats(scorer).goals++;
-    if (assister) ensureStats(assister).assists++;
+    scorerLeague.goals++;
+    if (assister) {
+      ensureStats(assister).assists++;
+      ensureLeagueStats(assister, club.division, club.id).assists++;
+    }
   }
   const st = state.stats[sk];
   st.shots++;
@@ -756,8 +762,13 @@ function addSimGoal(state, minute, team, scorerId, assistId = null, opts = {}) {
 
   // 个人数据：正常进球记射手；乌龙不记任何人进球
   if (!state.isCup && scorer && !ownGoal) {
+    const scorerLeague = ensureLeagueStats(scorer, club.division, club.id);
     ensureStats(scorer).goals++;
-    if (assister) ensureStats(assister).assists++;
+    scorerLeague.goals++;
+    if (assister) {
+      ensureStats(assister).assists++;
+      ensureLeagueStats(assister, club.division, club.id).assists++;
+    }
   }
 
   let text;
@@ -2265,6 +2276,9 @@ function applyMatchRatings(state) {
       if (!state.isCup) {
         st.ratingSum = (st.ratingSum || 0) + r;
         st.lastRating = r;
+        const leagueStats = ensureLeagueStats(p, club.division, club.id);
+        leagueStats.ratingSum = (leagueStats.ratingSum || 0) + r;
+        leagueStats.lastRating = r;
       }
       list.push({
         playerId: p.id,
@@ -2311,6 +2325,7 @@ export function finalizeMatch(state) {
     const countApps = (club) => {
       for (const p of getLineupPlayers(club)) {
         ensureStats(p).apps++;
+        ensureLeagueStats(p, club.division, club.id).apps++;
       }
     };
     countApps(home);
@@ -2321,10 +2336,16 @@ export function finalizeMatch(state) {
     if (homeGk) {
       ensureStats(homeGk).goalsConceded += ag;
       if (ag === 0) ensureStats(homeGk).cleanSheets++;
+      const leagueStats = ensureLeagueStats(homeGk, home.division, home.id);
+      leagueStats.goalsConceded += ag;
+      if (ag === 0) leagueStats.cleanSheets++;
     }
     if (awayGk) {
       ensureStats(awayGk).goalsConceded += hg;
       if (hg === 0) ensureStats(awayGk).cleanSheets++;
+      const leagueStats = ensureLeagueStats(awayGk, away.division, away.id);
+      leagueStats.goalsConceded += hg;
+      if (hg === 0) leagueStats.cleanSheets++;
     }
   }
 

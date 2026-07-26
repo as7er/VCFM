@@ -17,6 +17,7 @@ import {
   resetSeasonStats,
   archiveAndResetSeasonStats,
   ensurePlayerHistory,
+  ensureLeagueStats,
   generateFixtures,
   generateAllDivisionFixtures,
   clubsInDivision,
@@ -1474,52 +1475,62 @@ export function allPlayersWithClub(world, division = null) {
   return list;
 }
 
-/** 射手榜 / 助攻榜 / 门将榜 / 评分榜（默认本级联赛） */
+/** 射手榜 / 助攻榜 / 门将榜 / 评分榜；division="all" 时汇总所有国内联赛。 */
 export function getStatLeaders(world, division = null) {
   const user = getUserClub(world);
-  const div = division != null ? division : user?.division || 3;
-  const all = allPlayersWithClub(world, div);
+  const div = division === "all" ? null : division != null ? Number(division) : user?.division || 3;
+  const clubsById = new Map((world.clubs || []).map((club) => [club.id, club]));
+  const all = allPlayersWithClub(world, null)
+    .map((entry) => {
+      const { player, club } = entry;
+      ensureLeagueStats(player, club.division, club.id);
+      const stats = div == null ? player.stats : player.leagueStats?.[String(div)];
+      if (!stats) return null;
+      const statClub = stats.clubId ? clubsById.get(stats.clubId) || club : club;
+      return { player, club: statClub, stats };
+    })
+    .filter(Boolean);
 
   const goals = [...all]
-    .filter((x) => x.player.stats.goals > 0)
+    .filter((x) => x.stats.goals > 0)
     .sort(
       (a, b) =>
-        b.player.stats.goals - a.player.stats.goals ||
-        b.player.stats.assists - a.player.stats.assists ||
+        b.stats.goals - a.stats.goals ||
+        b.stats.assists - a.stats.assists ||
         b.player.ovr - a.player.ovr
     )
     .slice(0, 20);
 
   const assists = [...all]
-    .filter((x) => x.player.stats.assists > 0)
+    .filter((x) => x.stats.assists > 0)
     .sort(
       (a, b) =>
-        b.player.stats.assists - a.player.stats.assists ||
-        b.player.stats.goals - a.player.stats.goals ||
+        b.stats.assists - a.stats.assists ||
+        b.stats.goals - a.stats.goals ||
         b.player.ovr - a.player.ovr
     )
     .slice(0, 20);
 
   // 门将：至少出场 1 次；优先零封，再看出场，再看失球少
   const keepers = all
-    .filter((x) => x.player.pos === "GK" && x.player.stats.apps > 0)
+    .filter((x) => x.player.pos === "GK" && x.stats.apps > 0)
     .map((x) => {
-      const s = x.player.stats;
+      const s = x.stats;
       const gaPerGame = s.apps ? s.goalsConceded / s.apps : 99;
       return { ...x, gaPerGame };
     })
     .sort(
       (a, b) =>
-        b.player.stats.cleanSheets - a.player.stats.cleanSheets ||
+        b.stats.cleanSheets - a.stats.cleanSheets ||
         a.gaPerGame - b.gaPerGame ||
-        b.player.stats.apps - a.player.stats.apps
+        b.stats.apps - a.stats.apps
     )
     .slice(0, 15);
 
   // 场均评分：至少 3 场（避免一两场高分刷榜）
   const ratings = all
     .map((x) => {
-      const s = x.player.stats || {};
+      const s = x.stats || {};
       const apps = s.apps || 0;
       const avg =
         apps > 0 && s.ratingSum > 0

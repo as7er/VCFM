@@ -972,12 +972,19 @@ function bindMainOnce() {
 
   $$(".tab").forEach((btn) => {
     btn.onclick = () => {
+      if (btn.dataset.tab === "table") {
+        setLeagueCentreView(selectedLeagueCentreView);
+        return;
+      }
       $$(".tab").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
       $$(".tab-panel").forEach((p) => p.classList.remove("active"));
       $(`#tab-${btn.dataset.tab}`).classList.add("active");
       refreshAll();
     };
+  });
+  $$('[data-league-centre-view]').forEach((btn) => {
+    btn.addEventListener("click", () => setLeagueCentreView(btn.dataset.leagueCentreView));
   });
 
   // 信箱筛选 + 概览入口
@@ -1407,6 +1414,12 @@ function refreshAll() {
 
 /** 世界赛事页当前选中的国家队 code */
 let selectedNationCode = null;
+/** 联赛中心内部视图；顶部只保留一个入口。 */
+let selectedLeagueCentreView = "table";
+/** 最近查看的具体联赛；“全部联赛”仅适用于球员榜。 */
+let selectedLeagueDivision = null;
+/** 数据榜联赛范围：默认展示全部 11 个国内联赛。 */
+let selectedStatsDivision = "all";
 /** 从俱乐部/国家队名单进入球员资料时，保留连续浏览与返回上下文。 */
 let activePlayerBrowseContext = null;
 
@@ -4390,18 +4403,20 @@ function renderTable() {
   const club = getUserClub(world);
   const sel = $("#table-division");
   fillDivisionSelects(club?.division || 3);
-  // 默认显示自己所在联赛
-  if (sel && !sel.dataset.touched) {
-    sel.value = String(club.division || 3);
-  }
+  const requestedDivision = Number(selectedLeagueDivision || club?.division || 3);
+  selectedLeagueDivision = DIVISIONS[requestedDivision]
+    ? requestedDivision
+    : Number(club?.division || 3);
+  if (sel) sel.value = String(selectedLeagueDivision);
   if (sel && !sel._bound) {
     sel._bound = true;
     sel.addEventListener("change", () => {
-      sel.dataset.touched = "1";
+      selectedLeagueDivision = Number(sel.value);
+      selectedStatsDivision = sel.value;
       renderTable();
     });
   }
-  const div = Number(sel?.value || club.division || 3);
+  const div = Number(selectedLeagueDivision || club.division || 3);
   const info = DIVISIONS[div] || DIVISIONS[3];
   const table = getSortedTable(world, div);
   const n = table.length;
@@ -4450,22 +4465,90 @@ function renderTable() {
     : `<tr><td colspan="10" class="muted">${en ? "No clubs in this division. Start a new save to use the complete league structure." : "该级别暂无球队（请开新档体验完整三级联赛）"}</td></tr>`;
 }
 
+function setLeagueCentreView(view) {
+  const next = view === "stats" ? "stats" : "table";
+  selectedLeagueCentreView = next;
+  $$(".tab").forEach((button) => button.classList.remove("active"));
+  $('.tab[data-tab="table"]')?.classList.add("active");
+  $$(".tab-panel").forEach((panel) => panel.classList.remove("active"));
+  $(`#tab-${next}`)?.classList.add("active");
+  $$('[data-league-centre-view]').forEach((button) => {
+    const active = button.dataset.leagueCentreView === next;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  refreshAll();
+}
+
+function statsLeagueCompactLabel(division) {
+  const info = DIVISIONS[Number(division)];
+  if (!info) return "—";
+  if (getLang() === "en") return `${info.countryCode} ${info.tier}`;
+  const prefix = { ENG: "英", ESP: "西", GER: "德", ITA: "意", FRA: "法" }[info.countryCode] || info.countryCode;
+  const tier = info.countryCode === "ENG"
+    ? info.tier === 1
+      ? "超"
+      : info.tier === 2
+        ? "甲"
+        : "乙"
+    : info.tier === 1
+      ? "甲"
+      : "乙";
+  return `${prefix}${tier}`;
+}
+
+function statsLeagueCell(club) {
+  const division = Number(club?.division || 0);
+  const full = t(`div.${division}`) || DIVISIONS[division]?.name || "—";
+  return `<td class="stats-league-cell" title="${escapeHtml(full)}">${escapeHtml(statsLeagueCompactLabel(division))}</td>`;
+}
+
+function renderStatsScope() {
+  const select = $("#stats-division-filter");
+  if (!select) return selectedStatsDivision;
+  const ids = Object.keys(DIVISIONS).map(Number).sort((a, b) => a - b);
+  const requested = selectedStatsDivision;
+  select.innerHTML = [
+    `<option value="all">${escapeHtml(t("stats.allLeagues"))}</option>`,
+    ...ids.map((id) => `<option value="${id}">${escapeHtml(t(`div.${id}`) || DIVISIONS[id]?.name || String(id))}</option>`),
+  ].join("");
+  select.value = requested === "all" || ids.includes(Number(requested)) ? String(requested) : "all";
+  selectedStatsDivision = select.value;
+  if (!select._bound) {
+    select._bound = true;
+    select.addEventListener("change", () => {
+      selectedStatsDivision = select.value;
+      if (select.value !== "all") selectedLeagueDivision = Number(select.value);
+      renderStats();
+    });
+  }
+  const summary = $("#stats-scope-summary");
+  if (summary) {
+    summary.textContent = selectedStatsDivision === "all"
+      ? t("stats.scopeAllHint", { n: ids.length })
+      : t("stats.scopeOneHint", { name: t(`div.${selectedStatsDivision}`) || "—" });
+  }
+  return selectedStatsDivision;
+}
+
 function renderStats() {
-  const { goals, assists, keepers, ratings } = getStatLeaders(world);
+  const scope = renderStatsScope();
+  const { goals, assists, keepers, ratings } = getStatLeaders(world, scope === "all" ? "all" : Number(scope));
   const uid = world.userClubId;
   const en = getLang() === "en";
 
   const goalsBody = $("#stats-goals tbody");
   goalsBody.innerHTML = goals.length
     ? goals
-        .map(({ player: p, club }, i) => {
-          const s = playerStats(p);
+        .map(({ player: p, club, stats }, i) => {
+          const s = stats || playerStats(p);
           const avgR = seasonAvgRating(p);
           const me = club.id === uid;
           return `<tr class="${me ? "me" : ""}">
             <td>${i + 1}</td>
             <td>${playerLinkHtml(p.id, p.name)}</td>
             <td>${clubLinkHtml(club.id, club.short)}</td>
+            ${statsLeagueCell(club)}
             <td><strong>${s.goals}</strong></td>
             <td>${s.assists}</td>
             <td>${s.apps}</td>
@@ -4473,19 +4556,20 @@ function renderStats() {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="7" class="muted">${en ? "No goals yet. This table updates after matches." : "暂无进球数据，踢完比赛后更新"}</td></tr>`;
+    : `<tr><td colspan="8" class="muted">${en ? "No goals yet in this scope. This table updates after matches." : "当前范围暂无进球数据，踢完比赛后更新"}</td></tr>`;
 
   const assistsBody = $("#stats-assists tbody");
   assistsBody.innerHTML = assists.length
     ? assists
-        .map(({ player: p, club }, i) => {
-          const s = playerStats(p);
+        .map(({ player: p, club, stats }, i) => {
+          const s = stats || playerStats(p);
           const avgR = seasonAvgRating(p);
           const me = club.id === uid;
           return `<tr class="${me ? "me" : ""}">
             <td>${i + 1}</td>
             <td>${playerLinkHtml(p.id, p.name)}</td>
             <td>${clubLinkHtml(club.id, club.short)}</td>
+            ${statsLeagueCell(club)}
             <td><strong>${s.assists}</strong></td>
             <td>${s.goals}</td>
             <td>${s.apps}</td>
@@ -4493,7 +4577,7 @@ function renderStats() {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="7" class="muted">${en ? "No assists yet. This table updates after matches." : "暂无助攻数据，踢完比赛后更新"}</td></tr>`;
+    : `<tr><td colspan="8" class="muted">${en ? "No assists yet in this scope. This table updates after matches." : "当前范围暂无助攻数据，踢完比赛后更新"}</td></tr>`;
 
   const ratingsBody = $("#stats-ratings tbody");
   if (ratingsBody) {
@@ -4505,26 +4589,28 @@ function renderStats() {
             <td>${i + 1}</td>
             <td>${playerLinkHtml(p.id, p.name)}</td>
             <td>${clubLinkHtml(club.id, club.short)}</td>
+            ${statsLeagueCell(club)}
             <td class="rating-cell ${ratingClass(avgRating)}"><strong>${formatRating(avgRating)}</strong></td>
             <td class="rating-cell ${ratingClass(lastRating)}">${formatRating(lastRating)}</td>
             <td>${apps}</td>
           </tr>`;
           })
           .join("")
-      : `<tr><td colspan="6" class="muted">${en ? "The ratings table appears after at least three appearances." : "至少 3 场出场后显示评分榜"}</td></tr>`;
+      : `<tr><td colspan="7" class="muted">${en ? "The ratings table appears after at least three appearances in this scope." : "当前范围至少 3 场出场后显示评分榜"}</td></tr>`;
   }
 
   const keepersBody = $("#stats-keepers tbody");
   keepersBody.innerHTML = keepers.length
     ? keepers
-        .map(({ player: p, club, gaPerGame }, i) => {
-          const s = playerStats(p);
+        .map(({ player: p, club, stats, gaPerGame }, i) => {
+          const s = stats || playerStats(p);
           const avgR = seasonAvgRating(p);
           const me = club.id === uid;
           return `<tr class="${me ? "me" : ""}">
             <td>${i + 1}</td>
             <td>${playerLinkHtml(p.id, p.name)}</td>
             <td>${clubLinkHtml(club.id, club.short)}</td>
+            ${statsLeagueCell(club)}
             <td>${s.apps}</td>
             <td><strong>${s.cleanSheets}</strong></td>
             <td>${s.goalsConceded}</td>
@@ -4533,7 +4619,7 @@ function renderStats() {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="8" class="muted">${en ? "No goalkeeper data yet. This table updates after matches." : "暂无门将数据，踢完比赛后更新"}</td></tr>`;
+    : `<tr><td colspan="9" class="muted">${en ? "No goalkeeper data yet in this scope. This table updates after matches." : "当前范围暂无门将数据，踢完比赛后更新"}</td></tr>`;
 }
 
 function openBuyNegotiator(playerId, fromClubId) {

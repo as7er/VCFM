@@ -4078,6 +4078,72 @@ html[data-theme="light"] .fm-com-log .event.ft {
 .global-search-shell {
   padding-right: 1.4rem;
 }
+
+.stats-scope-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+.stats-scope-bar h2 { margin: 0; }
+.league-centre-switch {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-bottom: 0.85rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg2);
+}
+.league-centre-switch button {
+  min-width: 7rem;
+  padding: 0.48rem 1rem;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+.league-centre-switch button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+}
+.league-centre-switch button.active {
+  color: #fff;
+  background: var(--primary);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 28%, transparent);
+}
+@media (max-width: 480px) {
+  .league-centre-switch { display: flex; }
+  .league-centre-switch button { min-width: 0; flex: 1; }
+}
+.stats-scope-select {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.stats-scope-select select {
+  min-width: 13rem;
+}
+.stats-league-cell {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .stats-scope-bar { align-items: stretch; flex-direction: column; }
+  .stats-scope-select { justify-content: space-between; }
+  .stats-scope-select select { min-width: 0; flex: 1; }
+}
 .global-search-shell h2 {
   margin: 0 0 0.85rem;
   font-size: 1.1rem;
