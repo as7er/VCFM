@@ -144,7 +144,7 @@ export class MatchViewFSM {
    * 当前是否允许 AI 自由行动
    */
   canAIAct() {
-    return this.state === 'PLAYING' && this.subState === 'FREE_PLAY';
+    return this.state === 'PLAYING' && (this.subState === 'FREE_PLAY' || this.subState === 'SIM_DRIVEN');
   }
 
   /**
