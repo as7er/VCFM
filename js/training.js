@@ -283,6 +283,131 @@ export function autoPickTraining(club, nextMatchDays = null) {
   return setTraining(club, { focus, intensity });
 }
 
+function average(values, fallback = 0) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : fallback;
+}
+
+function attrAverage(players, keys, positions = null) {
+  const pool = positions ? players.filter((player) => positions.includes(player.pos)) : players;
+  const values = [];
+  for (const player of pool) {
+    for (const key of keys) values.push(Number(player.attrs?.[key] || 0));
+  }
+  return average(values, 10);
+}
+
+function nextFixtureForClub(world, clubId) {
+  return [
+    ...(world.fixtures || []),
+    ...allCompetitionFixtures(world),
+  ]
+    .filter((fixture) =>
+      !fixture.played &&
+      (fixture.home === clubId || fixture.away === clubId) &&
+      Number(fixture.day || 0) >= Number(world.day || 0)
+    )
+    .sort((a, b) => Number(a.day || 0) - Number(b.day || 0))[0] || null;
+}
+
+/** Build a deterministic recommendation using the assistant coach and current squad state. */
+export function assistantTrainingPlan(world, club) {
+  ensureStaff(club);
+  ensureTraining(club);
+  const players = club.players || [];
+  const available = players.filter((player) => !(player.injured > 0));
+  const sample = available.length ? available : players;
+  const coach = club.staff?.coach;
+  const coachRating = Number(coach?.rating || 8);
+  const avgFitness = Math.round(average(sample.map((player) => Number(player.fitness ?? 70)), 70));
+  const avgMorale = Math.round(average(sample.map((player) => Number(player.morale ?? 70)), 70));
+  const injured = players.filter((player) => player.injured > 0).length;
+  const lowFitness = sample.filter((player) => Number(player.fitness ?? 70) < 65).length;
+  const nextFixture = nextFixtureForClub(world, club.id);
+  const daysToMatch = nextFixture ? Math.max(0, Number(nextFixture.day || 0) - Number(world.day || 0)) : null;
+
+  const scores = {
+    attack: attrAverage(sample, ["shooting", "finishing", "dribbling", "pace"], ["ATT", "MID"]),
+    defense: attrAverage(sample, ["tackling", "marking", "positioning", "strength"], ["DEF", "MID"]),
+    technical: attrAverage(sample, ["passing", "vision", "dribbling"], ["MID", "ATT"]),
+    goalkeeping: attrAverage(sample, ["reflexes", "handling", "positioning", "kicking"], ["GK"]),
+    fitness: attrAverage(sample, ["stamina", "pace", "strength"]),
+  };
+  const weakestFocus = Object.entries(scores).sort((a, b) => a[1] - b[1])[0]?.[0] || "balanced";
+  const developmentPlayers = players.filter((player) =>
+    player.age <= 21 && Number(player.potential || player.ovr || 0) >= Number(player.ovr || 0) + 2
+  ).length;
+
+  let focus = "balanced";
+  let intensity = "normal";
+  let prepMode = "balanced";
+  let reasonKey = "balanced";
+
+  if (avgFitness < 65 || injured >= 3 || lowFitness >= 5) {
+    focus = "recovery";
+    intensity = "light";
+    prepMode = "fitness";
+    reasonKey = "recovery";
+  } else if (daysToMatch != null && daysToMatch <= 1) {
+    focus = "match_prep";
+    intensity = "light";
+    prepMode = avgFitness < 78 ? "fitness" : avgMorale < 58 ? "morale" : "setpiece";
+    reasonKey = "imminent";
+  } else if (daysToMatch != null && daysToMatch <= 3) {
+    focus = "match_prep";
+    intensity = avgFitness < 76 ? "light" : "normal";
+    prepMode = avgFitness < 76 ? "fitness" : avgMorale < 58 ? "morale" : "setpiece";
+    reasonKey = "matchPrep";
+  } else if (avgFitness < 76 || injured >= 2) {
+    focus = "recovery";
+    intensity = avgFitness < 70 ? "light" : "normal";
+    prepMode = "fitness";
+    reasonKey = "fitness";
+  } else if (avgMorale < 52) {
+    focus = "balanced";
+    intensity = "light";
+    prepMode = "morale";
+    reasonKey = "morale";
+  } else if (coachRating >= 14 && developmentPlayers >= 6 && (daysToMatch == null || daysToMatch >= 5)) {
+    focus = "youth";
+    intensity = "normal";
+    reasonKey = "youth";
+  } else if (coachRating >= 10) {
+    focus = weakestFocus;
+    reasonKey = "weakness";
+    if (coachRating >= 15 && avgFitness >= 88 && injured === 0 && lowFitness === 0 && (daysToMatch == null || daysToMatch >= 5)) {
+      intensity = "hard";
+    }
+  }
+
+  if (prepMode === "balanced" && nextFixture) {
+    const opponentId = nextFixture.home === club.id ? nextFixture.away : nextFixture.home;
+    const opponent = world.clubs?.find((item) => item.id === opponentId);
+    const ownOvr = average(sample.map((player) => Number(player.ovr || 0)), 0);
+    const opponentOvr = average((opponent?.players || []).map((player) => Number(player.ovr || 0)), ownOvr);
+    prepMode = opponentOvr > ownOvr + 1 ? "defense" : ownOvr > opponentOvr + 1 ? "attack" : "setpiece";
+  }
+
+  const reasons = {
+    recovery: ["多名球员体能告急或正在伤停，先降低负荷并恢复。", "Several players are fatigued or injured, so workload is reduced for recovery."],
+    imminent: ["比赛就在明天，避免额外消耗并集中演练比赛内容。", "The next match is tomorrow, so the squad avoids extra load and rehearses match situations."],
+    matchPrep: ["比赛临近，训练转向赛前准备并控制体能消耗。", "With a match approaching, training shifts to preparation while controlling fatigue."],
+    fitness: ["阵容体能储备偏低，恢复优先于技术负荷。", "Squad fitness is below target, so recovery takes priority over technical load."],
+    morale: ["阵容士气偏低，采用轻负荷并加入团队激励。", "Squad morale is low, so the plan uses a light workload and team-building work."],
+    youth: ["队内有较多具备成长空间的年轻球员，本周期侧重发展。", "Several young players have room to develop, so this cycle prioritizes development."],
+    weakness: ["赛程允许专项训练，助教选择了阵容数据中最薄弱的环节。", "The schedule allows specialist work, so the assistant targets the squad's weakest measured area."],
+    balanced: ["当前体能、士气与赛程较稳定，维持综合训练。", "Fitness, morale and schedule are stable, so the squad keeps a balanced programme."],
+  };
+
+  return {
+    focus,
+    intensity,
+    prepMode,
+    reason: reasons[reasonKey][0],
+    reasonEn: reasons[reasonKey][1],
+    metrics: { avgFitness, avgMorale, injured, lowFitness, daysToMatch, developmentPlayers },
+  };
+}
+
 function pickWeighted(pairs) {
   const total = pairs.reduce((s, [, w]) => s + w, 0);
   let r = rng() * total;

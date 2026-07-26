@@ -29,8 +29,8 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=151";
-import { nationFlagHtml } from "./flags.js?v=151";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=155";
+import { nationFlagHtml } from "./flags.js?v=155";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -165,6 +165,7 @@ import {
   ensureTraining,
   setTraining,
   trainingSummary,
+  assistantTrainingPlan,
   TRAINING_FOCUSES,
   TRAINING_INTENSITIES,
   ensureTransferWindow,
@@ -256,7 +257,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=151";
+} from "./avatar.js?v=155";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -1280,6 +1281,13 @@ function bindMainOnce() {
       showClubModal(clubLink.dataset.clubLink);
       return;
     }
+    const staffLink = e.target.closest("[data-staff-link]");
+    if (staffLink) {
+      e.preventDefault();
+      e.stopPropagation();
+      showStaffModal(staffLink.dataset.staffLink);
+      return;
+    }
     // 任意界面：点击球员名打开资料
     const playerLink = e.target.closest("[data-player-link]");
     if (playerLink) {
@@ -2157,13 +2165,14 @@ function renderTraining() {
   const sum = trainingSummary(club);
   const focusCopy = {
     balanced: ["Balanced", "General development across the squad"],
-    attacking: ["Attacking", "Finishing, passing and movement"],
-    defending: ["Defending", "Tackling, marking and shape"],
+    attack: ["Attacking", "Finishing, dribbling and movement"],
+    defense: ["Defending", "Tackling, marking and shape"],
+    technical: ["Technical", "Passing, vision and close control"],
     fitness: ["Fitness", "Stamina and physical conditioning"],
     goalkeeping: ["Goalkeeping", "Keeper handling and reflexes"],
     youth: ["Youth development", "Extra growth for academy players"],
     recovery: ["Recovery", "Restore fitness and reduce injury risk"],
-    matchprep: ["Match preparation", "Prepare the squad for matchday"],
+    match_prep: ["Match preparation", "Prepare the squad for matchday"],
   };
   const intensityCopy = { light: "Light", normal: "Normal", hard: "High intensity" };
 
@@ -2260,6 +2269,30 @@ function renderTraining() {
   }
 
   renderTrainingPrep(club, en);
+
+  const delegate = $("#btn-delegate-training");
+  if (delegate) {
+    const coach = club.staff?.coach;
+    delegate.textContent = en ? "Delegate to assistant" : "委托助理教练安排";
+    delegate.title = coach
+      ? (en ? `${coach.name} · Ability ${coach.rating}` : `${coach.name} · 能力 ${coach.rating}`)
+      : "";
+    delegate.onclick = () => {
+      const plan = assistantTrainingPlan(world, club);
+      setTraining(club, { focus: plan.focus, intensity: plan.intensity });
+      const prepResult = setTrainingMode(club, plan.prepMode, world.day);
+      autosave("assistant-training-plan");
+      renderTraining();
+      const focusLabel = en ? focusCopy[plan.focus]?.[0] || plan.focus : TRAINING_FOCUSES[plan.focus]?.label || plan.focus;
+      const intensityLabel = en ? intensityCopy[plan.intensity] || plan.intensity : TRAINING_INTENSITIES[plan.intensity]?.label || plan.intensity;
+      const prep = TRAINING_MODES[plan.prepMode];
+      const prepLabel = en ? prep?.labelEn || plan.prepMode : prep?.label || plan.prepMode;
+      const prepNote = prepResult.ok
+        ? ` · ${en ? "Prep" : "备战"} ${prepLabel}`
+        : ` · ${en ? "Prep unchanged (cooldown)" : "备战方案因冷却保持不变"}`;
+      toast(`${en ? "Assistant plan" : "助教安排"}：${focusLabel} · ${intensityLabel}${prepNote}。${en ? plan.reasonEn : plan.reason}`);
+    };
+  }
 }
 
 /** 赛前备战：训练模式短期加成（影响下一场比赛） */
@@ -2374,13 +2407,16 @@ function renderStaff() {
           ${staffAvatarHtml(s, 52)}
           <div>
             <div class="role">${en ? roleCopy[role]?.[0] || role : meta.label}</div>
-            <h3 style="margin:0.15rem 0">${escapeHtml(s.name)}</h3>
+            <h3 style="margin:0.15rem 0">${staffLinkHtml(s)}</h3>
           </div>
         </div>
         <div class="meta">${en ? "Ability" : "能力"} <strong class="${ovrClass(s.rating)}">${s.rating}</strong> · ${en ? `Age ${s.age}` : `${s.age} 岁`}</div>
         <div class="meta">${en ? "Wage" : "周薪"} ${formatMoney(s.wage)}</div>
         <p class="hint" style="margin:0.4rem 0">${en ? roleCopy[role]?.[1] || "" : meta.effect}</p>
-        <button class="btn small danger" data-fire="${role}">${en ? "Release" : "解约"}</button>
+        <div class="staff-card-actions">
+          <button class="btn small" data-staff-link="${escapeHtml(s.id)}">${en ? "Profile" : "资料"}</button>
+          <button class="btn small danger" data-fire="${role}">${en ? "Release" : "解约"}</button>
+        </div>
       </div>`;
     })
     .join("");
@@ -2402,7 +2438,7 @@ function renderStaff() {
     .map((s) => {
       const fee = Math.round(s.rating * s.rating * 8000);
       return `<tr>
-        <td class="avatar-cell">${staffAvatarHtml(s, 32)} ${escapeHtml(s.name)}</td>
+        <td class="avatar-cell">${staffAvatarHtml(s, 32)} ${staffLinkHtml(s)}</td>
         <td>${en ? roleCopy[s.role]?.[0] || s.role : ROLES[s.role]?.label || s.role}</td>
         <td class="${ovrClass(s.rating)}"><strong>${s.rating}</strong></td>
         <td>${s.age}</td>
@@ -2423,6 +2459,84 @@ function renderStaff() {
       }
     };
   });
+}
+
+function staffLinkHtml(staff) {
+  if (!staff?.id) return escapeHtml(staff?.name || "—");
+  return `<button type="button" class="staff-link" data-staff-link="${escapeHtml(staff.id)}">${escapeHtml(staff.name || "—")}</button>`;
+}
+
+function findStaffById(staffId) {
+  const club = getUserClub(world);
+  const current = Object.values(club?.staff || {}).find((staff) => staff?.id === staffId);
+  if (current) return { staff: current, current: true };
+  const candidate = (world.staffMarket || []).find((staff) => staff?.id === staffId);
+  return candidate ? { staff: candidate, current: false } : null;
+}
+
+function staffImpactLines(staff, en) {
+  const rating = Number(staff.rating || 8);
+  if (staff.role === "coach") {
+    const matchMod = 0.94 + (rating / 20) * 0.14;
+    return [
+      en ? `Match support multiplier ${matchMod.toFixed(3)}x` : `比赛支持系数 ${matchMod.toFixed(3)}x`,
+      en ? `Weekly youth growth chance +${(rating * 0.8).toFixed(1)} percentage points` : `年轻球员每周成长概率 +${(rating * 0.8).toFixed(1)} 个百分点`,
+      en ? "Training delegation uses fitness, injuries, morale, schedule and squad weaknesses" : "委托训练会分析体能、伤病、士气、赛程与阵容短板",
+    ];
+  }
+  if (staff.role === "scout") {
+    const buyMod = 1.12 - (rating / 20) * 0.2;
+    const sellMod = 0.85 + (rating / 20) * 0.2;
+    return [
+      en ? `Buying valuation multiplier ${buyMod.toFixed(2)}x` : `买入估价系数 ${buyMod.toFixed(2)}x`,
+      en ? `Selling negotiation multiplier ${sellMod.toFixed(2)}x` : `出售议价系数 ${sellMod.toFixed(2)}x`,
+      en ? `Youth intake potential bonus +${Math.floor(rating / 8)}` : `青训招生潜力加成 +${Math.floor(rating / 8)}`,
+    ];
+  }
+  const injuryMod = 1.15 - (rating / 20) * 0.45;
+  return [
+    en ? `Injury probability multiplier ${injuryMod.toFixed(2)}x` : `受伤概率系数 ${injuryMod.toFixed(2)}x`,
+    en ? `Daily recovery bonus +${Math.floor(rating / 5)}` : `每日恢复加成 +${Math.floor(rating / 5)}`,
+    en ? "Medical effectiveness combines with the club's training facilities" : "医疗效果会与俱乐部训练设施共同生效",
+  ];
+}
+
+function showStaffModal(staffId) {
+  const found = findStaffById(staffId);
+  if (!found) return;
+  activePlayerBrowseContext = null;
+  const { staff, current } = found;
+  const en = getLang() === "en";
+  const meta = ROLES[staff.role] || {};
+  const roleCopy = {
+    coach: ["Coach", "Leads first-team coaching and supports the manager's training programme."],
+    scout: ["Scout", "Assesses recruitment targets, supports negotiations and improves youth intake knowledge."],
+    doctor: ["Doctor", "Manages injury prevention, rehabilitation and daily player recovery."],
+  };
+  const lines = staffImpactLines(staff, en);
+  const fee = Math.round(Number(staff.rating || 0) ** 2 * 8000);
+  $("#modal-card")?.classList.remove("wide", "search-modal");
+  $("#modal-body").innerHTML = `
+    <div class="staff-profile-head">
+      ${staffAvatarHtml(staff, 76)}
+      <div>
+        <div class="role">${escapeHtml(en ? roleCopy[staff.role]?.[0] || staff.role : meta.label || staff.role)}</div>
+        <h2>${escapeHtml(staff.name)}</h2>
+        <p class="muted">${en ? `Age ${staff.age}` : `${staff.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${ovrClass(staff.rating)}">${staff.rating}</strong> / 20</p>
+      </div>
+    </div>
+    <div class="staff-profile-status">
+      <span class="badge ${current ? "DEF" : "MID"}">${escapeHtml(current ? (en ? "Current staff" : "现任职员") : (en ? "Available candidate" : "市场候选人"))}</span>
+      <span>${en ? "Weekly wage" : "周薪"} <strong>${formatMoney(staff.wage)}</strong></span>
+      ${current ? "" : `<span>${en ? "Signing fee" : "签约费"} <strong>${formatMoney(fee)}</strong></span>`}
+    </div>
+    <p>${escapeHtml(en ? roleCopy[staff.role]?.[1] || "" : meta.desc || "")}</p>
+    <h3 class="staff-profile-subtitle">${en ? "Current impact" : "当前能力影响"}</h3>
+    <div class="staff-impact-list">${lines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>
+    <p class="hint">${escapeHtml(en ? "Effects use the same staff rating that drives matches, transfers, youth development and recovery; there is no separate hidden profile rating." : "资料展示与比赛、转会、青训和恢复实际使用同一职员能力，不存在独立隐藏评分。")}</p>
+  `;
+  $("#modal").classList.remove("hidden");
+  $("#modal-card").scrollTop = 0;
 }
 
 function renderMedia() {

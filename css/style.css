@@ -4300,6 +4300,7 @@ html[data-theme="light"] .fm-com-log .event.ft {
 /* 可点击队名 / 球员名 */
 button.club-link,
 button.player-link,
+button.staff-link,
 button.nation-link {
   background: none;
   border: none;
@@ -4315,6 +4316,7 @@ button.nation-link {
 }
 button.club-link:hover,
 button.player-link:hover,
+button.staff-link:hover,
 button.nation-link:hover {
   border-bottom-color: var(--primary);
   color: var(--text);
@@ -4541,6 +4543,37 @@ button.player-link.pitch-player-link:hover {
 .staff-card h3 { margin: 0 0 0.35rem; font-size: 1rem; }
 .staff-card .role { color: var(--primary); font-size: 0.85rem; font-weight: 600; }
 .staff-card .meta { color: var(--muted); font-size: 0.85rem; margin: 0.35rem 0; }
+.staff-card-actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+.staff-profile-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.staff-profile-head h2 { margin: 0.15rem 0; }
+.staff-profile-head .role { color: var(--primary); font-weight: 700; }
+.staff-profile-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 1rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg2);
+}
+.staff-profile-subtitle { margin: 1rem 0 0.45rem; font-size: 0.95rem; }
+.staff-impact-list { display: grid; gap: 0.45rem; }
+.staff-impact-list > div {
+  padding: 0.6rem 0.75rem;
+  border-left: 3px solid var(--primary);
+  border-radius: 6px;
+  background: var(--bg2);
+}
 .honor-list {
   display: grid;
   gap: 0.35rem;
@@ -4903,6 +4936,8 @@ html[data-theme="light"] .player-modal-head .avatar {
 }
 
 /* 训练日程 */
+.training-title-row { align-items: center; gap: 0.75rem; }
+.training-title-row h2 { margin-bottom: 0; }
 .training-options {
   display: flex;
   flex-direction: column;

@@ -267,6 +267,7 @@ const dict = {
 
     // training
     "train.focus": "训练重点",
+    "train.delegate": "委托助理教练安排",
     "train.focusHint": "每日推进时生效；高强度更易成长也更易受伤。教练能力影响成长与恢复。",
     "train.intensity": "训练强度",
     "train.fitness": "阵容体能一览",
@@ -751,6 +752,7 @@ const dict = {
     "staff.refresh": "Refresh candidates",
 
     "train.focus": "Training focus",
+    "train.delegate": "Delegate to assistant",
     "train.focusHint": "Applies each day. Higher intensity grows faster but risks injury. Coach rating matters.",
     "train.intensity": "Intensity",
     "train.fitness": "Squad fitness",
