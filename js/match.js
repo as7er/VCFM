@@ -38,6 +38,7 @@ import {
   applyMatchPrepBonus,
   resetMatchPrepCounter,
 } from "./training-boost.js";
+import { getFormBonus, getSeasonPhaseBonus } from "./matchday-income.js";
 import {
   mediaAfterUserMatch,
   narrativeAfterUserMatch,
@@ -318,33 +319,21 @@ function recomputeSides(state) {
   const awayPrep = applyMatchPrepBonus(away, home);
   state._matchPrep = { home: homePrep, away: awayPrep };
 
-  // 应用赛前准备效果
-  if (homePrep.fitness > 0) {
-    // 体能加成：稍微提升攻防
-    homeAtk *= 1 + homePrep.fitness * 0.005;
-    homeDef *= 1 + homePrep.fitness * 0.005;
-  }
-  if (homePrep.morale > 0) {
-    // 士气加成：主要提升攻击
-    homeAtk *= 1 + homePrep.morale * 0.008;
-  }
-  if (homePrep.tactics > 0) {
-    // 战术加成：攻防均衡提升
-    homeAtk *= 1 + homePrep.tactics;
-    homeDef *= 1 + homePrep.tactics;
-  }
-
-  if (awayPrep.fitness > 0) {
-    awayAtk *= 1 + awayPrep.fitness * 0.005;
-    awayDef *= 1 + awayPrep.fitness * 0.005;
-  }
-  if (awayPrep.morale > 0) {
-    awayAtk *= 1 + awayPrep.morale * 0.008;
-  }
-  if (awayPrep.tactics > 0) {
-    awayAtk *= 1 + awayPrep.tactics;
-    awayDef *= 1 + awayPrep.tactics;
-  }
+  // 应用赛前准备效果：体能/士气为间接影响，攻防演练为直接影响
+  // 训练模式的代价（体能 -2、士气 -1）同样计入，因此不做正数过滤
+  const prepMods = (prep) => ({
+    atk:
+      (1 + prep.fitness * 0.005) *
+      (1 + prep.morale * 0.008) *
+      (1 + prep.attacking / 100),
+    def: (1 + prep.fitness * 0.005) * (1 + prep.defending / 100),
+  });
+  const hPrepMod = prepMods(homePrep);
+  const aPrepMod = prepMods(awayPrep);
+  homeAtk *= hPrepMod.atk;
+  homeDef *= hPrepMod.def;
+  awayAtk *= aPrepMod.atk;
+  awayDef *= aPrepMod.def;
 
   // 缓存控球/犯规/威胁权重供 tryAttack 使用
   state._possW = {
@@ -866,13 +855,27 @@ function addSimGoal(state, minute, team, scorerId, assistId = null, opts = {}) {
  * （pushSimFlavor 的 injury 分支）。用户队也自动补人：半场是预跑的，无法中途询问；
  * 换人事件对用户可见，中场仍可自由调整。
  */
+/** 训练模式带来的受伤风险修正（1.0 = 无影响；体能储备为负、攻防演练为正） */
+function prepInjuryMod(state, club) {
+  const sk = club.id === state.home.id ? "home" : "away";
+  return 1 + (state._matchPrep?.[sk]?.injury || 0);
+}
+
 function wireSimInjuries(state) {
   const eng = state.simEng;
   if (!eng) return;
   const wMul = state.weather?.injury || 1;
   eng.injuryMul = {
-    home: wMul * doctorInjuryMod(state.home) * trainingInjuryMod(state.home),
-    away: wMul * doctorInjuryMod(state.away) * trainingInjuryMod(state.away),
+    home:
+      wMul *
+      doctorInjuryMod(state.home) *
+      trainingInjuryMod(state.home) *
+      prepInjuryMod(state, state.home),
+    away:
+      wMul *
+      doctorInjuryMod(state.away) *
+      trainingInjuryMod(state.away) *
+      prepInjuryMod(state, state.away),
   };
   if (!state._simPendingSubs) state._simPendingSubs = [];
   eng.onInjurySub = (agent) => {
@@ -1456,7 +1459,8 @@ function tryCardOrFoul(state, minute) {
 
 function tryInjury(state, minute) {
   const club = chance(0.5) ? state.home : state.away;
-  const injuryMod = doctorInjuryMod(club) * trainingInjuryMod(club);
+  const injuryMod =
+    doctorInjuryMod(club) * trainingInjuryMod(club) * prepInjuryMod(state, club);
   // injuryMod 越低（好队医/设施）越不易伤
   const base = 0.005 * (state.weather.injury || 1) * injuryMod;
   if (!chance(base)) return;
@@ -2226,7 +2230,8 @@ function applyResult(world, f) {
 }
 
 function drainFitness(club, isHome, state) {
-  const injuryMod = doctorInjuryMod(club) * trainingInjuryMod(club);
+  const injuryMod =
+    doctorInjuryMod(club) * trainingInjuryMod(club) * prepInjuryMod(state, club);
   const sk = club.id === state.home.id ? "home" : "away";
   const sent = state.sentOff[sk];
   const fitW = state._fitW?.[sk] || fitnessMultOf(club.tactics);
@@ -2558,6 +2563,8 @@ export function finalizeMatch(state) {
                   fixture.roundLabel === '1/4决赛' ? 'quarter' : null,
         winStreak,
         opponentStrength: opp.strength || 50,
+        formBonus: getFormBonus(world, me.id),
+        seasonPhaseBonus: getSeasonPhaseBonus(world),
       });
 
       me.money += income;

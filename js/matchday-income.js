@@ -3,10 +3,13 @@
  * v154: 基于表现、对手、赛事类型的收入加成
  */
 
-import { DIVISIONS } from "./data.js";
-
 /**
- * 计算比赛日收入加成
+ * 计算比赛日收入加成（完整版）
+ *
+ * ⚠️ 注意：facilities.js 的 matchdayIncome() 已自行处理德比、杯赛阶段、
+ * 争冠/保级加成。本函数包含同样的因子，两者叠加会重复计算。
+ * 与 matchdayIncome() 配合时请改用 getFormBonus() 与 getSeasonPhaseBonus()。
+ *
  * @param {Object} world - 世界状态
  * @param {Object} club - 主队
  * @param {Object} opponent - 客队
@@ -51,7 +54,7 @@ export function calculateMatchdayBonus(world, club, opponent, fixture) {
 /**
  * 表现加成：基于最近战绩
  */
-function getFormBonus(world, clubId) {
+export function getFormBonus(world, clubId) {
   if (!world?.table?.[clubId]) return 1.0;
 
   // 简化版：基于积分率
@@ -176,11 +179,17 @@ function getCupBonus(competitionType, round) {
 /**
  * 赛季阶段加成：赛季末关键期
  */
-function getSeasonPhaseBonus(world) {
-  if (!world?.day || world.seasonOver) return 1.0;
+export function getSeasonPhaseBonus(world) {
+  if (!world || world.seasonOver) return 1.0;
 
-  const totalDays = 220; // v152标准赛季长度
-  const progress = world.day / totalDays;
+  // 优先按赛程完成度衡量：赛季长度会随赛制调整，比绝对日期可靠
+  let progress = 0;
+  if (Array.isArray(world.fixtures) && world.fixtures.length) {
+    progress =
+      world.fixtures.filter((f) => f.played).length / world.fixtures.length;
+  } else if (world.day) {
+    progress = world.day / 220; // v152 标准赛季长度，无赛程时的兜底
+  }
 
   // 赛季末最后10场（约85%+）：+10%
   if (progress >= 0.85) return 1.10;

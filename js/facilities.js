@@ -319,7 +319,8 @@ export function matchdayIncome(club, options = {}) {
   }
 
   const fill = fillMin + Math.random() * (fillMax - fillMin);
-  let income = Math.round(base * fill);
+  const gateIncome = Math.round(base * fill);
+  let income = gateIncome;
 
   // 胜利奖金
   if (won) income = Math.round(income * 1.08);
@@ -357,6 +358,9 @@ export function matchdayIncome(club, options = {}) {
   if (seasonPhaseBonus !== 1.0) {
     income = Math.round(income * seasonPhaseBonus);
   }
+
+  // 上限：单场票房最高为基础票房的 2.5 倍（欧冠决赛级别），避免加成连乘失控
+  income = Math.min(income, Math.round(gateIncome * 2.5));
 
   // 联赛级别微调
   const tier = DIVISIONS[club.division || 3]?.tier || 3;

@@ -612,6 +612,10 @@ export function advanceDay(world) {
     !!(sackedResult && sackedResult.sacked) ||
     !!(finishResult && finishResult.sacked) ||
     !!world.sacked;
+  // 标注事件发生日，便于多日推进后的摘要按时间排列
+  for (const ev of events) {
+    if (ev.day == null) ev.day = world.day;
+  }
   return {
     userMatches,
     sacked,
@@ -649,6 +653,10 @@ function checkYouthRecruitmentEvent(world) {
       return {
         type: "youth_recruitment",
         count: newcomers.length,
+        avgPotential: Math.round(
+          newcomers.reduce((s, p) => s + (p.potential || p.ovr || 0), 0) /
+            newcomers.length
+        ),
       };
     }
   }
@@ -683,14 +691,6 @@ function isRelegationClash(world, fixture) {
 
   // 双方都在保级区附近（倒数5名）
   return homePos > 0 && awayPos > 0 && homePos >= relegationZone - 2 && awayPos >= relegationZone - 2;
-}
-        type: "youth_recruitment",
-        count: newcomers.length,
-        avgPotential: Math.round(newcomers.reduce((s, p) => s + (p.potential || p.ovr), 0) / newcomers.length)
-      };
-    }
-  }
-  return null;
 }
 
 function checkInjuryEvent(world, userClub) {
@@ -1242,8 +1242,12 @@ export function advanceToSeasonEnd(world, { maxDays = 400, stopOnUserMatch = tru
 
   let days = 0;
   let last = { userMatches: [] };
+  const allEvents = []; // 累积事件供界面摘要展示
   while (days < maxDays && !world.seasonOver && !world.sacked) {
     last = advanceDay(world);
+    if (last.events && last.events.length > 0) {
+      allEvents.push(...last.events);
+    }
     days += 1;
     if (last.sacked || world.sacked) {
       return {
@@ -1253,6 +1257,7 @@ export function advanceToSeasonEnd(world, { maxDays = 400, stopOnUserMatch = tru
         sacked: true,
         sackedResult: last.sackedResult,
         msg: last.sackedResult?.msg || "你已被解雇",
+        events: allEvents,
       };
     }
     if (stopOnUserMatch && last.userMatches && last.userMatches.length) {
@@ -1263,6 +1268,7 @@ export function advanceToSeasonEnd(world, { maxDays = 400, stopOnUserMatch = tru
         pendingMatch: last.userMatches[0],
         stoppedForMatch: true,
         msg: `推进 ${days} 天，遇到我方比赛，已停下`,
+        events: allEvents,
       };
     }
     if (world.seasonOver) {
@@ -1273,6 +1279,7 @@ export function advanceToSeasonEnd(world, { maxDays = 400, stopOnUserMatch = tru
         stoppedForMatch: false,
         msg: `推进 ${days} 天，赛季结束`,
         sacked: !!world.sacked,
+        events: allEvents,
       };
     }
   }
@@ -1282,6 +1289,7 @@ export function advanceToSeasonEnd(world, { maxDays = 400, stopOnUserMatch = tru
     userMatches: last.userMatches || [],
     stoppedForMatch: !!(last.userMatches && last.userMatches.length),
     msg: `已推进 ${days} 天（未到赛季末）`,
+    events: allEvents,
   };
 }
 

@@ -99,7 +99,7 @@ export const TRAINING_MODES = {
  */
 export function setTrainingMode(club, mode, currentDay) {
   if (!TRAINING_MODES[mode]) {
-    return { ok: false, msg: "未知训练模式" };
+    return { ok: false, msg: "未知训练模式", msgEn: "Unknown training mode" };
   }
 
   const boost = ensureTrainingBoost(club);
@@ -107,9 +107,12 @@ export function setTrainingMode(club, mode, currentDay) {
   // 冷却时间：至少3天才能更改（避免频繁切换）
   const daysSinceChange = currentDay - boost.lastChanged;
   if (daysSinceChange < 3 && boost.lastChanged > 0) {
+    const wait = 3 - daysSinceChange;
     return {
       ok: false,
-      msg: `训练计划需要稳定性，请等待 ${3 - daysSinceChange} 天后再调整`
+      wait,
+      msg: `训练计划需要稳定性，请等待 ${wait} 天后再调整`,
+      msgEn: `Training plans need stability — wait ${wait} more day(s)`,
     };
   }
 
@@ -120,7 +123,8 @@ export function setTrainingMode(club, mode, currentDay) {
   const modeInfo = TRAINING_MODES[mode];
   return {
     ok: true,
-    msg: `训练重心已调整为：${modeInfo.label}`
+    msg: `训练重心已调整为：${modeInfo.label}`,
+    msgEn: `Match preparation set to: ${modeInfo.labelEn}`,
   };
 }
 
@@ -185,6 +189,45 @@ export function trainingBoostToMatchMods(boost) {
     injuryMod: 1.0 + (boost.injury || 0),
     setpieceMod: 1.0 + (boost.setpiece || 0) / 100,
   };
+}
+
+/**
+ * 赛前准备加成（比赛引擎入口）
+ *
+ * recomputeSides() 会在一场比赛内被多次调用（换人、战术调整、中场），
+ * 因此本函数必须幂等：同一场比赛内任意次调用都返回相同结果。
+ * "每场只生效一次" 的语义由 resetMatchPrepCounter() 在赛后清除标记来保证。
+ *
+ * @param {Object} club - 参赛俱乐部
+ * @param {Object} opponent - 对手（保留参数，当前不影响加成）
+ * @returns {Object} - { mode, fitness, morale, attacking, defending, setpiece, injury }
+ */
+export function applyMatchPrepBonus(club, opponent) {
+  const boost = ensureTrainingBoost(club);
+  const mode = TRAINING_MODES[boost.mode] || TRAINING_MODES.balanced;
+
+  // 标记本场已应用的模式，赛后由 resetMatchPrepCounter 清除
+  boost.boostedMatch = boost.mode;
+
+  return {
+    mode: boost.mode,
+    fitness: mode.fitness || 0,
+    morale: mode.morale || 0,
+    attacking: mode.attacking || 0,
+    defending: mode.defending || 0,
+    setpiece: mode.setpiece || 0,
+    injury: mode.injury || 0,
+  };
+}
+
+/**
+ * 赛后重置赛前准备标记，让下场比赛可以重新应用加成
+ * @param {Object} club - 俱乐部
+ */
+export function resetMatchPrepCounter(club) {
+  if (!club) return;
+  const boost = ensureTrainingBoost(club);
+  boost.boostedMatch = null;
 }
 
 /**
