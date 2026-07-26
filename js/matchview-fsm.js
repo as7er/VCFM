@@ -194,6 +194,13 @@ export class MatchViewFSM {
   }
 
   /**
+   * 获取当前状态
+   */
+  current() {
+    return this.state;
+  }
+
+  /**
    * 获取当前状态的完整描述（调试用）
    */
   describe() {
