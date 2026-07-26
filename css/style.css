@@ -1421,7 +1421,7 @@ html[data-theme="light"] .fm-scoreboard {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 7.5rem;
+  max-width: 6.5rem;
 }
 .fm-sb-short {
   font-size: 0.72rem;
@@ -2810,8 +2810,8 @@ html[data-theme="dark"] .mp-fmm-dock {
   padding: 4px 2px;
   pointer-events: auto;
 }
-.mp-bench-lane.home { left: 0.5%; }
-.mp-bench-lane.away { right: 0.5%; }
+.mp-bench-lane.home { left: -1.5%; }
+.mp-bench-lane.away { right: -1.5%; }
 .mp-bench-lane.empty { display: none; }
 .mp-bench-chip {
   display: flex;

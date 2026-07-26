@@ -2591,7 +2591,7 @@ export class MatchView {
       const x = px(pl.x);
       const y = py(pl.y);
       // 与模拟层 2.85~3.35 的中心间距匹配；旧半径 9px 会让直径大于碰撞距离。
-      const r = clamp(minDim * 0.022, 6, 8);
+      const r = clamp(minDim * 0.026, 7, 10);
       const spd = Math.hypot(pl.vx || 0, pl.vy || 0);
       const dim =
         focusOn && !this.focusIds.has(pl.id) && !pl.el.classList.contains("has-ball");
@@ -3674,7 +3674,7 @@ export class MatchView {
     if (pl._lastX !== undefined) {
       const jump = Math.hypot(pl.x - pl._lastX, pl.y - pl._lastY);
       const expected = Math.hypot(pl.vx, pl.vy) * dt + 0.5;
-      if (jump > expected * 2 + 1.5) { pl.vx = 0; pl.vy = 0; }
+      if (jump > expected * 2 + 2.5) { pl.vx = 0; pl.vy = 0; }
     }
 
     const dx = pl.tx - pl.x;
@@ -3689,7 +3689,7 @@ export class MatchView {
     }
 
     // arrive 行为：接近目标（<slowR）时降低期望速度，形成自然减速
-    const slowR = 5.5;
+    const slowR = 6.5;
     const desiredSpeed = speed * Math.min(1, dist / slowR);
     const dvx = (dx / dist) * desiredSpeed;
     const dvy = (dy / dist) * desiredSpeed;
