@@ -5549,6 +5549,7 @@ export class MatchView {
 
     // —— 真空间投影：只横幅/音效/贴帧，不瞬移编舞 ——
     // simDrive / 贴帧 / 或 engine=v2 事件：一律走轻量分支（防 fast 未开 simDrive 时掉进旧高光）
+    console.log('[DEBUG onEvent]', ev.type, 'snap.engine=', snap?.engine, 'snap.sim=', !!snap?.sim, 'this.simDrive=', this.simDrive);
     if (this.simDrive || snap?.sim || snap?.engine === "v2" || ev?.fromSim) {
       if (snap?.sim) this.applySimSnapshot(snap.sim);
       // 无帧时也钉死 simDrive，阻断 update() 旧 AI
