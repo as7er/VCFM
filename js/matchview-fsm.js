@@ -101,9 +101,9 @@ export class MatchViewFSM {
       return ['PLAYING', 'PRE_MATCH', 'HALF_TIME'].includes(toState);
     }
 
-    // HALF_TIME 只能进入 PLAYING
+    // HALF_TIME 可以进入 PLAYING 或 PAUSED
     if (fromState === 'HALF_TIME') {
-      return toState === 'PLAYING';
+      return toState === 'PLAYING' || toState === 'PAUSED';
     }
 
     // FULL_TIME 是终态
