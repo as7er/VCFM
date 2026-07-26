@@ -2466,8 +2466,8 @@ export class MatchView {
       return;
     }
     this._ballTrail.push({ x, y, z });
-    // 持球时轨迹短，飞行时长
-    const max = !this.carrier || z > 0.6 ? 22 : 8;
+    // 持球时轨迹短，飞行时长（更克制的长度）
+    const max = !this.carrier || z > 0.6 ? 14 : 5;
     while (this._ballTrail.length > max) this._ballTrail.shift();
   }
 
@@ -2570,8 +2570,9 @@ export class MatchView {
         ctx.moveTo(px(a.x), py(a.y));
         ctx.lineTo(px(b.x), py(b.y));
         if (isShotTrail) {
-          ctx.strokeStyle = `rgba(251, 146, 60, ${0.18 + t * 0.72})`;
-          ctx.lineWidth = (1.8 + t * 3.6 + elev * 0.5) * (minDim / 420);
+          // 更克制的射门轨迹：降低透明度和线宽
+          ctx.strokeStyle = `rgba(251, 146, 60, ${0.12 + t * 0.48})`;
+          ctx.lineWidth = (1.2 + t * 2.4 + elev * 0.3) * (minDim / 420);
         } else {
           ctx.strokeStyle =
             elev > 0.8
@@ -2596,12 +2597,12 @@ export class MatchView {
         focusOn && !this.focusIds.has(pl.id) && !pl.el.classList.contains("has-ball");
       ctx.globalAlpha = dim ? 0.38 : 1;
 
-      // 冲刺残影（再明显一点）
+      // 冲刺残影（更克制的强度）
       if (spd > 0.48 && pl.heading != null && pl.pose !== "dive") {
         const hx = Math.cos(pl.heading);
         const hy = Math.sin(pl.heading);
         for (let k = 1; k <= 3; k++) {
-          ctx.fillStyle = `rgba(255,255,255,${0.12 - k * 0.03})`;
+          ctx.fillStyle = `rgba(255,255,255,${0.08 - k * 0.02})`;
           ctx.beginPath();
           ctx.arc(
             x - hx * r * k * 0.62,
@@ -2627,7 +2628,7 @@ export class MatchView {
           ? "#eab308"
           : "#a3e635"
         : pl.el.querySelector(".mp-dot")?.style?.background ||
-          (pl.team === "home" ? "#3d8bfd" : "#ef4444");
+          (pl.team === "home" ? "#2563eb" : "#dc2626");
       const diving =
         pl.pose === "dive" &&
         (!pl.poseUntil || performance.now() < pl.poseUntil);

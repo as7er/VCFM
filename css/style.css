@@ -2336,10 +2336,10 @@ html[data-theme="light"] .ht-role-tips, html[data-theme="light"] .ht-role-tip {
   /* FMM：横条棋盘格草坪（对照 rec 录屏） */
   background: repeating-linear-gradient(
     0deg,
-    #1f9a4a 0px,
-    #1f9a4a 22px,
-    #1a8740 22px,
-    #1a8740 44px
+    #2d7a47 0px,
+    #2d7a47 22px,
+    #266938 22px,
+    #266938 44px
   );
 }
 .mp-grass::before {
