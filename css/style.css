@@ -1415,13 +1415,13 @@ html[data-theme="light"] .fm-scoreboard {
   gap: 0.1rem;
 }
 .fm-sb-name {
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   font-weight: 800;
   letter-spacing: 0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 6.5rem;
+  max-width: 5.5rem;
 }
 .fm-sb-short {
   font-size: 0.72rem;
