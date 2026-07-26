@@ -472,38 +472,51 @@ export function releaseYouth(world, clubId, playerId) {
 /** 推进一天：训练恢复、AI 比赛、工资 */
 export function advanceDay(world) {
   if (world.sacked) {
-    return { userMatches: [], sacked: true };
+    return { userMatches: [], sacked: true, events: [] };
   }
 
   world.day += 1;
+  const events = []; // 收集关键事件用于反馈
 
   // 转会窗开/关提示
   ensureTransferWindow(world);
   processTransferWindowDay(world);
+  const twEvent = checkTransferWindowEvent(world);
+  if (twEvent) events.push(twEvent);
+
   expirePoachBids(world);
   processPoachingDay(world);
   // 信箱：同步挖角、过期、偶发球员/球探邮件
   processInboxDay(world);
   // 关系/氛围 + 可能的约谈信草稿
   const relOut = processRelationsDay(world);
-  if (relOut?.inboxDraft) pushInbox(world, relOut.inboxDraft);
+  if (relOut?.inboxDraft) {
+    pushInbox(world, relOut.inboxDraft);
+    events.push({ type: "player_unhappy", player: relOut.inboxDraft.playerName });
+  }
   processScoutMissions(world);
   processWorldPulse(world);
   processYouthPulse(world);
 
   // 设施建设完工
-  processFacilityDay(world);
+  const facilityResult = processFacilityDay(world);
+  if (facilityResult?.completed) {
+    events.push({ type: "facility_completed", facility: facilityResult.kind });
+  }
 
   // 训练日程：体能 / 伤愈 / 士气 / 周成长（替代原先统一恢复）
   processTrainingDay(world);
 
   // 青训
   processYouthDay(world);
+  const youthEvent = checkYouthRecruitmentEvent(world);
+  if (youthEvent) events.push(youthEvent);
 
   // 国际比赛日（约每 50 天，更贴近现实频率）
   if (!world.lastIntlDay) world.lastIntlDay = 0;
   if (world.day - world.lastIntlDay >= 50 && !world.seasonOver) {
     runInternationalBreak(world);
+    events.push({ type: "international_break", day: world.day });
   }
 
   ensureCompetitions(world);
@@ -513,18 +526,35 @@ export function advanceDay(world) {
   const todayCompetitions = competitionFixturesOnDay(world, world.day);
   const today = [...todayLeague, ...todayCompetitions];
   const userMatches = [];
+  const aiMatchResults = [];
   for (const f of today) {
     const isUser = f.home === world.userClubId || f.away === world.userClubId;
     if (isUser) {
       userMatches.push(f);
     } else {
-      simulateMatch(world, f);
+      const result = simulateMatch(world, f);
+      // 记录关键AI比赛（德比、争冠、保级）
+      if (f.derby || isTopTableClash(world, f) || isRelegationClash(world, f)) {
+        aiMatchResults.push({
+          home: clubById(world, f.home)?.short || clubById(world, f.home)?.name,
+          away: clubById(world, f.away)?.short || clubById(world, f.away)?.name,
+          homeGoals: result?.homeGoals || f.homeGoals,
+          awayGoals: result?.awayGoals || f.awayGoals,
+          derby: f.derby,
+        });
+      }
     }
+  }
+  if (aiMatchResults.length > 0) {
+    events.push({ type: "key_matches", matches: aiMatchResults });
   }
 
   // 租借到期归还
   ensureLoans(world);
-  processLoansDay(world);
+  const loanResult = processLoansDay(world);
+  if (loanResult?.returned?.length > 0) {
+    events.push({ type: "loan_returned", count: loanResult.returned.length });
+  }
 
   // 媒体日常脉搏
   const userClub = clubById(world, world.userClubId);
@@ -533,6 +563,14 @@ export function advanceDay(world) {
     narrativeTablePulse(world, userClub, getSortedTable);
     narrativeInjuryWave(world, userClub);
   }
+
+  // 检查伤病事件
+  const injuryEvent = checkInjuryEvent(world, userClub);
+  if (injuryEvent) events.push(injuryEvent);
+
+  // 检查董事会警告
+  const boardEvent = checkBoardEvent(world);
+  if (boardEvent) events.push(boardEvent);
 
   // 每周发工资（每 7 天）——一线含租借分摊
   if (world.day % 7 === 0) {
@@ -581,7 +619,101 @@ export function advanceDay(world) {
       sackedResult ||
       finishResult?.sackedResult ||
       (world.sacked ? { sacked: true, msg: world.sackedReason } : null),
+    events, // 返回事件列表供界面展示
   };
+}
+
+// 辅助函数：检查各种关键事件
+
+function checkTransferWindowEvent(world) {
+  const tw = world.transferWindow;
+  if (!tw || !tw.lastPhase) return null;
+  const phase = getTransferPhase(world);
+  if (phase !== tw.lastPhase) {
+    if (phase === "summer") return { type: "transfer_window", phase: "summer_open" };
+    if (phase === "winter") return { type: "transfer_window", phase: "winter_open" };
+    if (phase === "closed") return { type: "transfer_window", phase: "closed" };
+  }
+  return null;
+}
+
+function checkYouthRecruitmentEvent(world) {
+  const userClub = clubById(world, world.userClubId);
+  if (!userClub) return null;
+  const ya = userClub.youth;
+  if (!ya) return null;
+  // 检查是否刚招生（daysSinceIntake === 0 表示刚重置）
+  if (ya.daysSinceIntake === 0 && ya.players.length > 0) {
+    const newcomers = ya.players.slice(-3); // 假设最多3个新人
+    if (newcomers.length > 0) {
+      return {
+        type: "youth_recruitment",
+        count: newcomers.length,
+      };
+    }
+  }
+  return null;
+}
+
+function isTopTableClash(world, fixture) {
+  if (!world?.table) return false;
+  const homeClub = clubById(world, fixture.home);
+  const awayClub = clubById(world, fixture.away);
+  if (!homeClub || !awayClub || homeClub.division !== awayClub.division) return false;
+
+  const table = getSortedTable(world, homeClub.division);
+  const homePos = table.findIndex(r => r.id === fixture.home) + 1;
+  const awayPos = table.findIndex(r => r.id === fixture.away) + 1;
+
+  // 双方都在前4名
+  return homePos > 0 && awayPos > 0 && homePos <= 4 && awayPos <= 4;
+}
+
+function isRelegationClash(world, fixture) {
+  if (!world?.table) return false;
+  const homeClub = clubById(world, fixture.home);
+  const awayClub = clubById(world, fixture.away);
+  if (!homeClub || !awayClub || homeClub.division !== awayClub.division || homeClub.division >= 3) return false;
+
+  const table = getSortedTable(world, homeClub.division);
+  const homePos = table.findIndex(r => r.id === fixture.home) + 1;
+  const awayPos = table.findIndex(r => r.id === fixture.away) + 1;
+  const total = table.length;
+  const relegationZone = total - 2;
+
+  // 双方都在保级区附近（倒数5名）
+  return homePos > 0 && awayPos > 0 && homePos >= relegationZone - 2 && awayPos >= relegationZone - 2;
+}
+        type: "youth_recruitment",
+        count: newcomers.length,
+        avgPotential: Math.round(newcomers.reduce((s, p) => s + (p.potential || p.ovr), 0) / newcomers.length)
+      };
+    }
+  }
+  return null;
+}
+
+function checkInjuryEvent(world, userClub) {
+  if (!userClub) return null;
+  const injured = userClub.players.filter((p) => (p.injured || 0) > 0);
+  if (injured.length >= 3) {
+    return { type: "injury_wave", count: injured.length };
+  }
+  return null;
+}
+
+function checkBoardEvent(world) {
+  const userClub = clubById(world, world.userClubId);
+  if (!userClub) return null;
+  const board = world.boardObjective;
+  if (!board) return null;
+  // 检查是否有新警告
+  const warnings = board.warnings || 0;
+  if (warnings > (board._lastWarnings || 0)) {
+    board._lastWarnings = warnings;
+    return { type: "board_warning", warnings, maxWarnings: 4 };
+  }
+  return null;
 }
 
 /**
@@ -1002,13 +1134,14 @@ export function nextUserMatchDay(world) {
 /**
  * 连续推进到下一场用户比赛日（或赛季结束）。
  * 若当天已有可踢比赛，不推进，返回 stopped 提示。
+ * 返回值包含关键事件摘要，用于界面展示。
  */
 export function advanceToNextMatchDay(world, maxDays = 60) {
   if (world.sacked) {
-    return { ok: false, msg: "你已被解雇", days: 0, userMatches: [], sacked: true };
+    return { ok: false, msg: "你已被解雇", days: 0, userMatches: [], sacked: true, events: [] };
   }
   if (world.seasonOver) {
-    return { ok: false, msg: "赛季已结束", days: 0, userMatches: [] };
+    return { ok: false, msg: "赛季已结束", days: 0, userMatches: [], events: [] };
   }
   const ready = getNextPlayableMatch(world);
   if (ready && ready.day <= world.day && !ready.played) {
@@ -1018,11 +1151,14 @@ export function advanceToNextMatchDay(world, maxDays = 60) {
       days: 0,
       userMatches: [ready],
       pendingMatch: ready,
+      events: [],
     };
   }
 
   let days = 0;
-  let last = { userMatches: [] };
+  let last = { userMatches: [], events: [] };
+  const allEvents = []; // 累积所有事件
+
   while (days < maxDays && !world.seasonOver && !world.sacked) {
     const target = nextUserMatchDay(world);
     if (target != null && world.day >= target) {
@@ -1033,9 +1169,13 @@ export function advanceToNextMatchDay(world, maxDays = 60) {
         userMatches: m ? [m] : [],
         pendingMatch: m,
         msg: m ? `比赛日到了（推进 ${days} 天）` : `已推进 ${days} 天`,
+        events: allEvents,
       };
     }
     last = advanceDay(world);
+    if (last.events && last.events.length > 0) {
+      allEvents.push(...last.events);
+    }
     days += 1;
     if (last.sacked || world.sacked) {
       return {
@@ -1045,6 +1185,7 @@ export function advanceToNextMatchDay(world, maxDays = 60) {
         sacked: true,
         sackedResult: last.sackedResult,
         msg: last.sackedResult?.msg || "你已被解雇",
+        events: allEvents,
       };
     }
     if (last.userMatches && last.userMatches.length) {
@@ -1054,6 +1195,7 @@ export function advanceToNextMatchDay(world, maxDays = 60) {
         userMatches: last.userMatches,
         pendingMatch: last.userMatches[0],
         msg: `推进 ${days} 天，比赛日到了`,
+        events: allEvents,
       };
     }
     if (world.seasonOver) {
@@ -1063,6 +1205,7 @@ export function advanceToNextMatchDay(world, maxDays = 60) {
         userMatches: [],
         msg: `推进 ${days} 天，赛季结束`,
         sacked: !!world.sacked,
+        events: allEvents,
       };
     }
   }
@@ -1071,6 +1214,7 @@ export function advanceToNextMatchDay(world, maxDays = 60) {
     days,
     userMatches: last.userMatches || [],
     msg: `已推进 ${days} 天`,
+    events: allEvents,
   };
 }
 

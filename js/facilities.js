@@ -255,19 +255,114 @@ export function facilityWeeklyUpkeep(club) {
   return (st.upkeep || 0) + (tr.upkeep || 0);
 }
 
-/** 主场比赛日收入（含上座波动） */
-export function matchdayIncome(club, { isCup = false, won = false } = {}) {
+/**
+ * 主场比赛日收入（含上座波动 + 动态加成）
+ * @param {Object} club - 俱乐部对象
+ * @param {Object} options - 比赛选项
+ * @param {boolean} options.isCup - 是否杯赛
+ * @param {boolean} options.won - 是否赢球
+ * @param {boolean} options.isDerby - 是否德比（同城/同级别对手）
+ * @param {boolean} options.isRelegationBattle - 是否保级大战
+ * @param {boolean} options.isTitleRace - 是否争冠关键战
+ * @param {string} options.cupStage - 杯赛阶段 ('final', 'semi', 'quarter', 'r16', 'group')
+ * @param {number} options.winStreak - 连胜场次
+ * @param {number} options.opponentStrength - 对手实力（用于判断强强对话）
+ * @param {number} options.formBonus - 表现加成（1.0 = 无加成）
+ * @param {number} options.seasonPhaseBonus - 赛季阶段加成（1.0 = 无加成）
+ */
+export function matchdayIncome(club, options = {}) {
+  const {
+    isCup = false,
+    won = false,
+    isDerby = false,
+    isRelegationBattle = false,
+    isTitleRace = false,
+    cupStage = null,
+    winStreak = 0,
+    opponentStrength = 0,
+    formBonus = 1.0,
+    seasonPhaseBonus = 1.0,
+  } = options;
+
   const st = stadiumInfo(club);
   let base = st.matchday || 40_000;
+
+  // 基础收入调整
   if (isCup) base *= 0.75;
-  // 上座 75%–100%
-  const fill = 0.75 + Math.random() * 0.25;
+
+  // 上座率：基础 75%–100%
+  let fillMin = 0.75;
+  let fillMax = 1.0;
+
+  // 动态上座率加成
+  if (isDerby) {
+    fillMin = 0.92; // 德比战几乎满座
+    fillMax = 1.0;
+  } else if (isRelegationBattle) {
+    fillMin = 0.85; // 保级生死战
+    fillMax = 0.98;
+  } else if (isTitleRace) {
+    fillMin = 0.88; // 争冠关键战
+    fillMax = 1.0;
+  } else if (winStreak >= 5) {
+    fillMin = 0.82; // 连胜吸引球迷
+    fillMax = 0.98;
+  } else if (winStreak >= 3) {
+    fillMin = 0.78;
+    fillMax = 0.95;
+  }
+
+  // 强强对话（对手实力接近）
+  const clubStrength = club.strength || 50;
+  if (opponentStrength > 0 && Math.abs(clubStrength - opponentStrength) < 5 && opponentStrength >= 60) {
+    fillMin = Math.min(1.0, fillMin + 0.08); // 强强对话吸引球迷
+  }
+
+  const fill = fillMin + Math.random() * (fillMax - fillMin);
   let income = Math.round(base * fill);
+
+  // 胜利奖金
   if (won) income = Math.round(income * 1.08);
+
+  // 杯赛阶段加成
+  if (isCup && cupStage) {
+    const cupBonus = {
+      final: 1.6,      // 决赛
+      semi: 1.4,       // 半决赛
+      quarter: 1.25,   // 八强
+      r16: 1.15,       // 十六强
+      group: 1.0,      // 小组赛
+    };
+    income = Math.round(income * (cupBonus[cupStage] || 1.0));
+  }
+
+  // 德比额外加成（票价溢价）
+  if (isDerby) {
+    income = Math.round(income * 1.25);
+  }
+
+  // 保级/争冠紧张氛围加成
+  if (isRelegationBattle) {
+    income = Math.round(income * 1.3);
+  } else if (isTitleRace) {
+    income = Math.round(income * 1.2);
+  }
+
+  // 表现加成（最近战绩）- v154新增
+  if (formBonus !== 1.0) {
+    income = Math.round(income * formBonus);
+  }
+
+  // 赛季阶段加成（赛季末冲刺期）- v154新增
+  if (seasonPhaseBonus !== 1.0) {
+    income = Math.round(income * seasonPhaseBonus);
+  }
+
   // 联赛级别微调
   const tier = DIVISIONS[club.division || 3]?.tier || 3;
   if (tier === 1) income = Math.round(income * 1.25);
   else if (tier === 2) income = Math.round(income * 1.1);
+
   return income;
 }
 

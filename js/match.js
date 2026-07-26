@@ -35,6 +35,10 @@ import {
 } from "./staff.js";
 import { trainingInjuryMod, matchdayIncome, stadiumInfo } from "./facilities.js";
 import {
+  applyMatchPrepBonus,
+  resetMatchPrepCounter,
+} from "./training-boost.js";
+import {
   mediaAfterUserMatch,
   narrativeAfterUserMatch,
   pushMedia,
@@ -308,6 +312,39 @@ function recomputeSides(state) {
   awayAtk *= aRole.atk;
   awayDef *= aRole.def;
   state._roleMods = { home: hRole, away: aRole };
+
+  // 赛前准备加成
+  const homePrep = applyMatchPrepBonus(home, away);
+  const awayPrep = applyMatchPrepBonus(away, home);
+  state._matchPrep = { home: homePrep, away: awayPrep };
+
+  // 应用赛前准备效果
+  if (homePrep.fitness > 0) {
+    // 体能加成：稍微提升攻防
+    homeAtk *= 1 + homePrep.fitness * 0.005;
+    homeDef *= 1 + homePrep.fitness * 0.005;
+  }
+  if (homePrep.morale > 0) {
+    // 士气加成：主要提升攻击
+    homeAtk *= 1 + homePrep.morale * 0.008;
+  }
+  if (homePrep.tactics > 0) {
+    // 战术加成：攻防均衡提升
+    homeAtk *= 1 + homePrep.tactics;
+    homeDef *= 1 + homePrep.tactics;
+  }
+
+  if (awayPrep.fitness > 0) {
+    awayAtk *= 1 + awayPrep.fitness * 0.005;
+    awayDef *= 1 + awayPrep.fitness * 0.005;
+  }
+  if (awayPrep.morale > 0) {
+    awayAtk *= 1 + awayPrep.morale * 0.008;
+  }
+  if (awayPrep.tactics > 0) {
+    awayAtk *= 1 + awayPrep.tactics;
+    awayDef *= 1 + awayPrep.tactics;
+  }
 
   // 缓存控球/犯规/威胁权重供 tryAttack 使用
   state._possW = {
@@ -2456,6 +2493,10 @@ export function finalizeMatch(state) {
     }
   }
 
+  // 重置赛前准备计数器（每场比赛后）
+  resetMatchPrepCounter(home);
+  resetMatchPrepCounter(away);
+
   // 用户场次新闻 / 收入 / 媒体
   const userId = world.userClubId;
   if (fixture.home === userId || fixture.away === userId) {
@@ -2499,17 +2540,30 @@ export function finalizeMatch(state) {
       text: `${tag}：对阵 ${opp.name} ${myG}-${opG} ${result}${ctx.length ? `（${ctx.join("·")}）` : ""}`,
     });
     if (isHome) {
+      // 计算连胜场次
+      const winStreak = (me.form || []).slice(-5).filter(r => r === 'W').length;
+
+      // 判断是否保级大战或争冠关键战
+      const isRelegationBattle = checkRelegationBattle(world, me);
+      const isTitleRace = checkTitleRace(world, me);
+
       const income = matchdayIncome(me, {
         isCup,
         won: myG > opG || (isKnockout && fixture.winner === userId),
+        isDerby: state.derby,
+        isRelegationBattle,
+        isTitleRace,
+        cupStage: fixture.roundLabel === '决赛' ? 'final' :
+                  fixture.roundLabel === '半决赛' ? 'semi' :
+                  fixture.roundLabel === '1/4决赛' ? 'quarter' : null,
+        winStreak,
+        opponentStrength: opp.strength || 50,
       });
-      // 德比/焦点略提收入
-      const bonus = state.derby ? 1.15 : state.bigMatch ? 1.08 : 1;
-      const finalIncome = Math.round(income * bonus);
-      me.money += finalIncome;
+
+      me.money += income;
       world.news.unshift({
         day: world.day,
-        text: `🏟️ 主场收入 ${formatMoney(finalIncome)}（${stadiumInfo(me).name} · 容量约 ${stadiumInfo(me).capacity.toLocaleString()}）`,
+        text: `🏟️ 主场收入 ${formatMoney(income)}（${stadiumInfo(me).name} · 容量约 ${stadiumInfo(me).capacity.toLocaleString()}）`,
       });
     }
     if (isLeague) {
@@ -2682,6 +2736,48 @@ export function getBenchPlayers(club, state) {
 
 export function getOnFieldPlayers(club, state) {
   return activeXi(state, club);
+}
+
+/**
+ * 判断是否保级大战（需要排名数据）
+ */
+function checkRelegationBattle(world, club) {
+  if (!world?.table || club.division >= 3) return false;
+  const table = Object.entries(world.table)
+    .filter(([id, row]) => {
+      const c = world.clubs.find(cl => cl.id === id);
+      return c && c.division === club.division;
+    })
+    .map(([id, row]) => ({ id, ...row }))
+    .sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
+
+  const myPos = table.findIndex((r) => r.id === club.id) + 1;
+  if (myPos === 0) return false;
+  const total = table.length;
+  const relegationZone = total - 2; // 最后3名降级
+
+  // 位于倒数4名（降级区或危险区）
+  return myPos >= relegationZone - 1;
+}
+
+/**
+ * 判断是否争冠关键战
+ */
+function checkTitleRace(world, club) {
+  if (!world?.table || club.division !== 1) return false;
+  const table = Object.entries(world.table)
+    .filter(([id, row]) => {
+      const c = world.clubs.find(cl => cl.id === id);
+      return c && c.division === club.division;
+    })
+    .map(([id, row]) => ({ id, ...row }))
+    .sort((a, b) => b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga));
+
+  const myPos = table.findIndex((r) => r.id === club.id) + 1;
+  if (myPos === 0) return false;
+
+  // 前4名 + 赛季后半段（>20轮）
+  return myPos <= 4 && (table[0]?.played || 0) > 20;
 }
 
 export { styleLabel };
