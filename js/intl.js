@@ -28,7 +28,7 @@ const EUROPEAN_CODES = new Set([
 
 const COMPETITION_COPY = {
   world: { name: "世界国家杯", nameEn: "World Nations Cup" },
-  europe: { name: "欧洲国家锦标赛", nameEn: "European Nations Championship" },
+  europe: { name: "欧洲杯", nameEn: "European Championship" },
   series: { name: "国际系列赛", nameEn: "International Series" },
 };
 
@@ -470,7 +470,7 @@ function ensureSeasonCompetition(world) {
 
   const entries = [...playersByNation(world).entries()];
   let competition = null;
-  // 世界杯 32 队 / 8 组；欧锦赛 16 队 / 4 组
+  // 世界杯 32 队 / 8 组；欧洲杯 16 队 / 4 组
   if (isWorldYear) {
     if (!state.competitions[worldId]?.completed) {
       const participants = selectParticipants(world, entries, 32, () => true, ["ENG", "ESP", "ITA", "GER", "FRA"]);
@@ -503,6 +503,25 @@ export function ensureInternational(world) {
   for (const competition of Object.values(state.competitions)) {
     if (!Array.isArray(competition.fixtureIds)) competition.fixtureIds = [];
     if (!competition.table || typeof competition.table !== "object") competition.table = {};
+    const copy = COMPETITION_COPY[competition.key];
+    if (copy) {
+      competition.name = copy.name;
+      competition.nameEn = copy.nameEn;
+    }
+  }
+  for (const match of state.matches) {
+    const copy = COMPETITION_COPY[match.competitionKey];
+    if (copy) {
+      match.competitionName = copy.name;
+      match.competitionNameEn = copy.nameEn;
+    }
+  }
+  for (const item of state.history) {
+    const copy = COMPETITION_COPY[item.key];
+    if (copy) {
+      item.name = copy.name;
+      item.nameEn = copy.nameEn;
+    }
   }
   ensureSeasonCompetition(world);
   return state;

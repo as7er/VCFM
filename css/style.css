@@ -4117,6 +4117,31 @@ html[data-theme="light"] .fm-com-log .event.ft {
   background: var(--primary);
   box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 28%, transparent);
 }
+.competition-players-title {
+  margin: 1.25rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 1rem;
+}
+.competition-leaders-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.25rem;
+  margin-top: 0.75rem;
+}
+.competition-leader-block {
+  min-width: 0;
+}
+.competition-leader-block h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.92rem;
+}
+.competition-leader-block .hint {
+  margin: -0.15rem 0 0.4rem;
+}
+@media (max-width: 860px) {
+  .competition-leaders-grid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 480px) {
   .league-centre-switch { display: flex; }
   .league-centre-switch button { min-width: 0; flex: 1; }

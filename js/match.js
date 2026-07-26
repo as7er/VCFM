@@ -13,6 +13,7 @@ import {
   formatMoney,
   ensurePlayerHistory,
   ensureLeagueStats,
+  ensureCompetitionStats,
   roleDefForPlayer,
   teamRoleMods,
 } from "./models.js";
@@ -602,6 +603,13 @@ function ensureStats(p) {
   return p.stats;
 }
 
+function continentalStats(state, player, club) {
+  if (!state.fixture?.competitionId || !String(state.competitionType || "").startsWith("continental")) {
+    return null;
+  }
+  return ensureCompetitionStats(player, state.fixture.competitionId, club.id);
+}
+
 function weightedPick(pool, weightFn) {
   if (!pool.length) return null;
   let total = 0;
@@ -680,7 +688,7 @@ function addGoal(state, minute, club, xi, { penalty = false } = {}) {
   const assister = penalty ? null : pickAssister(xi, scorer, state, club);
   if (sk === "home") state.hg++;
   else state.ag++;
-  // 个人赛季数据只计联赛（数据榜 / 阵容赛季列）
+  // 国内联赛与洲际赛事分别记账；国内杯不进入球员榜。
   if (!state.isCup) {
     const scorerLeague = ensureLeagueStats(scorer, club.division, club.id);
     ensureStats(scorer).goals++;
@@ -688,6 +696,12 @@ function addGoal(state, minute, club, xi, { penalty = false } = {}) {
     if (assister) {
       ensureStats(assister).assists++;
       ensureLeagueStats(assister, club.division, club.id).assists++;
+    }
+  } else {
+    const scorerCompetition = continentalStats(state, scorer, club);
+    if (scorerCompetition) {
+      scorerCompetition.goals++;
+      if (assister) continentalStats(state, assister, club).assists++;
     }
   }
   const st = state.stats[sk];
@@ -761,13 +775,21 @@ function addSimGoal(state, minute, team, scorerId, assistId = null, opts = {}) {
   else state.ag++;
 
   // 个人数据：正常进球记射手；乌龙不记任何人进球
-  if (!state.isCup && scorer && !ownGoal) {
-    const scorerLeague = ensureLeagueStats(scorer, club.division, club.id);
-    ensureStats(scorer).goals++;
-    scorerLeague.goals++;
-    if (assister) {
-      ensureStats(assister).assists++;
-      ensureLeagueStats(assister, club.division, club.id).assists++;
+  if (scorer && !ownGoal) {
+    if (!state.isCup) {
+      const scorerLeague = ensureLeagueStats(scorer, club.division, club.id);
+      ensureStats(scorer).goals++;
+      scorerLeague.goals++;
+      if (assister) {
+        ensureStats(assister).assists++;
+        ensureLeagueStats(assister, club.division, club.id).assists++;
+      }
+    } else {
+      const scorerCompetition = continentalStats(state, scorer, club);
+      if (scorerCompetition) {
+        scorerCompetition.goals++;
+        if (assister) continentalStats(state, assister, club).assists++;
+      }
     }
   }
 
@@ -2279,6 +2301,12 @@ function applyMatchRatings(state) {
         const leagueStats = ensureLeagueStats(p, club.division, club.id);
         leagueStats.ratingSum = (leagueStats.ratingSum || 0) + r;
         leagueStats.lastRating = r;
+      } else {
+        const competitionStats = continentalStats(state, p, club);
+        if (competitionStats) {
+          competitionStats.ratingSum = (competitionStats.ratingSum || 0) + r;
+          competitionStats.lastRating = r;
+        }
       }
       list.push({
         playerId: p.id,
@@ -2320,7 +2348,7 @@ export function finalizeMatch(state) {
   if (state.finished) return state.report;
   const { world, fixture, home, away, isCup, isLeague, isKnockout, hg, ag, events } = state;
 
-  // 出场 / 零封 / 失球只计联赛（杯赛不进数据榜与赛季个人统计）
+  // 国内联赛和洲际赛事分别记账；国内杯暂不设球员榜。
   if (!isCup) {
     const countApps = (club) => {
       for (const p of getLineupPlayers(club)) {
@@ -2347,9 +2375,28 @@ export function finalizeMatch(state) {
       leagueStats.goalsConceded += hg;
       if (hg === 0) leagueStats.cleanSheets++;
     }
+  } else if (String(state.competitionType || "").startsWith("continental")) {
+    const countApps = (club) => {
+      for (const p of getLineupPlayers(club)) continentalStats(state, p, club).apps++;
+    };
+    countApps(home);
+    countApps(away);
+
+    const homeGk = pickGk(getLineupPlayers(home));
+    const awayGk = pickGk(getLineupPlayers(away));
+    if (homeGk) {
+      const stats = continentalStats(state, homeGk, home);
+      stats.goalsConceded += ag;
+      if (ag === 0) stats.cleanSheets++;
+    }
+    if (awayGk) {
+      const stats = continentalStats(state, awayGk, away);
+      stats.goalsConceded += hg;
+      if (hg === 0) stats.cleanSheets++;
+    }
   }
 
-  // 赛后评分（报告始终生成；ratingSum/lastRating 仅联赛写入）
+  // 赛后评分始终生成；联赛与洲际赛事写入各自分账。
   // 须先于 buildReport，以便 narrative 写入 MOTM
   const ratings = applyMatchRatings(state);
   state.matchRatings = ratings;

@@ -193,7 +193,7 @@ function simulateTournament(season, expectedKey, breaks, expectedMatches) {
 }
 
 // 世界杯 32 队：小组 48 + 十六强 8 + 八强 4 + 半决 2 + 决赛 1 = 63，共 7 个国际比赛日
-// 欧锦赛 16 队：小组 24 + 八强 4 + 半决 2 + 决赛 1 = 31，共 6 个国际比赛日
+// 欧洲杯 16 队：小组 24 + 八强 4 + 半决 2 + 决赛 1 = 31，共 6 个国际比赛日
 const worldCup = simulateTournament(2026, "world", 7, 63);
 const european = simulateTournament(2028, "europe", 6, 31);
 

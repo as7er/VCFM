@@ -29,9 +29,14 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=146";
-import { nationFlagHtml } from "./flags.js?v=146";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=151";
+import { nationFlagHtml } from "./flags.js?v=151";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
+import {
+  ensureCompetitions,
+  sortedContinentalTable,
+  continentalPlayerLeaders,
+} from "./cup.js";
 
 function clubDisplayName(club) {
   return localizedClubName(club, getLang()) || club?.name || "—";
@@ -246,7 +251,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=146";
+} from "./avatar.js?v=151";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -986,6 +991,9 @@ function bindMainOnce() {
   $$('[data-league-centre-view]').forEach((btn) => {
     btn.addEventListener("click", () => setLeagueCentreView(btn.dataset.leagueCentreView));
   });
+  $$('[data-competition-centre-view]').forEach((btn) => {
+    btn.addEventListener("click", () => setCompetitionCentreView(btn.dataset.competitionCentreView));
+  });
 
   // 信箱筛选 + 概览入口
   document.querySelectorAll("[data-inbox-filter]").forEach((btn) => {
@@ -1414,6 +1422,8 @@ function refreshAll() {
 
 /** 世界赛事页当前选中的国家队 code */
 let selectedNationCode = null;
+/** 世界赛事内部视图；默认先展示俱乐部欧洲赛事。 */
+let selectedCompetitionCentreView = "clubs";
 /** 联赛中心内部视图；顶部只保留一个入口。 */
 let selectedLeagueCentreView = "table";
 /** 最近查看的具体联赛；“全部联赛”仅适用于球员榜。 */
@@ -1582,13 +1592,211 @@ function renderNationalTeamsPanel(competitionId = null) {
     .join("");
 }
 
-/** 世界赛事 / 国家队页 */
+function syncCompetitionCentreView() {
+  const clubsActive = selectedCompetitionCentreView !== "nations";
+  const clubsView = $("#competition-clubs-view");
+  const nationsView = $("#competition-nations-view");
+  if (clubsView) clubsView.hidden = !clubsActive;
+  if (nationsView) nationsView.hidden = clubsActive;
+  $$('[data-competition-centre-view]').forEach((button) => {
+    const active = button.dataset.competitionCentreView === (clubsActive ? "clubs" : "nations");
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+}
+
+function setCompetitionCentreView(view) {
+  selectedCompetitionCentreView = view === "nations" ? "nations" : "clubs";
+  syncCompetitionCentreView();
+  renderCompetitions();
+}
+
+function continentalStageLabel(stage) {
+  const en = getLang() === "en";
+  if (stage === "league") return t("clubIntl.leagueStage");
+  if (stage === "QF") return en ? "Quarter-finals" : "四分之一决赛";
+  if (stage === "SF") return en ? "Semi-finals" : "半决赛";
+  if (stage === "F") return en ? "Final" : "决赛";
+  if (stage === "done") return t("intl.completed");
+  return stage || "—";
+}
+
+function continentalRoundLabel(fixture) {
+  const en = getLang() === "en";
+  if (fixture.competitionType === "continental-league-stage") {
+    return en
+      ? `${t("clubIntl.leagueStage")} · MD ${fixture.round || "—"}`
+      : `${t("clubIntl.leagueStage")} · 第 ${fixture.round || "—"} 比赛日`;
+  }
+  return continentalStageLabel(fixture.round);
+}
+
+function renderClubCompetitionPlayerLeaders(competition) {
+  const goalsBody = $("#club-competition-goals tbody");
+  const assistsBody = $("#club-competition-assists tbody");
+  const ratingsBody = $("#club-competition-ratings tbody");
+  const keepersBody = $("#club-competition-keepers tbody");
+  if (!goalsBody || !assistsBody || !ratingsBody || !keepersBody) return;
+  const empty = escapeHtml(t("clubIntl.emptyPlayers"));
+  if (!competition) {
+    goalsBody.innerHTML = `<tr><td colspan="6" class="muted">${empty}</td></tr>`;
+    assistsBody.innerHTML = `<tr><td colspan="6" class="muted">${empty}</td></tr>`;
+    ratingsBody.innerHTML = `<tr><td colspan="6" class="muted">${empty}</td></tr>`;
+    keepersBody.innerHTML = `<tr><td colspan="8" class="muted">${empty}</td></tr>`;
+    return;
+  }
+
+  const { goals, assists, ratings, keepers } = continentalPlayerLeaders(world, competition.id);
+  const rowClass = (club) => (club.id === world.userClubId ? "me" : "");
+  goalsBody.innerHTML = goals.length
+    ? goals
+        .map(({ player, club, stats }, index) => `<tr class="${rowClass(club)}">
+          <td>${index + 1}</td><td>${playerLinkHtml(player.id, player.name)}</td>
+          <td>${clubLinkHtml(club.id, club.short)}</td><td><strong>${stats.goals}</strong></td>
+          <td>${stats.assists}</td><td>${stats.apps}</td>
+        </tr>`)
+        .join("")
+    : `<tr><td colspan="6" class="muted">${empty}</td></tr>`;
+  assistsBody.innerHTML = assists.length
+    ? assists
+        .map(({ player, club, stats }, index) => `<tr class="${rowClass(club)}">
+          <td>${index + 1}</td><td>${playerLinkHtml(player.id, player.name)}</td>
+          <td>${clubLinkHtml(club.id, club.short)}</td><td><strong>${stats.assists}</strong></td>
+          <td>${stats.goals}</td><td>${stats.apps}</td>
+        </tr>`)
+        .join("")
+    : `<tr><td colspan="6" class="muted">${empty}</td></tr>`;
+  ratingsBody.innerHTML = ratings.length
+    ? ratings
+        .map(({ player, club, stats, avgRating }, index) => `<tr class="${rowClass(club)}">
+          <td>${index + 1}</td><td>${playerLinkHtml(player.id, player.name)}</td>
+          <td>${clubLinkHtml(club.id, club.short)}</td>
+          <td class="rating-cell ${ratingClass(avgRating)}"><strong>${formatRating(avgRating)}</strong></td>
+          <td class="rating-cell ${ratingClass(stats.lastRating)}">${formatRating(stats.lastRating)}</td>
+          <td>${stats.apps}</td>
+        </tr>`)
+        .join("")
+    : `<tr><td colspan="6" class="muted">${empty}</td></tr>`;
+  keepersBody.innerHTML = keepers.length
+    ? keepers
+        .map(({ player, club, stats, avgRating, gaPerGame }, index) => `<tr class="${rowClass(club)}">
+          <td>${index + 1}</td><td>${playerLinkHtml(player.id, player.name)}</td>
+          <td>${clubLinkHtml(club.id, club.short)}</td><td>${stats.apps}</td>
+          <td><strong>${stats.cleanSheets}</strong></td><td>${stats.goalsConceded}</td>
+          <td>${gaPerGame.toFixed(2)}</td>
+          <td class="rating-cell ${ratingClass(avgRating)}">${formatRating(avgRating)}</td>
+        </tr>`)
+        .join("")
+    : `<tr><td colspan="8" class="muted">${empty}</td></tr>`;
+}
+
+function renderClubCompetitions() {
+  const select = $("#club-competition");
+  const summary = $("#club-competition-summary");
+  const tableBody = $("#club-competition-table tbody");
+  const matchesBody = $("#club-competition-matches tbody");
+  if (!select || !summary || !tableBody || !matchesBody) return;
+
+  ensureCompetitions(world);
+  const en = getLang() === "en";
+  const order = { champions: 0, union: 1, conference: 2 };
+  const competitions = Object.values(world.continentals || {}).sort(
+    (a, b) => (order[a.key] ?? 99) - (order[b.key] ?? 99)
+  );
+  const previous = select.value;
+  select.innerHTML = competitions.length
+    ? competitions
+        .map((competition) => {
+          const name = en ? competition.nameEn || competition.name : competition.name;
+          return `<option value="${escapeHtml(competition.id)}">${escapeHtml(name)} · S${competition.season}</option>`;
+        })
+        .join("")
+    : `<option value="">${escapeHtml(t("clubIntl.noComp"))}</option>`;
+  if (previous && [...select.options].some((option) => option.value === previous)) {
+    select.value = previous;
+  }
+  if (!select._bound) {
+    select._bound = true;
+    select.addEventListener("change", () => renderClubCompetitions());
+  }
+
+  const competition = competitions.find((item) => item.id === select.value) || competitions[0] || null;
+  if (!competition) {
+    summary.textContent = t("clubIntl.noComp");
+    tableBody.innerHTML = `<tr><td colspan="10" class="muted">${escapeHtml(t("clubIntl.noComp"))}</td></tr>`;
+    matchesBody.innerHTML = `<tr><td colspan="5" class="muted">${escapeHtml(t("clubIntl.emptyMatches"))}</td></tr>`;
+    renderClubCompetitionPlayerLeaders(null);
+    return;
+  }
+
+  const name = en ? competition.nameEn || competition.name : competition.name;
+  const completed = competition.stage === "done";
+  const champion = competition.champion
+    ? clubLinkHtml(competition.champion, null, "club-link-compact")
+    : "";
+  summary.innerHTML = `<strong>${escapeHtml(name)}</strong>
+    · ${(competition.participants || []).length}${en ? " clubs" : " 队"}
+    · ${escapeHtml(t("clubIntl.stage"))}: ${escapeHtml(continentalStageLabel(competition.stage))}
+    · ${escapeHtml(completed ? t("intl.completed") : t("intl.inProgress"))}
+    ${champion ? ` · ${escapeHtml(t("intl.champion"))}: ${champion}` : ""}`;
+
+  const rows = sortedContinentalTable(competition);
+  tableBody.innerHTML = rows.length
+    ? rows
+        .map((row, index) => {
+          const rank = index + 1;
+          const me = row.id === world.userClubId;
+          const zone = rank <= 8
+            ? ` <span class="badge MID">${escapeHtml(en ? "KO" : "晋级")}</span>`
+            : "";
+          return `<tr class="${me ? "me" : ""}">
+            <td>${rank}</td>
+            <td>${clubLinkHtml(row.id)}${me ? " ★" : ""}${zone}</td>
+            <td>${row.played || 0}</td><td>${row.w || 0}</td><td>${row.d || 0}</td><td>${row.l || 0}</td>
+            <td>${row.gf || 0}</td><td>${row.ga || 0}</td>
+            <td>${row.gd > 0 ? "+" : ""}${row.gd || 0}</td><td><strong>${row.pts || 0}</strong></td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="10" class="muted">${escapeHtml(t("clubIntl.noComp"))}</td></tr>`;
+
+  const fixtures = [...(competition.fixtures || [])].sort(
+    (a, b) => (a.day || 0) - (b.day || 0) || String(a.id).localeCompare(String(b.id))
+  );
+  const firstPending = fixtures.findIndex((fixture) => !fixture.played);
+  const start = Math.max(0, firstPending < 0 ? fixtures.length - 40 : firstPending - 12);
+  const visibleFixtures = fixtures.slice(start, start + 40);
+  matchesBody.innerHTML = visibleFixtures.length
+    ? visibleFixtures
+        .map((fixture) => {
+          const score = fixture.played
+            ? `${fixture.homeGoals ?? 0} - ${fixture.awayGoals ?? 0}`
+            : "—";
+          return `<tr class="${fixture.home === world.userClubId || fixture.away === world.userClubId ? "me" : ""}">
+            <td>D${fixture.day ?? "—"}<div class="muted" style="font-size:0.75rem">${escapeHtml(continentalRoundLabel(fixture))}</div></td>
+            <td>${clubLinkHtml(fixture.home)}</td>
+            <td><strong>${score}</strong></td>
+            <td>${clubLinkHtml(fixture.away)}</td>
+            <td>${escapeHtml(fixture.played ? t("clubIntl.finished") : t("clubIntl.scheduled"))}</td>
+          </tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="5" class="muted">${escapeHtml(t("clubIntl.emptyMatches"))}</td></tr>`;
+  renderClubCompetitionPlayerLeaders(competition);
+}
+
+/** 世界赛事：欧洲俱乐部赛事与国家队赛事。 */
 function renderCompetitions() {
   if (!world) return;
+  syncCompetitionCentreView();
+  renderClubCompetitions();
   const sumEl = $("#intl-summary");
   const tablesEl = $("#intl-tables");
   const matchesBody = $("#intl-matches tbody");
   const scorersEl = $("#intl-scorers");
+  const assistsEl = $("#intl-assists");
+  const appearancesEl = $("#intl-appearances");
+  const keepersEl = $("#intl-keepers");
   const historyEl = $("#intl-history");
   const sel = $("#intl-competition");
   if (!sumEl || !tablesEl || !matchesBody) return;
@@ -1628,6 +1836,9 @@ function renderCompetitions() {
     tablesEl.innerHTML = "";
     matchesBody.innerHTML = `<tr><td colspan="5" class="muted">${escapeHtml(t("intl.emptyMatches"))}</td></tr>`;
     if (scorersEl) scorersEl.textContent = "—";
+    if (assistsEl) assistsEl.textContent = "—";
+    if (appearancesEl) appearancesEl.textContent = "—";
+    if (keepersEl) keepersEl.textContent = "—";
     if (historyEl) historyEl.textContent = "—";
     renderNationalTeamsPanel(null);
     return;
@@ -1763,19 +1974,27 @@ function renderCompetitions() {
         })
         .join("")
     : `<tr><td colspan="5" class="muted">${escapeHtml(t("intl.emptyMatches"))}</td></tr>`;
-  if (scorersEl) {
-    const leaders = internationalLeaders(world, competition.id);
-    const scorers = leaders?.scorers || leaders?.goals || [];
-    const top = (Array.isArray(scorers) ? scorers : []).slice(0, 10);
-    scorersEl.innerHTML = top.length
+  const leaders = internationalLeaders(world, competition.id);
+  const renderIntlLeaderList = (element, rows, valueFor) => {
+    if (!element) return;
+    const top = (Array.isArray(rows) ? rows : []).slice(0, 10);
+    element.innerHTML = top.length
       ? `<ol style="margin:0;padding-left:1.2rem">${top
           .map(
-            (s) =>
-              `<li>${escapeHtml(s.name || s.id)} ${s.nation ? nationFlagHtml(s.nation) : ""} <strong>${s.value ?? s.goals ?? 0}</strong></li>`
+            (item) =>
+              `<li>${playerLinkHtml(item.id, item.name || item.id)} ${item.nation ? nationFlagHtml(item.nation) : ""} <strong>${escapeHtml(valueFor(item))}</strong></li>`
           )
           .join("")}</ol>`
       : "—";
-  }
+  };
+  renderIntlLeaderList(scorersEl, leaders?.scorers, (item) => item.value ?? 0);
+  renderIntlLeaderList(assistsEl, leaders?.assists, (item) => item.value ?? 0);
+  renderIntlLeaderList(appearancesEl, leaders?.appearances, (item) => item.value ?? 0);
+  renderIntlLeaderList(
+    keepersEl,
+    leaders?.keepers,
+    (item) => `${item.cleanSheets || 0} / ${item.goalsConceded || 0}`
+  );
   if (historyEl) {
     const hist = world.international?.history || [];
     historyEl.innerHTML = hist.length

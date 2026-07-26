@@ -627,6 +627,9 @@ export function ensurePlayerHistory(p) {
   if (!p.leagueStats || typeof p.leagueStats !== "object" || Array.isArray(p.leagueStats)) {
     p.leagueStats = {};
   }
+  if (!p.competitionStats || typeof p.competitionStats !== "object" || Array.isArray(p.competitionStats)) {
+    p.competitionStats = {};
+  }
   return p;
 }
 
@@ -659,6 +662,22 @@ export function ensureLeagueStats(p, division, clubId = null) {
     if (clubId) p.leagueStats[key].clubId = clubId;
   }
   return p.leagueStats[key];
+}
+
+/** 本赛季按俱乐部杯赛/洲际赛事 ID 独立记账，不混入国内联赛数据。 */
+export function ensureCompetitionStats(p, competitionId, clubId = null) {
+  ensurePlayerHistory(p);
+  const key = String(competitionId || "unknown");
+  if (!p.competitionStats[key]) {
+    p.competitionStats[key] = { ...emptyMatchStats(), clubId };
+  } else {
+    const empty = emptyMatchStats();
+    for (const statKey of Object.keys(empty)) {
+      if (p.competitionStats[key][statKey] == null) p.competitionStats[key][statKey] = empty[statKey];
+    }
+    if (clubId) p.competitionStats[key].clubId = clubId;
+  }
+  return p.competitionStats[key];
 }
 
 /**
@@ -710,6 +729,7 @@ export function archiveAndResetSeasonStats(p, season, clubId, clubName) {
   p.stats = emptyMatchStats();
   p.leagueStats = {};
   p.leagueStatsVersion = 1;
+  p.competitionStats = {};
   p.fitness = Math.min(100, Math.max(80, p.fitness || 90));
   p.injured = 0;
 }
@@ -720,6 +740,7 @@ export function resetSeasonStats(p) {
   p.stats = emptyMatchStats();
   p.leagueStats = {};
   p.leagueStatsVersion = 1;
+  p.competitionStats = {};
   p.fitness = Math.min(100, Math.max(80, p.fitness || 90));
   p.injured = 0;
 }
@@ -795,6 +816,8 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     // 本赛季国内联赛分赛事数据：{ [divisionId]: stats + clubId }
     leagueStats: {},
     leagueStatsVersion: 1,
+    // 本赛季俱乐部杯赛分赛事数据：{ [competitionId]: stats + clubId }
+    competitionStats: {},
     // 生涯总计（跨赛季累计）
     career: emptyMatchStats(),
     // 分赛季历史 [{ season, clubId, clubName, apps, goals, ... }]

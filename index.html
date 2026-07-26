@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=150" />
+  <link rel="stylesheet" href="css/style.css?v=151" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -473,15 +473,125 @@
           </div>
         </div>
 
-        <!-- 世界赛事 / 国家队 -->
+        <!-- 世界赛事：欧洲俱乐部赛事 / 国家队赛事 -->
         <div id="tab-competitions" class="tab-panel">
+          <div class="league-centre-switch" role="tablist" aria-label="世界赛事">
+            <button type="button" class="active" data-competition-centre-view="clubs" role="tab" aria-selected="true" data-i18n="competitionCentre.clubs">俱乐部赛事</button>
+            <button type="button" data-competition-centre-view="nations" role="tab" aria-selected="false" data-i18n="competitionCentre.nations">国家队赛事</button>
+          </div>
+
+          <div id="competition-clubs-view">
+            <div class="card">
+              <div class="row-between" style="flex-wrap:wrap;gap:0.5rem">
+                <h2 style="margin:0" data-i18n="clubIntl.title">欧洲俱乐部赛事</h2>
+                <select id="club-competition" aria-label="club competition" style="min-width:12rem"></select>
+              </div>
+              <p class="hint" style="margin:0.5rem 0 0.75rem" data-i18n="clubIntl.hint">
+                五国顶级联赛按赛季排名分流至欧冠、欧联和欧协联。新赛季联赛阶段每队 8 场，前 8 名进入淘汰赛。
+              </p>
+              <div id="club-competition-summary" class="intl-summary muted" style="margin-bottom:0.75rem"></div>
+              <div class="table-wrap" style="max-height:28rem;overflow:auto">
+                <table id="club-competition-table">
+                  <thead>
+                    <tr>
+                      <th data-i18n="th.num">#</th>
+                      <th data-i18n="th.club">球队</th>
+                      <th data-i18n="th.p">赛</th>
+                      <th data-i18n="th.w">胜</th>
+                      <th data-i18n="th.d">平</th>
+                      <th data-i18n="th.l">负</th>
+                      <th data-i18n="th.gf">进</th>
+                      <th data-i18n="th.gaShort">失</th>
+                      <th data-i18n="th.gd">净</th>
+                      <th data-i18n="th.pts">分</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem" data-i18n="clubIntl.recent">赛程与赛果</h3>
+              <div class="table-wrap">
+                <table id="club-competition-matches">
+                  <thead>
+                    <tr>
+                      <th data-i18n="th.date">日期</th>
+                      <th data-i18n="th.home">主队</th>
+                      <th data-i18n="th.score">比分</th>
+                      <th data-i18n="th.away">客队</th>
+                      <th data-i18n="th.status">状态</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <h3 class="competition-players-title" data-i18n="clubIntl.players">赛事球员榜</h3>
+              <div class="competition-leaders-grid">
+                <section class="competition-leader-block">
+                  <h3 data-i18n="stats.goals">射手榜</h3>
+                  <div class="table-wrap">
+                    <table id="club-competition-goals">
+                      <thead><tr>
+                        <th data-i18n="th.num">#</th><th data-i18n="th.player">球员</th>
+                        <th data-i18n="th.club">球队</th><th data-i18n="th.goals">进球</th>
+                        <th data-i18n="th.assists">助攻</th><th data-i18n="th.apps">出场</th>
+                      </tr></thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </section>
+                <section class="competition-leader-block">
+                  <h3 data-i18n="stats.assists">助攻榜</h3>
+                  <div class="table-wrap">
+                    <table id="club-competition-assists">
+                      <thead><tr>
+                        <th data-i18n="th.num">#</th><th data-i18n="th.player">球员</th>
+                        <th data-i18n="th.club">球队</th><th data-i18n="th.assists">助攻</th>
+                        <th data-i18n="th.goals">进球</th><th data-i18n="th.apps">出场</th>
+                      </tr></thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </section>
+                <section class="competition-leader-block">
+                  <h3 data-i18n="stats.ratings">评分榜</h3>
+                  <p class="hint" data-i18n="clubIntl.ratingsHint">至少 2 场出场 · 本赛事场均评分</p>
+                  <div class="table-wrap">
+                    <table id="club-competition-ratings">
+                      <thead><tr>
+                        <th data-i18n="th.num">#</th><th data-i18n="th.player">球员</th>
+                        <th data-i18n="th.club">球队</th><th data-i18n="th.avgR">场均</th>
+                        <th data-i18n="th.lastR">最近</th><th data-i18n="th.apps">出场</th>
+                      </tr></thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </section>
+                <section class="competition-leader-block">
+                  <h3 data-i18n="stats.keepers">门将榜（零封 / 失球）</h3>
+                  <div class="table-wrap">
+                    <table id="club-competition-keepers">
+                      <thead><tr>
+                        <th data-i18n="th.num">#</th><th data-i18n="th.gk">门将</th>
+                        <th data-i18n="th.club">球队</th><th data-i18n="th.apps">出场</th>
+                        <th data-i18n="th.cs">零封</th><th data-i18n="th.ga">失球</th>
+                        <th data-i18n="th.gavg">场均失球</th><th data-i18n="th.avgR">场均</th>
+                      </tr></thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <div id="competition-nations-view" hidden>
           <div class="card">
             <div class="row-between" style="flex-wrap:wrap;gap:0.5rem">
-              <h2 style="margin:0" data-i18n="intl.title">世界赛事 · 国家队</h2>
+              <h2 style="margin:0" data-i18n="intl.title">国家队赛事</h2>
               <select id="intl-competition" aria-label="competition" style="min-width:12rem"></select>
             </div>
             <p class="hint" style="margin:0.5rem 0 0.75rem" data-i18n="intl.hint">
-              约每 30 天国际比赛日。世界国家杯 32 队、欧洲国家锦标赛 16 队；其余赛季为全员国际系列赛。点选国家可查看名单。
+              约每 30 天国际比赛日。世界国家杯 32 队、欧洲杯 16 队；其余赛季为全员国际系列赛。点选国家可查看名单。
             </p>
             <div id="intl-summary" class="intl-summary muted" style="margin-bottom:0.75rem"></div>
             <div id="intl-tables" class="intl-tables" style="display:grid;gap:0.75rem"></div>
@@ -500,16 +610,27 @@
                 <tbody></tbody>
               </table>
             </div>
-            <div class="row-between" style="flex-wrap:wrap;gap:1rem;margin-top:1rem;align-items:flex-start">
-              <div style="flex:1;min-width:12rem">
-                <h3 style="margin:0 0 0.4rem;font-size:0.95rem" data-i18n="intl.scorers">赛事射手</h3>
+            <h3 class="competition-players-title" data-i18n="intl.players">赛事球员榜</h3>
+            <div class="competition-leaders-grid">
+              <section class="competition-leader-block">
+                <h3 data-i18n="intl.scorers">赛事射手</h3>
                 <div id="intl-scorers" class="muted"></div>
-              </div>
-              <div style="flex:1;min-width:12rem">
-                <h3 style="margin:0 0 0.4rem;font-size:0.95rem" data-i18n="intl.history">历届冠军</h3>
-                <div id="intl-history" class="muted"></div>
-              </div>
+              </section>
+              <section class="competition-leader-block">
+                <h3 data-i18n="intl.assists">助攻榜</h3>
+                <div id="intl-assists" class="muted"></div>
+              </section>
+              <section class="competition-leader-block">
+                <h3 data-i18n="intl.appearances">出场榜</h3>
+                <div id="intl-appearances" class="muted"></div>
+              </section>
+              <section class="competition-leader-block">
+                <h3 data-i18n="intl.keepers">门将榜</h3>
+                <div id="intl-keepers" class="muted"></div>
+              </section>
             </div>
+            <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem" data-i18n="intl.history">历届冠军</h3>
+            <div id="intl-history" class="muted"></div>
           </div>
 
           <div class="card" style="margin-top:0.75rem">
@@ -534,6 +655,7 @@
                 <tbody></tbody>
               </table>
             </div>
+          </div>
           </div>
         </div>
 
@@ -1009,12 +1131,12 @@
     <div id="season-summary" class="season-summary hidden" role="dialog" aria-modal="true"></div>
   </div>
 
-  <script type="module" src="js/main.js?v=150"></script>
+  <script type="module" src="js/main.js?v=151"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v150";
+        var CURRENT_CACHE = "vcfm-v151";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1024,7 +1146,7 @@
             );
           }).catch(function () {});
         }
-        navigator.serviceWorker.register("./sw.js?v=150").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=151").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1033,8 +1155,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v146")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v146", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v151")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v151", "1");
               location.reload();
             }
           } catch (e) {
