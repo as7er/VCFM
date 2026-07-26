@@ -1508,6 +1508,8 @@ html[data-theme="light"] .fm-scoreboard {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
+  max-height: 70vh;
+  max-height: 70dvh;
 }
 .fm-commentary,
 .fmm-commentary {
