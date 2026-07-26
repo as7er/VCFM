@@ -24,7 +24,8 @@ export function processPoachingDay(world) {
 
   // 已有未处理报价则不再刷
   if (world.poachBids.some((b) => b.status === "pending")) return;
-  if (Math.random() > 0.12) return;
+  // 提高概率从 12% 到 18%，增加球员保留压力
+  if (Math.random() > 0.18) return;
 
   const user = world.clubs.find((c) => c.id === world.userClubId);
   if (!user || user.players.length <= 15) return;

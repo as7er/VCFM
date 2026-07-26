@@ -262,25 +262,31 @@ export function calibrateWorldAbilityDistribution(clubs) {
 
 export function estimateValue(p) {
   const ovr = playerOverall(p);
+  // 更平滑的指数级数：1.8 而非 2.4，避免顶级球员与普通球员价差过大
+  // 20 OVR 与 10 OVR 现在约 40 倍差距（而非原 96 倍），更接近真实转会市场
   const ageFactor = p.age <= 23 ? 1.35 : p.age <= 28 ? 1.15 : p.age <= 32 ? 0.9 : 0.55;
-  const base = Math.pow(ovr, 2.4) * 12_000;
+  const base = Math.pow(ovr, 1.8) * 18_000;
   return Math.max(50_000, Math.round(base * ageFactor / 10_000) * 10_000);
 }
 
 export function estimateWage(p) {
   const ovr = playerOverall(p);
   const ageTax = p.age >= 34 ? 0.75 : p.age >= 32 ? 0.9 : 1;
-  return Math.max(800, Math.round(ovr * ovr * 45 * ageTax));
+  // 位置稀缺性系数：门将供给充足（0.85），前锋市场溢价（1.1）
+  const positionMod = p.pos === "GK" ? 0.85 : p.pos === "DEF" ? 0.9 : p.pos === "ATT" ? 1.1 : 1.0;
+  return Math.max(800, Math.round(ovr * ovr * 45 * ageTax * positionMod));
 }
 
-/** 高龄退役概率（赛季结束后、年龄已 +1） */
+/** 高龄退役概率（赛季结束后、年龄已 +1）平滑曲线，避免悬崖式退役 */
 export function retireChance(age) {
   if (age >= 40) return 1;
-  if (age >= 38) return 0.75;
-  if (age >= 36) return 0.45;
-  if (age >= 34) return 0.22;
-  if (age >= 33) return 0.1;
-  if (age >= 32) return 0.04;
+  if (age >= 38) return 0.85;
+  if (age >= 37) return 0.6;
+  if (age >= 36) return 0.35;
+  if (age >= 35) return 0.18;
+  if (age >= 34) return 0.08;
+  if (age >= 33) return 0.03;
+  if (age >= 32) return 0.01;
   return 0;
 }
 
@@ -333,7 +339,32 @@ export function emptyMatchStats() {
     ratingSum: 0,
     /** 最近一场评分 0–10 */
     lastRating: null,
+    /** 最近 5 场评分记录（用于计算状态）*/
+    recentRatings: [],
   };
+}
+
+/** 球员状态（form）：最近 5 场评分平均，用于选人决策与界面显示 */
+export function playerForm(p) {
+  const s = p?.stats || emptyMatchStats();
+  const recent = s.recentRatings || [];
+  if (recent.length === 0) return null;
+  const sum = recent.reduce((acc, r) => acc + (r || 0), 0);
+  return Math.round((sum / recent.length) * 10) / 10;
+}
+
+/** 状态颜色档：≥7.3 热（红火）/ ≥6.8 良好 / ≥6.0 正常 / <6.0 低迷（冷） */
+export function formClass(form) {
+  if (form == null || Number.isNaN(form)) return "";
+  if (form >= 7.3) return "form-hot";
+  if (form >= 6.8) return "form-good";
+  if (form >= 6.0) return "form-ok";
+  return "form-cold";
+}
+
+export function formatForm(form) {
+  if (form == null || Number.isNaN(form)) return "—";
+  return Number(form).toFixed(1);
 }
 
 /** 本赛季场均评分；不足 1 场返回 null */

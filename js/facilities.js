@@ -8,13 +8,13 @@ import { DIVISIONS } from "./data.js";
 
 export const FACILITY_MAX = 5;
 
-/** 球场等级：容量、主场比赛日收入、周维护 */
+/** 球场等级：容量、主场比赛日收入、周维护（调整：降低5级收入与提高维护成本，平衡经济） */
 export const STADIUM_LEVELS = {
   1: { name: "社区球场", capacity: 4_000, matchday: 45_000, upkeep: 8_000 },
   2: { name: "区级球场", capacity: 8_000, matchday: 90_000, upkeep: 18_000 },
   3: { name: "职业球场", capacity: 15_000, matchday: 180_000, upkeep: 40_000 },
-  4: { name: "现代化主场", capacity: 28_000, matchday: 350_000, upkeep: 80_000 },
-  5: { name: "地标球场", capacity: 45_000, matchday: 600_000, upkeep: 140_000 },
+  4: { name: "现代化主场", capacity: 28_000, matchday: 350_000, upkeep: 85_000 },
+  5: { name: "地标球场", capacity: 45_000, matchday: 480_000, upkeep: 180_000 },
 };
 
 /** 训练设施：成长加成、恢复加成、伤病风险系数 */
@@ -26,19 +26,19 @@ export const TRAINING_FACILITY_LEVELS = {
   5: { name: "世界级训练城", growth: 0.055, heal: 4, injuryMod: 0.7, upkeep: 120_000 },
 };
 
-/** 升级费用（升到该级） */
+/** 升级费用（升到该级）调整：降低4-5级成本30%，改善ROI */
 export const STADIUM_UPGRADE_COST = {
   2: 3_000_000,
   3: 8_000_000,
-  4: 18_000_000,
-  5: 40_000_000,
+  4: 13_000_000,
+  5: 28_000_000,
 };
 
 export const TRAINING_FACILITY_COST = {
   2: 1_500_000,
   3: 4_000_000,
-  4: 10_000_000,
-  5: 22_000_000,
+  4: 7_000_000,
+  5: 15_000_000,
 };
 
 /** 建设天数（升到该级） */

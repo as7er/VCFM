@@ -89,36 +89,43 @@ export function applyPlayerTalk(world, playerId, action) {
   let msg = "";
   let dRel = 0;
   let dMor = 0;
+  let cooldownDays = 4; // 默认冷却 4 天（从 7 天降低）
+
   if (action === "praise") {
     dRel = 1;
     dMor = 5;
     msg = `表扬了 ${p.name}`;
+    cooldownDays = 4; // 表扬/批评可较频繁
   } else if (action === "criticize") {
     dRel = -1;
     dMor = -4;
     msg = `批评了 ${p.name}`;
+    cooldownDays = 4;
   } else if (action === "promise") {
     dRel = 1;
     dMor = 3;
     p._promisedPlay = (world.day || 0) + 14;
     p._promiseAppsBase = p.stats?.apps || 0;
     msg = `向 ${p.name} 承诺更多出场`;
+    cooldownDays = 10; // 承诺类谈话较严肃，冷却长
   } else if (action === "contract") {
     dRel = 1;
     dMor = 2;
     p._wantsRenew = true;
     msg = `与 ${p.name} 谈了续约意愿（请到转会页操作）`;
+    cooldownDays = 10;
   } else if (action === "listen") {
     dRel = 0;
     dMor = 2;
     msg = `倾听了 ${p.name} 的想法`;
+    cooldownDays = 4;
   } else {
     return { ok: false, msg: "未知约谈选项" };
   }
 
   p.relation = Math.max(-2, Math.min(2, (p.relation || 0) + dRel));
   p.morale = Math.max(20, Math.min(100, Math.round((p.morale || 70) + dMor)));
-  p.talkCooldown = (world.day || 0) + 7;
+  p.talkCooldown = (world.day || 0) + cooldownDays;
 
   world.news = world.news || [];
   world.news.unshift({

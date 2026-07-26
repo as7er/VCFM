@@ -250,7 +250,7 @@ export function sackManager(world, reason = "") {
   };
 }
 
-/** 赛季中施压/鼓励（约每 14 天）；危险累计警告，满 3 解雇 */
+/** 赛季中施压/鼓励（约每 14 天）；危险累计警告，满 4 解雇（改进：从 3 次提升到 4 次，更宽容） */
 export function checkBoardMidSeason(world, sortedTableFn) {
   if (!world || world.seasonOver || world.sacked) return null;
   const board = ensureBoardObjective(world);
@@ -270,33 +270,33 @@ export function checkBoardMidSeason(world, sortedTableFn) {
 
   if (prog.status === "danger") {
     // 持续危险就加警告；刚进入危险也加
-    board.sackWarnings = Math.min(3, (board.sackWarnings || 0) + 1);
+    board.sackWarnings = Math.min(4, (board.sackWarnings || 0) + 1);
     const w = board.sackWarnings;
-    if (w >= 3) {
+    if (w >= 4) {
       return sackManager(
         world,
         `联赛第 ${prog.pos}，远未达到「${board.label}」，董事会忍无可忍。`
       );
     }
-    if (w === 2) {
-      const text = `⚠️ 最后警告：当前第 ${prog.pos}，目标「${board.label}」。再无起色将被解雇！（警告 ${w}/3）`;
+    if (w === 3) {
+      const text = `⚠️ 最后警告：当前第 ${prog.pos}，目标「${board.label}」。再无起色将被解雇！（警告 ${w}/4）`;
       world.news.unshift({ day: world.day, text });
       pushBoardInbox(world, {
         title: "董事会最后警告",
         titleEn: "Final warning from the board",
         body: text,
-        bodyEn: `Final warning: the club is ${ordinalEn(prog.pos)}, with a target of top ${board.targetPos}. Results must improve to avoid dismissal. Warning ${w}/3.`,
+        bodyEn: `Final warning: the club is ${ordinalEn(prog.pos)}, with a target of top ${board.targetPos}. Results must improve to avoid dismissal. Warning ${w}/4.`,
         warning: true,
         priority: 3,
       });
     } else {
-      const text = `董事会施压：当前第 ${prog.pos}，目标「${board.label}」。警告 ${w}/3 · 未完成将罚 ${formatMoney(board.fine)}。`;
+      const text = `董事会施压：当前第 ${prog.pos}，目标「${board.label}」。警告 ${w}/4 · 未完成将罚 ${formatMoney(board.fine)}。`;
       world.news.unshift({ day: world.day, text });
       pushBoardInbox(world, {
         title: "董事会施压",
         titleEn: "The board demands improvement",
         body: text,
-        bodyEn: `The club is ${ordinalEn(prog.pos)}, with a target of top ${board.targetPos}. Warning ${w}/3 · failure penalty ${formatMoney(board.fine)}.`,
+        bodyEn: `The club is ${ordinalEn(prog.pos)}, with a target of top ${board.targetPos}. Warning ${w}/4 · failure penalty ${formatMoney(board.fine)}.`,
         warning: true,
         priority: 3,
       });
@@ -305,21 +305,27 @@ export function checkBoardMidSeason(world, sortedTableFn) {
       p.morale = Math.max(30, (p.morale || 70) - 2 - w);
     }
   } else if (prog.status === "met") {
+    // 改进：连续达标时可减免警告（最多连续 3 次达标减免 1 次警告）
     if ((board.sackWarnings || 0) > 0) {
-      board.sackWarnings = Math.max(0, board.sackWarnings - 1);
-      const text = `董事会认可：排名回升至第 ${prog.pos}，目标重回正轨。警告降至 ${board.sackWarnings}/3。`;
-      world.news.unshift({ day: world.day, text });
-      pushBoardInbox(world, {
-        title: "董事会认可近况",
-        titleEn: "The board acknowledges recent progress",
-        body: text,
-        bodyEn: `The club has recovered to ${ordinalEn(prog.pos)} and the objective is back on track. Warnings reduced to ${board.sackWarnings}/3.`,
-        priority: 1,
-      });
-      for (const p of user.players || []) {
-        p.morale = Math.min(100, (p.morale || 70) + 2);
+      board._consecutiveMet = (board._consecutiveMet || 0) + 1;
+      if (board._consecutiveMet >= 3) {
+        board.sackWarnings = Math.max(0, board.sackWarnings - 1);
+        board._consecutiveMet = 0;
+        const text = `董事会认可：排名回升至第 ${prog.pos}，连续达标表现良好。警告降至 ${board.sackWarnings}/4。`;
+        world.news.unshift({ day: world.day, text });
+        pushBoardInbox(world, {
+          title: "董事会认可近况",
+          titleEn: "The board acknowledges recent progress",
+          body: text,
+          bodyEn: `The club has recovered to ${ordinalEn(prog.pos)} and sustained good form. Warnings reduced to ${board.sackWarnings}/4.`,
+          priority: 1,
+        });
+        for (const p of user.players || []) {
+          p.morale = Math.min(100, (p.morale || 70) + 3);
+        }
       }
     } else if (prev === "danger") {
+      board._consecutiveMet = 0;
       const text = `董事会认可：排名回升至第 ${prog.pos}，目标「${board.label}」重回正轨。`;
       world.news.unshift({ day: world.day, text });
       pushBoardInbox(world, {
@@ -334,13 +340,13 @@ export function checkBoardMidSeason(world, sortedTableFn) {
       }
     }
   } else if (prog.status === "danger" && world.day % 28 < 3) {
-    const text = `目标告急：仍在第 ${prog.pos}（目标前 ${board.targetPos}）· 警告 ${board.sackWarnings || 0}/3`;
+    const text = `目标告急：仍在第 ${prog.pos}（目标前 ${board.targetPos}）· 警告 ${board.sackWarnings || 0}/4`;
     world.news.unshift({ day: world.day, text });
     pushBoardInbox(world, {
       title: "目标告急",
       titleEn: "Board objective at risk",
       body: text,
-      bodyEn: `The club remains ${ordinalEn(prog.pos)} against a top-${board.targetPos} target · warnings ${board.sackWarnings || 0}/3.`,
+      bodyEn: `The club remains ${ordinalEn(prog.pos)} against a top-${board.targetPos} target · warnings ${board.sackWarnings || 0}/4.`,
       warning: true,
       priority: 2,
     });

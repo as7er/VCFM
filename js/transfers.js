@@ -7,9 +7,9 @@
 const SUMMER_START = 1;
 const SUMMER_END = 50;
 
-/** 冬窗：约第 130–160 天（联赛中后段），延长至 30 天 */
-const WINTER_START = 130;
-const WINTER_END = 160;
+/** 冬窗：约第 90–125 天（赛季中段），延长至 35 天，给予更多战术调整空间 */
+const WINTER_START = 90;
+const WINTER_END = 125;
 
 export function ensureTransferWindow(world) {
   if (!world) return null;
