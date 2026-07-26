@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>VCFM 冒烟测试</title>
+<style>
+body {
+  margin: 20px;
+  font-family: system-ui;
+  background: #0f1117;
+  color: #e5e7eb;
+}
+.test {
+  padding: 12px;
+  margin: 8px 0;
+  border-radius: 6px;
+  border-left: 3px solid #64748b;
+}
+.test.pass { border-left-color: #22c55e; background: #14532d; }
+.test.fail { border-left-color: #ef4444; background: #7f1d1d; }
+.test.warn { border-left-color: #f59e0b; background: #78350f; }
+pre {
+  background: #1f2937;
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+</style>
+</head>
+<body>
+<h1>🧪 VCFM 冒烟测试</h1>
+<div id="results"></div>
+
+<script type="module">
+import { MatchViewFSM } from "./js/matchview-fsm.js";
+import { coordSystem } from "./js/matchview-coords.js";
+import { DirectorScript, GOAL_NARRATIVE } from "./js/matchview-director.js";
+
+const results = document.getElementById("results");
+
+function test(name, fn) {
+  const div = document.createElement("div");
+  div.className = "test";
+  try {
+    const result = fn();
+    if (result === false) {
+      div.classList.add("fail");
+      div.innerHTML = `<strong>❌ ${name}</strong><pre>Test returned false</pre>`;
+    } else {
+      div.classList.add("pass");
+      div.innerHTML = `<strong>✅ ${name}</strong>`;
+      if (result && typeof result === 'string') {
+        div.innerHTML += `<pre>${result}</pre>`;
+      }
+    }
+  } catch (e) {
+    div.classList.add("fail");
+    div.innerHTML = `<strong>❌ ${name}</strong><pre>${e.stack}</pre>`;
+  }
+  results.appendChild(div);
+}
+
+// ========== FSM 测试 ==========
+test("FSM: 初始化", () => {
+  const fsm = new MatchViewFSM();
+  if (fsm.state !== 'IDLE') throw new Error(`Expected IDLE, got ${fsm.state}`);
+  return `初始状态: ${fsm.describe()}`;
+});
+
+test("FSM: 转换到 PLAYING.FREE_PLAY", () => {
+  const fsm = new MatchViewFSM();
+  fsm.transition('PLAYING', 'FREE_PLAY');
+  if (!fsm.canAIAct()) throw new Error("canAIAct() should be true");
+  return `状态: ${fsm.describe()}, canAIAct: ${fsm.canAIAct()}`;
+});
+
+test("FSM: current() 方法", () => {
+  const fsm = new MatchViewFSM();
+  fsm.transition('PLAYING', 'FREE_PLAY');
+  const current = fsm.current();
+  if (current !== 'PLAYING') throw new Error(`Expected PLAYING, got ${current}`);
+  return `current(): ${current}`;
+});
+
+test("FSM: shouldAdvanceTime()", () => {
+  const fsm = new MatchViewFSM();
+  fsm.transition('PLAYING', 'FREE_PLAY');
+  if (!fsm.shouldAdvanceTime()) throw new Error("shouldAdvanceTime() should be true");
+  return `shouldAdvanceTime: ${fsm.shouldAdvanceTime()}`;
+});
+
+// ========== 坐标系统测试 ==========
+test("coordSystem: 球门坐标", () => {
+  const homeGoal = coordSystem.defendingGoal(true);
+  const awayGoal = coordSystem.defendingGoal(false);
+  if (homeGoal.y !== 96) throw new Error(`Home goal y should be 96, got ${homeGoal.y}`);
+  if (awayGoal.y !== 4) throw new Error(`Away goal y should be 4, got ${awayGoal.y}`);
+  return `主队球门: y=${homeGoal.y}, 客队球门: y=${awayGoal.y}`;
+});
+
+test("coordSystem: 禁区判断", () => {
+  const inHomeBox = coordSystem.isInBox(50, 90, 'home', true);
+  const inAwayBox = coordSystem.isInBox(50, 10, 'away', true);
+  if (!inHomeBox) throw new Error("(50, 90) should be in home box");
+  if (!inAwayBox) throw new Error("(50, 10) should be in away box");
+  return `(50,90) 在主队禁区: ${inHomeBox}, (50,10) 在客队禁区: ${inAwayBox}`;
+});
+
+// ========== DirectorScript 测试 ==========
+test("DirectorScript: 初始化", () => {
+  const script = new DirectorScript('rewatch', GOAL_NARRATIVE);
+  if (!script) throw new Error("Failed to create DirectorScript");
+  return `配置: ${script.name}, 阶段数: ${script.phases.length}`;
+});
+
+test("DirectorScript: tick 推进", () => {
+  const script = new DirectorScript('rewatch', GOAL_NARRATIVE);
+  script.tick(0.5);
+  const phase = script.currentPhase();
+  if (!phase) throw new Error("No current phase after tick");
+  return `当前阶段: ${phase.name}, 进度: ${script.phaseProgress().toFixed(2)}`;
+});
+
+// ========== 集成测试 ==========
+test("集成: FSM + coordSystem", () => {
+  const fsm = new MatchViewFSM();
+  fsm.transition('PLAYING', 'FREE_PLAY');
+
+  // 模拟进球判断
+  const ballX = 50, ballY = 97;
+  const isGoal = coordSystem.isInGoal(ballX, ballY, 'home');
+
+  if (!isGoal) throw new Error("(50, 97) should be a goal");
+  if (!fsm.canAIAct()) throw new Error("AI should be active in FREE_PLAY");
+
+  return `球在 (${ballX}, ${ballY}), 是否进球: ${isGoal}, AI激活: ${fsm.canAIAct()}`;
+});
+
+test("集成: FSM + DirectorScript", () => {
+  const fsm = new MatchViewFSM();
+  fsm.transition('GOAL_SEQUENCE', 'STRIKE');
+
+  const script = new DirectorScript('rewatch', GOAL_NARRATIVE);
+  script.tick(1.0);
+
+  const phase = script.currentPhase();
+  if (!phase) throw new Error("No phase after 1s");
+
+  return `FSM: ${fsm.describe()}, Script phase: ${phase.name}`;
+});
+
+console.log("✅ 所有冒烟测试完成");
+</script>
+</body>
+</html>

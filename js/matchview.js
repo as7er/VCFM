@@ -5095,6 +5095,17 @@ export class MatchView {
     // scriptLock：关键事件预演，只朝脚本目标跑，不跑自由 AI
     // pre / idle / pause：钉阵型；UI frozen：冻结当前帧
 
+    // DEBUG: 开球后记录一次状态
+    if (!this._debugLogged && livePlay) {
+      console.log('[Update] First livePlay frame:');
+      console.log('  livePlay:', livePlay);
+      console.log('  simDrive:', this.simDrive);
+      console.log('  frozen:', this.frozen);
+      console.log('  scriptLock:', this.scriptLock);
+      console.log('  FSM:', this.fsm.describe());
+      this._debugLogged = true;
+    }
+
     // —— 真空间投影：位置由 playSimTimeline 写入；软跟镜 + Canvas ——
     if (this.simDrive && (livePlay || staged) && !this.frozen) {
       for (const pl of this.players) {
