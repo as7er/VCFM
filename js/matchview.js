@@ -14,6 +14,7 @@
 
 import { FORMATIONS, playerDisplaySurname } from "./data.js";
 import { MatchViewFSM } from "./matchview-fsm.js";
+import { coordSystem } from "./matchview-coords.js";
 import {
   ensureKit,
   getLineupPlayers,
@@ -358,8 +359,8 @@ export class MatchView {
       if (sim.ball.netHit && !this._netHitDone && (by < 8 || by > 92)) {
         this._netHitDone = true;
         const attHome = by < 50;
-        const gx = clamp(bx, 42, 58);
-        const gy = attHome ? Math.min(by, 3.5) : Math.max(by, 96.5);
+        const gx = clamp(bx, coordSystem.GOAL.X_MIN - 2, coordSystem.GOAL.X_MAX + 2);
+        const gy = attHome ? Math.min(by, coordSystem.GOAL.AWAY_Y - 0.5) : Math.max(by, coordSystem.GOAL.HOME_Y + 0.5);
         this._goalNetEffect?.(gx, gy, attHome);
       }
     }
@@ -3419,16 +3420,21 @@ export class MatchView {
     if (!pl) return false;
     // 主队攻上（y 小），客队攻下（y 大）
     if (pl.team === "home") {
-      return deep ? pl.y <= 18 && pl.x >= 28 && pl.x <= 72 : pl.y <= 32 && pl.x >= 18 && pl.x <= 82;
+      return deep
+        ? coordSystem.isInBox(pl.x, pl.y, 'away', true)
+        : pl.y <= 32 && pl.x >= 18 && pl.x <= 82;
     }
-    return deep ? pl.y >= 82 && pl.x >= 28 && pl.x <= 72 : pl.y >= 68 && pl.x >= 18 && pl.x <= 82;
+    return deep
+      ? coordSystem.isInBox(pl.x, pl.y, 'home', true)
+      : pl.y >= 68 && pl.x >= 18 && pl.x <= 82;
   }
 
   /** 球门中心与门将位置 */
   _goalTarget(team) {
     const attHome = team === "home";
-    const gx = 50 + (Math.random() - 0.5) * 10;
-    const gy = attHome ? 4 + Math.random() * 3 : 96 - Math.random() * 3;
+    const goal = coordSystem.attackingGoal(attHome);
+    const gx = goal.x + (Math.random() - 0.5) * 10;
+    const gy = attHome ? goal.y + Math.random() * 3 : goal.y - Math.random() * 3;
     return { gx, gy, attHome };
   }
 
@@ -6525,17 +6531,17 @@ export class MatchView {
     if (!scorer || !this._built) return;
     const team = scorer.team;
     const attHome = team === "home";
-    const cornerX = (scorer.x ?? 50) < 50 ? 10 : 90;
+    const corner = coordSystem.getCelebrationCorner(attHome, scorer.x ?? 50);
     this._celebrate = {
       until: performance.now() + 5200,
       team,
       scorerId: scorer.id,
-      cornerX,
+      cornerX: corner.x,
       attHome,
     };
     // 只设置移动目标，不改写当前位置。
-    scorer.tx = cornerX;
-    scorer.ty = attHome ? 8 : 92;
+    scorer.tx = corner.x;
+    scorer.ty = corner.y;
     scorer.el.classList.add("highlight", "scorer");
     // 仅四名近端队友自然围拢；加上射手一共最多五人。
     const mates = this.players
@@ -6556,7 +6562,7 @@ export class MatchView {
         const ang = (i / 4) * Math.PI * 2 + 0.4;
         const ring = 3.2 + (i % 3) * 1.4;
         const tx = clamp(
-          scorer.x + Math.cos(ang) * ring + (cornerX - 50) * 0.12,
+          scorer.x + Math.cos(ang) * ring + (corner.x - 50) * 0.12,
           6,
           94
         );
