@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>VCFM 新模块测试 - 状态机 + 坐标系统 + 回放</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #0b1220; color: #e5e7eb;
+    font: 14px/1.4 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: grid; grid-template-columns: 1fr 300px; gap: 16px;
+    padding: 14px; min-height: 100vh;
+  }
+  .main { display: flex; flex-direction: column; gap: 12px; }
+  .sidebar { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+
+  h1 { font-size: 16px; margin: 4px 0; font-weight: 700; }
+  h2 { font-size: 14px; margin: 8px 0 4px; font-weight: 600; color: #60a5fa; }
+  .sub { color: #94a3b8; font-size: 12px; margin-top: -6px; }
+
+  .panel {
+    background: #111827; padding: 12px; border-radius: 8px;
+    border: 1px solid #1f2937;
+  }
+
+  .wrap {
+    position: relative; width: 100%; aspect-ratio: 2/3; max-width: 520px;
+    background: linear-gradient(160deg, #14532d, #166534 55%, #15803d);
+    border-radius: 10px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,.5);
+    margin: 0 auto;
+  }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  .scorebar {
+    display: flex; align-items: center; gap: 14px; justify-content: center;
+    padding: 8px 18px; font-weight: 700;
+  }
+  .scorebar .home { color: #60a5fa; }
+  .scorebar .away { color: #f87171; }
+  .scorebar .clock { color: #fbbf24; font-variant-numeric: tabular-nums; }
+
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  button, select {
+    background: #1f2937; color: #e5e7eb; border: 1px solid #374151;
+    border-radius: 7px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+    transition: background 0.2s;
+  }
+  button:hover { background: #374151; }
+  button.on { background: #2563eb; border-color: #3b82f6; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 12px;
+    font-size: 12px; color: #cbd5e1;
+  }
+  .stats b { color: #f1f5f9; font-variant-numeric: tabular-nums; }
+
+  .fsm-state {
+    padding: 8px 12px; background: #1f2937; border-radius: 6px;
+    border-left: 3px solid #3b82f6;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+  }
+  .fsm-state.goal { border-left-color: #22c55e; }
+  .fsm-state.paused { border-left-color: #f59e0b; }
+
+  .coord-info {
+    font-size: 11px; line-height: 1.6;
+    color: #94a3b8;
+  }
+  .coord-info code {
+    background: #1f2937; padding: 1px 4px; border-radius: 3px;
+    font-size: 10px;
+  }
+
+  .replay-list { display: flex; flex-direction: column; gap: 6px; }
+  .replay-item {
+    display: flex; gap: 8px; padding: 8px; background: #1f2937;
+    border-radius: 6px; cursor: pointer; transition: background 0.2s;
+    align-items: center;
+  }
+  .replay-item:hover { background: #374151; }
+  .replay-icon { font-size: 20px; }
+  .replay-info { flex: 1; font-size: 11px; }
+  .replay-time { font-weight: 600; color: #fbbf24; }
+  .replay-type { color: #94a3b8; }
+  .replay-text { color: #e5e7eb; margin-top: 2px; }
+  .replay-empty { text-align: center; color: #64748b; padding: 20px; }
+
+  .legend { font-size: 11px; color: #64748b; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div class="main">
+    <div class="panel">
+      <h1>🧪 VCFM 新模块测试</h1>
+      <div class="sub">测试状态机、坐标系统、回放管理器的集成</div>
+    </div>
+
+    <div class="panel scorebar">
+      <span class="home" id="homeName">主队</span>
+      <span id="score">0 - 0</span>
+      <span class="away" id="awayName">客队</span>
+      <span class="clock" id="clock">00:00</span>
+    </div>
+
+    <div class="wrap">
+      <canvas id="cv"></canvas>
+    </div>
+
+    <div class="panel controls">
+      <button id="playBtn" class="on">▶ 播放</button>
+      <button id="pauseBtn">⏸ 暂停</button>
+      <button id="resetBtn">↻ 重置</button>
+      <select id="speedSel">
+        <option value="1">×1</option>
+        <option value="2" selected>×2</option>
+        <option value="4">×4</option>
+      </select>
+      <button id="goalBtn">⚽ 模拟进球</button>
+      <button id="coordTestBtn">📍 坐标测试</button>
+    </div>
+
+    <div class="panel">
+      <h2>📊 比赛统计</h2>
+      <div class="stats">
+        <div>控球 主 <b id="possH">50</b>%</div>
+        <div>控球 客 <b id="possA">50</b>%</div>
+        <div>射门 <b id="shots">0-0</b></div>
+        <div>传球 <b id="passes">0</b></div>
+        <div>抢断 <b id="tackles">0</b></div>
+        <div>角球 <b id="corners">0</b></div>
+      </div>
+    </div>
+
+    <div class="panel legend">
+      <strong>测试说明：</strong><br>
+      • 状态机：点击"暂停"进入 PAUSED 状态，"播放"恢复 PLAYING<br>
+      • 进球模拟：点击"模拟进球"进入 GOAL_SEQUENCE 状态<br>
+      • 坐标系统：点击"坐标测试"在控制台查看区域判断<br>
+      • 回放管理：进球会自动保存到右侧回放列表
+    </div>
+  </div>
+
+  <div class="sidebar">
+    <div class="panel">
+      <h2>🎮 状态机 (FSM)</h2>
+      <div class="fsm-state" id="fsmState">IDLE</div>
+      <div style="margin-top: 8px; font-size: 11px; color: #94a3b8;">
+        <div>canAIAct: <b id="fsmCanAI">false</b></div>
+        <div>shouldAdvanceTime: <b id="fsmAdvance">false</b></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>📍 坐标系统</h2>
+      <div class="coord-info" id="coordInfo">
+        球门: HOME <code>y=96</code> / AWAY <code>y=4</code><br>
+        禁区: <code>x=28-72</code> <code>y=82-96 / 4-18</code><br>
+        点击"坐标测试"查看更多
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>📹 回放列表</h2>
+      <div id="replayList" class="replay-list">
+        <div class="replay-empty">暂无回放</div>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+import { SimEngine, SIM } from "./js/sim/engine.js";
+import { MatchViewFSM } from "./js/matchview-fsm.js";
+import { coordSystem } from "./js/matchview-coords.js";
+import { ReplayManager } from "./js/matchview-replay.js";
+
+// ========== 初始化 ==========
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+let W = 0, H = 0, dpr = 1;
+
+function resize() {
+  const r = cv.getBoundingClientRect();
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  W = Math.floor(r.width); H = Math.floor(r.height);
+  cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  coordSystem.updateCanvasSize(W, H, dpr);
+}
+window.addEventListener("resize", resize);
+resize();
+
+// ========== 新模块实例 ==========
+const fsm = new MatchViewFSM();
+const replayManager = new ReplayManager();
+
+// 状态机监听器
+fsm.on('enter:PLAYING', () => {
+  console.log('✅ 进入 PLAYING 状态');
+  updateFSMDisplay();
+});
+
+fsm.on('enter:PAUSED', () => {
+  console.log('⏸ 进入 PAUSED 状态');
+  updateFSMDisplay();
+});
+
+fsm.on('enter:GOAL_SEQUENCE', () => {
+  console.log('⚽ 进入 GOAL_SEQUENCE 状态');
+  updateFSMDisplay();
+});
+
+// ========== 模拟引擎 ==========
+function makeClub(name, power) {
+  const roles = ["GK","DEF","DEF","DEF","DEF","MID","MID","MID","ATT","ATT","ATT"];
+  const players = [], lineup = [];
+  for (let i = 0; i < 11; i++) {
+    const mean = power / 5;
+    const g = () => Math.max(1, Math.min(20, Math.round(mean + (Math.random() - 0.5) * 5)));
+    const id = `${name}-p${i}`;
+    players.push({
+      id, name: `${name}#${i}`, pos: roles[i], number: i + 1, fitness: 100,
+      attrs: {
+        pace: g(), shooting: g(), passing: g(), dribbling: g(), defending: g(),
+        physical: g(), finishing: g(), tackling: g(), marking: g(), strength: g(),
+        stamina: g(), vision: g(), reflexes: g(), handling: g(), positioning: g(), kicking: g()
+      }
+    });
+    lineup.push(id);
+  }
+  return { name, players, tactics: { formation: "4-3-3", lineup } };
+}
+
+let eng, simAccT = 0, speed = 2;
+let ownerSteps = { home: 0, away: 0 };
+let prevPos = null, curPos = null;
+let recordedFrames = []; // 录制帧（用于回放）
+let isRecording = false;
+
+function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function grabPos() {
+  const p = { players: {}, ball: { x: eng.ball.x, y: eng.ball.y } };
+  for (const a of eng.agents) {
+    p.players[a.id] = { x: a.x, y: a.y, vx: a.vx, vy: a.vy, heading: a.heading };
+  }
+  return p;
+}
+
+function newMatch() {
+  eng = new SimEngine(makeClub("HOME", 68), makeClub("AWAY", 62));
+  ownerSteps = { home: 0, away: 0 };
+  simAccT = 0;
+  prevPos = curPos = null;
+  recordedFrames = [];
+
+  // 初始化状态机
+  fsm.transition('PRE_MATCH');
+  fsm.transition('PLAYING', 'FREE_PLAY');
+
+  updateUI();
+  updateFSMDisplay();
+
+  document.getElementById("homeName").textContent = "主队";
+  document.getElementById("awayName").textContent = "客队";
+}
+
+// ========== 渲染 ==========
+function draw() {
+  ctx.fillStyle = "#166534";
+  ctx.fillRect(0, 0, W, H);
+
+  if (!eng) return;
+
+  // 插值比例
+  const alpha = curPos && prevPos ? clamp(simAccT / SIM.DT, 0, 1) : 1;
+
+  // 画球员
+  for (const a of eng.agents) {
+    let x = a.x, y = a.y, heading = a.heading;
+
+    // 插值
+    if (curPos && prevPos && curPos.players[a.id] && prevPos.players[a.id]) {
+      const c = curPos.players[a.id];
+      const p = prevPos.players[a.id];
+      x = lerp(p.x, c.x, alpha);
+      y = lerp(p.y, c.y, alpha);
+    }
+
+    const px = (x / 100) * W;
+    const py = (y / 100) * H;
+    const r = 6;
+
+    // 圆点
+    ctx.fillStyle = a.team === "home" ? "#60a5fa" : "#f87171";
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 号码
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 9px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(a.num || "?", px, py);
+
+    // 持球光环
+    if (eng.ball.owner === a.id) {
+      ctx.strokeStyle = "#fbbf24";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(px, py, r + 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // 画球
+  const bx = (eng.ball.x / 100) * W;
+  const by = (eng.ball.y / 100) * H;
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.arc(bx, by, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ========== 逻辑更新 ==========
+function tick(dt) {
+  if (!eng || !fsm.shouldAdvanceTime()) return;
+
+  simAccT += dt * speed;
+
+  while (simAccT >= SIM.DT) {
+    prevPos = curPos;
+    eng.step();
+    curPos = grabPos();
+    simAccT -= SIM.DT;
+
+    // 统计控球
+    if (eng.ball.owner) {
+      const team = eng.agents.find(a => a.id === eng.ball.owner)?.team;
+      if (team) ownerSteps[team]++;
+    }
+
+    // 录制帧（模拟进球时）
+    if (isRecording) {
+      recordedFrames.push({
+        t: eng.t,
+        ball: { x: eng.ball.x, y: eng.ball.y, owner: eng.ball.owner },
+        players: eng.agents.slice(0, 5).map(a => ({ id: a.id, x: a.x, y: a.y }))
+      });
+    }
+
+    // 检查事件（简化：只检查进球）
+    for (const ev of eng.events) {
+      if (ev.type === 'goal' && ev.t >= eng.t - SIM.DT) {
+        handleGoalEvent(ev);
+      }
+    }
+  }
+
+  updateUI();
+}
+
+function handleGoalEvent(ev) {
+  console.log('⚽ 进球事件:', ev);
+
+  // 切换到进球状态
+  fsm.transition('GOAL_SEQUENCE', 'STRIKE');
+
+  // 保存回放
+  if (recordedFrames.length > 0) {
+    const highlightId = replayManager.saveHighlight('goal', recordedFrames, {
+      minute: Math.floor(eng.t / 60),
+      scorerId: ev.attackerId,
+      teamId: ev.team,
+      text: `${ev.team === 'home' ? '主队' : '客队'} 进球！`,
+      score: { home: ev.homeGoals, away: ev.awayGoals }
+    });
+    console.log('💾 回放已保存:', highlightId);
+    renderReplayList();
+  }
+
+  // 2 秒后恢复比赛
+  setTimeout(() => {
+    fsm.transition('PLAYING', 'FREE_PLAY');
+    recordedFrames = [];
+  }, 2000);
+}
+
+// ========== UI 更新 ==========
+function updateUI() {
+  if (!eng) return;
+
+  const minute = Math.floor(eng.t / 60);
+  const sec = Math.floor(eng.t % 60);
+  document.getElementById("clock").textContent = `${minute}:${sec.toString().padStart(2, '0')}`;
+
+  const totalSteps = ownerSteps.home + ownerSteps.away || 1;
+  const possH = Math.round((ownerSteps.home / totalSteps) * 100);
+  const possA = 100 - possH;
+  document.getElementById("possH").textContent = possH;
+  document.getElementById("possA").textContent = possA;
+
+  const homeGoals = eng.events.filter(e => e.type === 'goal' && e.team === 'home').length;
+  const awayGoals = eng.events.filter(e => e.type === 'goal' && e.team === 'away').length;
+  document.getElementById("score").textContent = `${homeGoals} - ${awayGoals}`;
+
+  const shots = eng.events.filter(e => e.type === 'shot' || e.type === 'goal').length;
+  document.getElementById("shots").textContent = `${shots}`;
+}
+
+function updateFSMDisplay() {
+  const stateEl = document.getElementById("fsmState");
+  stateEl.textContent = fsm.describe();
+
+  // 根据状态改变样式
+  stateEl.className = 'fsm-state';
+  if (fsm.isIn('GOAL_SEQUENCE')) stateEl.classList.add('goal');
+  if (fsm.is('PAUSED')) stateEl.classList.add('paused');
+
+  document.getElementById("fsmCanAI").textContent = fsm.canAIAct();
+  document.getElementById("fsmAdvance").textContent = fsm.shouldAdvanceTime();
+}
+
+function renderReplayList() {
+  const list = replayManager.listHighlights();
+  const container = document.getElementById("replayList");
+
+  if (list.length === 0) {
+    container.innerHTML = '<div class="replay-empty">暂无回放</div>';
+    return;
+  }
+
+  container.innerHTML = list.map(h => `
+    <div class="replay-item" data-id="${h.id}">
+      <div class="replay-icon">⚽</div>
+      <div class="replay-info">
+        <div class="replay-time">${h.time}'</div>
+        <div class="replay-type">${h.metadata.text || '进球'}</div>
+      </div>
+    </div>
+  `).join('');
+
+  // 绑定点击事件
+  container.querySelectorAll('.replay-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = el.dataset.id;
+      const highlight = replayManager.getHighlight(id);
+      console.log('📹 播放回放:', highlight);
+      alert(`回放 ${id}: ${highlight.metadata.text}\n帧数: ${highlight.frames.length}`);
+    });
+  });
+}
+
+// ========== 按钮事件 ==========
+document.getElementById("playBtn").addEventListener("click", () => {
+  if (fsm.is('PAUSED') || fsm.is('PRE_MATCH')) {
+    fsm.transition('PLAYING', 'FREE_PLAY');
+  }
+});
+
+document.getElementById("pauseBtn").addEventListener("click", () => {
+  if (fsm.isIn('PLAYING')) {
+    fsm.transition('PAUSED');
+  }
+});
+
+document.getElementById("resetBtn").addEventListener("click", () => {
+  newMatch();
+});
+
+document.getElementById("speedSel").addEventListener("change", (e) => {
+  speed = parseFloat(e.target.value);
+});
+
+document.getElementById("goalBtn").addEventListener("click", () => {
+  if (!eng) return;
+
+  // 开始录制
+  isRecording = true;
+  recordedFrames = [];
+
+  // 手动触发进球事件（模拟）
+  setTimeout(() => {
+    const fakeGoal = {
+      type: 'goal',
+      t: eng.t,
+      team: 'home',
+      attackerId: 'HOME-p9',
+      homeGoals: 1,
+      awayGoals: 0
+    };
+    eng.events.push(fakeGoal);
+    handleGoalEvent(fakeGoal);
+    isRecording = false;
+  }, 1000);
+});
+
+document.getElementById("coordTestBtn").addEventListener("click", () => {
+  console.log('📍 坐标系统测试:');
+  console.log('主队球门:', coordSystem.defendingGoal(true));
+  console.log('客队球门:', coordSystem.defendingGoal(false));
+  console.log('(50, 90) 在主队禁区?', coordSystem.isInBox(50, 90, 'home'));
+  console.log('(50, 10) 在客队禁区?', coordSystem.isInBox(50, 10, 'away'));
+  console.log('(50, 97) 在主队球门内?', coordSystem.isInGoal(50, 97, 'home'));
+  console.log('距离主队球门 (50, 50):', coordSystem.distanceToGoal(50, 50, true));
+  console.log('最近角旗 (20, 90, home):', coordSystem.nearestCorner(20, 90, true));
+
+  const coordInfo = document.getElementById("coordInfo");
+  coordInfo.innerHTML = `
+    <strong>坐标测试结果（见控制台）</strong><br>
+    主队球门: <code>y=${coordSystem.GOAL.HOME_Y}</code><br>
+    客队球门: <code>y=${coordSystem.GOAL.AWAY_Y}</code><br>
+    (50,90) 在主队禁区: <code>${coordSystem.isInBox(50, 90, 'home')}</code><br>
+    (50,10) 在客队禁区: <code>${coordSystem.isInBox(50, 10, 'away')}</code>
+  `;
+});
+
+// ========== 主循环 ==========
+let lastTime = 0;
+function loop(now) {
+  const dt = lastTime ? Math.min((now - lastTime) / 1000, 0.1) : 0;
+  lastTime = now;
+
+  tick(dt);
+  draw();
+
+  requestAnimationFrame(loop);
+}
+
+newMatch();
+requestAnimationFrame(loop);
+
+console.log('✅ 新模块测试页面已启动');
+console.log('状态机:', fsm);
+console.log('坐标系统:', coordSystem);
+console.log('回放管理:', replayManager);
+</script>
+
+</body>
+</html>

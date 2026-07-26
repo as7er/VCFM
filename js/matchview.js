@@ -13,12 +13,14 @@
  */
 
 import { FORMATIONS, playerDisplaySurname } from "./data.js";
+import { MatchViewFSM } from "./matchview-fsm.js";
 import {
   ensureKit,
   getLineupPlayers,
   autoLineup,
   assignPlayersToFormationSlots,
 } from "./models.js";
+import { MatchViewFSM } from "./matchview-fsm.js";
 
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
@@ -109,7 +111,7 @@ export class MatchView {
     this.running = false;
     this.raf = 0;
     this.lastTs = 0;
-    this.phase = "pre"; // pre | play | goal | pause（pre=赛前静止）
+    this.fsm = new MatchViewFSM(); // 状态机替代 phase
     this.possession = "home";
     this.passTimer = 0;
     this.highlightId = null;
@@ -159,13 +161,23 @@ export class MatchView {
     this.actionTimer = 0;
     /** 导演控球偏置 0..1 = 主队控球倾向（来自 snap.possession） */
     this.directorBias = 0.5;
-    /** UI 暂停：冻结 AI，保留站位（区别于 HT/FT 的 phase=pause） */
-    this.frozen = false;
-    /**
-     * 关键事件预演锁：暂停自由持球 AI，只跑镜头脚本跑位
-     * （FMM：机会/扑救前 1–2 秒组织进攻）
-     */
-    this.scriptLock = false;
+    // ===== 状态机（替代旧的 phase/frozen/scriptLock 标志） =====
+    this.fsm = new MatchViewFSM();
+    this._legacyPhase = "pre";
+    this._legacyFrozen = false;
+    this._legacyScriptLock = false;
+
+    // FSM 状态监听器：同步回旧标志（兼容期）
+    this.fsm.on('enter:PRE_MATCH', () => { this._legacyPhase = 'pre'; });
+    this.fsm.on('enter:PLAYING', (data) => {
+      this._legacyPhase = 'play';
+      this._legacyScriptLock = data?.subState === 'SCRIPTED';
+    });
+    this.fsm.on('enter:GOAL_SEQUENCE', () => { this._legacyPhase = 'goal'; });
+    this.fsm.on('enter:PAUSED', () => { this._legacyPhase = 'pause'; });
+    this.fsm.on('enter:HALF_TIME', () => { this._legacyPhase = 'pause'; });
+    this.fsm.on('enter:FULL_TIME', () => { this._legacyPhase = 'pause'; });
+
     /** 事件收尾中：缓慢回落，不立刻乱踢 */
     this.aftermathUntil = 0;
     /**
@@ -186,6 +198,46 @@ export class MatchView {
      * 直播 v2 时开启。
      */
     this.simDrive = false;
+  }
+
+  // ===== 状态标志兼容层（getter/setter 代理到 FSM） =====
+
+  /** @deprecated 使用 fsm.state 替代 */
+  get phase() { return this._legacyPhase; }
+  set phase(val) {
+    this._legacyPhase = val;
+    // 同步到 FSM
+    if (val === 'pre') {
+      this.fsm.transition('PRE_MATCH');
+    } else if (val === 'play') {
+      const subState = this._legacyScriptLock ? 'SCRIPTED' : 'FREE_PLAY';
+      this.fsm.transition('PLAYING', subState);
+    } else if (val === 'goal') {
+      this.fsm.transition('GOAL_SEQUENCE', 'STRIKE');
+    } else if (val === 'pause') {
+      this.fsm.transition('PAUSED');
+    }
+  }
+
+  /** @deprecated 使用 fsm.canAIAct() 替代 */
+  get frozen() { return this._legacyFrozen; }
+  set frozen(val) {
+    this._legacyFrozen = !!val;
+    if (val) {
+      this.fsm.transition('PAUSED');
+    } else if (this._legacyPhase === 'play') {
+      const subState = this._legacyScriptLock ? 'SCRIPTED' : 'FREE_PLAY';
+      this.fsm.transition('PLAYING', subState);
+    }
+  }
+
+  /** @deprecated 使用 fsm 子状态替代 */
+  get scriptLock() { return this._legacyScriptLock; }
+  set scriptLock(val) {
+    this._legacyScriptLock = !!val;
+    if (this._legacyPhase === 'play' && !this._legacyFrozen) {
+      this.fsm.transition('PLAYING', val ? 'SCRIPTED' : 'FREE_PLAY');
+    }
   }
 
   /**
@@ -215,7 +267,10 @@ export class MatchView {
         if (paths) paths.innerHTML = "";
       }
       this.passNetwork?.clear?.();
-      if (this.phase === "pre" || this.phase === "pause") this.phase = "play";
+      const currentState = this.fsm.current();
+      if (currentState === 'PRE_MATCH' || currentState === 'PAUSED' || currentState === 'HALF_TIME') {
+        this.fsm.transition('PLAYING', 'FREE_PLAY');
+      }
     }
   }
 
@@ -230,7 +285,9 @@ export class MatchView {
     this.scriptLock = false;
     this.flight = null;
     this.ballFlightUntil = 0;
-    if (this.phase !== "goal") this.phase = "play";
+    if (!this.fsm.isIn('GOAL_SEQUENCE')) {
+      this.fsm.transition('PLAYING', 'SIM_DRIVEN');
+    }
 
     const soft = !!opts.soft;
     // 平滑系数：约 70ms 跟上目标，去掉帧边界硬切造成的肉眼抖动
@@ -442,7 +499,10 @@ export class MatchView {
       this.stopSimTimeline();
       this.setSimDrive(true);
       this.frozen = false;
-      if (this.phase === "pre" || this.phase === "pause") this.phase = "play";
+      const currentState = this.fsm.current();
+      if (currentState === 'PRE_MATCH' || currentState === 'PAUSED' || currentState === 'HALF_TIME') {
+        this.fsm.transition('PLAYING', 'SIM_DRIVEN');
+      }
       // FM 软跟镜：缓跟球 + 死区；高潮前由导演切 box
       this.camMode = "follow";
       this._ballTrail = [];
@@ -509,7 +569,7 @@ export class MatchView {
 
         if (ts < sp.holdUntil) {
           // hold：不推进 simT；进球叙事 → 庆祝
-          if (this.phase === "goal") {
+          if (this.fsm.isIn('GOAL_SEQUENCE')) {
             if (this._goalBeat && !this._goalBeat.done) {
               this._tickGoalBeat(realDt);
             } else {
@@ -524,7 +584,7 @@ export class MatchView {
 
         // 进球叙事/庆祝中：不要用后续 sim 帧覆盖（否则刚围拢又被冲散）
         if (
-          this.phase === "goal" &&
+          this.fsm.isIn('GOAL_SEQUENCE') &&
           (this._goalBeat || this._celebrate)
         ) {
           if (this._goalBeat && !this._goalBeat.done) {
@@ -610,7 +670,7 @@ export class MatchView {
     if (kind === "goal") {
       this.camMode = "follow";
       this.camBoostUntil = now + 4200;
-      this.phase = "goal";
+      this.fsm.transition('GOAL_SEQUENCE', 'STRIKE');
       this._netHitDone = false;
       this.fieldEl?.classList.add("mp-replay-slow");
       // 先播 3s 助攻→射门→入网，再庆祝（勿立刻聚拢抢戏）
@@ -698,7 +758,7 @@ export class MatchView {
   _clearDirectorChrome() {
     this.fieldEl?.classList.remove("mp-replay-slow", "mp-corner-active");
     // mp-replay 留给完整回放；直播导演只清 slow
-    if (this.phase !== "goal") {
+    if (!this.fsm.isIn('GOAL_SEQUENCE')) {
       this.fieldEl?.classList.remove("mp-replay");
       this.replayBadgeEl?.classList.add("hidden");
     } else if (this.replayBadgeEl && !this.fieldEl?.classList.contains("mp-replay")) {
@@ -742,7 +802,7 @@ export class MatchView {
         sp.eventSlowUntil = 0;
         sp.eventRateMul = 1;
         eventMul = 1;
-        if (this.phase === "goal") {
+        if (this.fsm.isIn('GOAL_SEQUENCE')) {
           // 进球 hold 结束后再清 chrome（由 hold 结束后 phase 可能仍是 goal）
         } else {
           this._clearDirectorChrome();
@@ -1115,7 +1175,7 @@ export class MatchView {
 
     this._built = true;
     // 赛前站位：静止，等 kickoff 再进入 play（修复未开赛就跑动）
-    this.phase = "pre";
+    this.fsm.transition('PRE_MATCH');
     this.carrier = null;
     this.ballState = "free";
     this.flight = null;
@@ -1424,7 +1484,7 @@ export class MatchView {
     const text =
       opts.text ||
       (en ? "2nd half — kick-off" : "下半场开始");
-    this.phase = "play";
+    this.fsm.transition('PLAYING', 'FREE_PLAY');
     this.camMode = "wide";
     this.camBoostUntil = performance.now() + 800;
     this.ball.tx = 50;
@@ -1447,7 +1507,7 @@ export class MatchView {
     const token = (this._aftermathToken = (this._aftermathToken || 0) + 1);
     setTimeout(() => {
       if (!this._built || this._aftermathToken !== token) return;
-      if (this.phase === "pause" || this.phase === "goal" || this.phase === "pre") return;
+      if (!this.fsm.canAIAct()) return;
       this._beginAftermath({
         flipPossession: !!opts.flipPossession,
         toGk: !!opts.toGk,
@@ -1456,7 +1516,7 @@ export class MatchView {
   }
 
   _beginAftermath({ flipPossession = false, toGk = false } = {}) {
-    if (this.phase !== "play") return;
+    if (!this.fsm.canAIAct()) return;
     this.aftermathUntil = performance.now() + 900;
     this.scriptLock = false;
     this.camMode = "wide";
@@ -1489,7 +1549,7 @@ export class MatchView {
         });
         // 门将持球后交给后场
         setTimeout(() => {
-          if (!this._built || this.phase !== "play") return;
+          if (!this._built || !this.fsm.canAIAct()) return;
           const def = this.players
             .filter(
               (p) =>
@@ -1640,7 +1700,7 @@ export class MatchView {
    * FMM 观感关键：连续，而不是更长的「新剧本」
    */
   async prepareEvent(ev, snap, fixture, opts = {}) {
-    if (!this._built || !ev || this.phase === "pre" || this.phase === "idle") return;
+    if (!this._built || !ev || this.fsm.is('PRE_MATCH') || this.fsm.is('IDLE')) return;
     // 真空间投影 / v2 事件：不编舞，只贴最新引擎帧
     if (this.simDrive || snap?.sim || snap?.engine === "v2" || ev?.fromSim) {
       if (snap?.sim) this.applySimSnapshot(snap.sim);
@@ -1705,7 +1765,7 @@ export class MatchView {
     }
 
     this.scriptLock = true;
-    this.phase = "play";
+    this.fsm.transition('PLAYING', 'SCRIPTED');
     this.camMode = "ball";
     this.actionTimer = 99;
     this.passTimer = 99;
@@ -2026,7 +2086,7 @@ export class MatchView {
       this.directorBias = lerp(this.directorBias, target, 0.35);
     }
     // 空分钟也保持「有球在踢」：若长时间 free 且 play，轻推控球
-    if (this.phase === "play" && !this.frozen && this.ballState === "free" && !this.carrier) {
+    if (this.fsm.canAIAct() && this.ballState === "free" && !this.carrier) {
       this.actionTimer = Math.min(this.actionTimer, 0.12);
     }
     // 攻势段落：无关键事件时也周期性「压上」
@@ -2039,7 +2099,7 @@ export class MatchView {
    * @param {{ ms?: number, intensity?: number, caption?: boolean }} [opts]
    */
   beginAttackPhase(side, opts = {}) {
-    if (!this._built || this.phase !== "play") return;
+    if (!this._built || !this.fsm.canAIAct()) return;
     const s = side === "away" ? "away" : "home";
     const ms = opts.ms ?? 14000;
     const intensity = clamp(opts.intensity ?? 0.7, 0.35, 1);
@@ -2084,7 +2144,7 @@ export class MatchView {
 
   /** 每分钟：续/开攻势段落 */
   _tickAttackPhase(snap) {
-    if (this.phase !== "play" || this.frozen || this.scriptLock) return;
+    if (!this.fsm.canAIAct()) return;
     if (performance.now() < this.aftermathUntil) return;
     const active = this._attackPhaseActive();
     if (active) {
@@ -2115,7 +2175,7 @@ export class MatchView {
    * 关键事件延长/开启攻势
    */
   extendAttackFromEvent(ev, fixture) {
-    if (!ev || this.phase !== "play") return;
+    if (!ev || !this.fsm.canAIAct()) return;
     const homeId = fixture?.home || this.home?.id;
     let side = null;
     if (ev.type === "chance" || ev.type === "woodwork" || ev.type === "corner" || ev.type === "penalty") {
@@ -2312,7 +2372,7 @@ export class MatchView {
     }
     if (this.attackArrowEl) {
       this.attackArrowEl.className = `mp-attack-arrow side-${side}`;
-      this.attackArrowEl.classList.toggle("show", this.phase === "play" && !this.frozen);
+      this.attackArrowEl.classList.toggle("show", this.fsm.canAIAct());
     }
     this.fieldEl?.classList.toggle("mp-poss-home", side === "home");
     this.fieldEl?.classList.toggle("mp-poss-away", side === "away");
@@ -2416,7 +2476,7 @@ export class MatchView {
     const ox = (this.ball.x - 50) / 50;
     const oy = (this.ball.y - 50) / 50;
     const deep = this.ball.y < 22 || this.ball.y > 78;
-    const tight = this.camMode === "box" || this.phase === "goal";
+    const tight = this.camMode === "box" || this.fsm.isIn('GOAL_SEQUENCE');
     if (tight) {
       this.cam.tx = clamp(-ox * 1.6, -2.4, 2.4);
       this.cam.ty = clamp(-oy * 1.8, -2.8, 2.8);
@@ -2492,7 +2552,7 @@ export class MatchView {
     const trail = this._ballTrail || [];
     const isShotTrail =
       this.ballState === "shot" ||
-      (this.phase === "goal" && trail.some((p) => (p.z || 0) > 0.8));
+      (this.fsm.isIn('GOAL_SEQUENCE') && trail.some((p) => (p.z || 0) > 0.8));
     if (trail.length >= 2) {
       ctx.save();
       ctx.lineCap = "round";
@@ -2794,7 +2854,7 @@ export class MatchView {
     if (!frames.length) return;
     const speed = Math.max(0.25, opts.speed || 1);
     const sleepFn = opts.sleepFn || ((ms) => new Promise((r) => setTimeout(r, ms)));
-    this.phase = "play";
+    this.fsm.transition('PLAYING', 'SCRIPTED');
     this.frozen = true; // 停 AI，只播帧
     this.scriptLock = true;
     let prevT = frames[0].t;
@@ -3464,7 +3524,7 @@ export class MatchView {
     // 表现层「扑救/偏出」：球到门前后由门将清走或出底
     const ms = 420;
     setTimeout(() => {
-      if (!this._built || this.phase !== "play") return;
+      if (!this._built || !this.fsm.canAIAct()) return;
       if (this.ballState === "shot" || this.ballState === "flight") return;
       const gk = this.players.find(
         (p) =>
@@ -3509,7 +3569,7 @@ export class MatchView {
    */
   _supportRuns() {
     const car = this.carrier;
-    if (!car || this.phase === "pause" || this.phase === "goal" || this.frozen || this.scriptLock)
+    if (!car || !this.fsm.canAIAct())
       return;
     const phase = this._attackPhaseActive();
     const dir = this._attackDir(car.team);
@@ -3556,7 +3616,7 @@ export class MatchView {
    */
   _pressCarrier() {
     const car = this.carrier;
-    if (!car || this.phase === "pause" || this.phase === "goal" || this.frozen || this.scriptLock)
+    if (!car || !this.fsm.canAIAct())
       return;
     const defs = this.players.filter(
       (p) =>
@@ -3697,7 +3757,7 @@ export class MatchView {
    * 核心：先铺三线块状站位，再只挑少量人 press/support，禁止全员扎堆禁区
    */
   _assignFsmTargets() {
-    if (this.phase !== "play" || this.frozen || this.scriptLock) return;
+    if (!this.fsm.canAIAct()) return;
     const car = this.carrier;
     // 持球人优先：防止 possession 滞后导致无球前锋仍按「进攻站位」
     if (car?.team) this.possession = car.team;
@@ -3984,7 +4044,7 @@ export class MatchView {
    * 属性 + 导演控球偏置 + 攻势段落；表现层断球不改比分
    */
   _decidePossessionAction() {
-    if (this.phase === "pause" || this.phase === "goal" || this.frozen || this.scriptLock)
+    if (!this.fsm.canAIAct())
       return;
     if (performance.now() < this.aftermathUntil) return;
     if (this._isBallInFlight()) return;
@@ -4159,7 +4219,7 @@ export class MatchView {
       // 传球被断（表现）
       if (Math.random() < 0.1 + pressN * 0.035 - passing / 200) {
         setTimeout(() => {
-          if (!this._built || this.phase !== "play") return;
+          if (!this._built || !this.fsm.canAIAct()) return;
           this.possession = car.team === "home" ? "away" : "home";
           this.carrier = null;
           this.ballState = "free";
@@ -4391,7 +4451,7 @@ export class MatchView {
   }
 
   _shapeDriftSoft(onlyFar = true) {
-    if (this.phase === "pause" || this.phase === "goal") return;
+    if (!this.fsm.canAIAct()) return;
     const dirHome = this.possession === "home" ? -1 : 0.35;
     const dirAway = this.possession === "away" ? 1 : -0.35;
     const focusX = this.carrier?.x ?? this.ball.x;
@@ -4543,14 +4603,15 @@ export class MatchView {
   }
 
   _syncClickable() {
-    const frozen = this.phase === "pause" || this.phase === "pre" || this.phase === "idle";
+    const frozen = !this.fsm.canAIAct();
     this.fieldEl?.classList.toggle("mp-clickable", true);
     this.fieldEl?.classList.toggle("mp-paused", frozen);
-    this.fieldEl?.classList.toggle("mp-pre", this.phase === "pre" || this.phase === "idle");
+    const isPre = this.fsm.is('PRE_MATCH') || this.fsm.is('IDLE');
+    this.fieldEl?.classList.toggle("mp-pre", isPre);
     if (this.tipEl) {
       // 赛前/中场都提示可点球员
       this.tipEl.classList.toggle("show", frozen);
-      if (this.phase === "pre" || this.phase === "idle") {
+      if (isPre) {
         this.tipEl.textContent =
           this.tipEl.dataset.preTip ||
           (document.documentElement.lang === "en"
@@ -4592,7 +4653,7 @@ export class MatchView {
    * 镜头：FMM 观感 — 默认稳全场，仅射门/进球短暂 box
    */
   _updateCameraTarget() {
-    if (this.phase === "pause" || this.phase === "pre" || this.phase === "idle") {
+    if (!this.fsm.canAIAct()) {
       this.cam.tScale = 1;
       this.cam.tx = 0;
       this.cam.ty = 0;
@@ -4610,7 +4671,7 @@ export class MatchView {
       this.cam.tx = clamp(-ox * 2.8, -3.8, 3.8);
       this.cam.ty = clamp(-oy * 3.4, -4.5, 4.5);
       this.cam.tScale = performance.now() < this.camBoostUntil ? 1.07 : 1.04;
-    } else if (mode === "ball" || this.phase === "goal") {
+    } else if (mode === "ball" || this.fsm.isIn('GOAL_SEQUENCE')) {
       this.cam.tx = clamp(-ox * 2.2, -3, 3);
       this.cam.ty = clamp(-oy * 2.0, -2.8, 2.8);
       this.cam.tScale = performance.now() < this.camBoostUntil ? 1.05 : 1.03;
@@ -4819,7 +4880,9 @@ export class MatchView {
     }
     this.setFmmReplayChrome(false, { lang });
     this.setFmmTicker("", "", 0);
-    if (this.phase === "goal") this.phase = "play";
+    if (this.fsm.isIn('GOAL_SEQUENCE')) {
+      this.fsm.transition('PLAYING', 'FREE_PLAY');
+    }
   }
 
   /**
@@ -5021,8 +5084,8 @@ export class MatchView {
   update(dt, ts) {
     // 防止切后台后 dt 爆炸
     const d = Math.min(dt, 0.05);
-    const livePlay = this.phase === "play" && !this.frozen;
-    const staged = this.phase === "goal" && !this.frozen; // 进球/回放：只跟目标
+    const livePlay = this.fsm.canAIAct();
+    const staged = this.fsm.isIn('GOAL_SEQUENCE') && !this.frozen; // 进球/回放：只跟目标
     // scriptLock：关键事件预演，只朝脚本目标跑，不跑自由 AI
     // pre / idle / pause：钉阵型；UI frozen：冻结当前帧
 
@@ -5039,7 +5102,7 @@ export class MatchView {
       return;
     }
 
-    if (this.frozen && this.phase === "play") {
+    if (this.fsm.is('PAUSED') && this.fsm.wasIn('PLAYING')) {
       // UI 暂停：保留站位与球，不跑 AI
       this._applyBall();
       this._updateCameraTarget();
@@ -5208,7 +5271,7 @@ export class MatchView {
         pl.y = pl.baseY;
         this._applyPlayer(pl);
       }
-      if (this.phase === "pre" || this.phase === "idle" || this.phase === "pause") {
+      if (!this.fsm.canAIAct()) {
         if (!this._isBallInFlight()) {
           this.ball.x = 50;
           this.ball.y = 50;
@@ -5480,7 +5543,7 @@ export class MatchView {
       const homeId0 = fixture?.home || this.home?.id;
       switch (ev.type) {
         case "kickoff":
-          this.phase = "play";
+          this.fsm.transition('PLAYING', 'FREE_PLAY');
           this.frozen = false;
           this.setBanner(ev.text || "Kick-off", "info");
           this.setCaption(ev.text || "Kick-off", "info", 1400);
@@ -5569,7 +5632,7 @@ export class MatchView {
           this.setBanner(ev.type === "ht" ? "HT" : "FT", "info");
           this.setCaption(ev.text || "", "info", 2000);
           this.playSfx("whistle");
-          this.phase = "pause";
+          this.fsm.transition(ev.type === "ht" ? 'HALF_TIME' : 'FULL_TIME');
           setTimeout(() => this.setBanner(""), 1600);
           break;
         default:
@@ -5583,7 +5646,7 @@ export class MatchView {
 
     switch (ev.type) {
       case "kickoff":
-        this.phase = "play";
+        this.fsm.transition('PLAYING', 'FREE_PLAY');
         this.frozen = false;
         this.aftermathUntil = 0;
         this.hidePlayerCard();
@@ -5907,7 +5970,7 @@ export class MatchView {
       }
 
       case "ht":
-        this.phase = "pause";
+        this.fsm.transition('HALF_TIME');
         this.camMode = "wide";
         this.aftermathUntil = 0;
         this._clearFocus();
@@ -5924,7 +5987,7 @@ export class MatchView {
         break;
 
       case "ft":
-        this.phase = "pause";
+        this.fsm.transition('FULL_TIME');
         this.camMode = "wide";
         this.aftermathUntil = 0;
         this._clearFocus();
@@ -6223,7 +6286,7 @@ export class MatchView {
 
     this.camMode = "box";
     this.camBoostUntil = performance.now() + 2400;
-    this.phase = "play";
+    this.fsm.transition('PLAYING', 'SCRIPTED');
 
     // 角球徽章
     if (this.replayBadgeEl) {
@@ -6341,7 +6404,7 @@ export class MatchView {
     this._applyPlayer(scorer);
     if (assister) this._applyPlayer(assister);
     this._applyBall();
-    this.phase = "goal";
+    this.fsm.transition('GOAL_SEQUENCE', 'BUILDUP');
     this.camMode = "follow";
     this.camBoostUntil = performance.now() + 3200;
     this._goalBeat = {
@@ -6600,7 +6663,7 @@ export class MatchView {
   async _restartAfterGoal(attHome, { wait, lang = "zh" } = {}) {
     this.fieldEl?.classList.remove("mp-replay", "mp-replay-slow");
     this.replayBadgeEl?.classList.add("hidden");
-    this.phase = "play";
+    this.fsm.transition('PLAYING', 'FREE_PLAY');
     this._celebrate = null;
     for (const pl of this.players) {
       pl.el.classList.remove("scorer", "highlight");
@@ -6736,7 +6799,7 @@ export class MatchView {
     const homeId = fixture?.home || this.home?.id;
     const attHome = ev.teamId === homeId;
     const team = attHome ? "home" : "away";
-    this.phase = "goal";
+    this.fsm.transition('GOAL_SEQUENCE', 'STRIKE');
     this.hidePlayerCard();
     this.possession = team;
     this.camMode = "box";
@@ -6806,7 +6869,7 @@ export class MatchView {
         clearInterval(celeIv);
         if (!this._built) return;
         this._celebrate = null;
-        this.phase = "play";
+        this.fsm.transition('PLAYING', 'FREE_PLAY');
         this._resetShape();
         this.ball.tx = 50;
         this.ball.ty = 50;
@@ -6851,7 +6914,7 @@ export class MatchView {
     let ballX = this.ball.x;
     let ballY = this.ball.y;
 
-    this.phase = "goal";
+    this.fsm.transition('GOAL_SEQUENCE', 'STRIKE');
     this.scriptLock = false;
     this.hidePlayerCard();
     this.flight = null;
@@ -7257,7 +7320,7 @@ export class MatchView {
   }
 
   async replayEvents(events, fixture, { onStep, speed = 1, sleepFn } = {}) {
-    this.phase = "play";
+    this.fsm.transition('PLAYING', 'FREE_PLAY');
     this._syncClickable();
     let hg = 0;
     let ag = 0;
