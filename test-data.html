@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>数据加载测试</title>
+</head>
+<body>
+  <h1>数据加载测试</h1>
+  <div id="output"></div>
+
+  <script type="module">
+    import { COUNTRY_LIST, CLUB_TEMPLATES } from "./js/data.js";
+
+    const output = document.getElementById("output");
+
+    try {
+      output.innerHTML = `
+        <h2>✅ 数据加载成功</h2>
+        <p>国家数量: ${COUNTRY_LIST.length}</p>
+        <p>俱乐部数量: ${CLUB_TEMPLATES.length}</p>
+        <h3>国家列表:</h3>
+        <ul>
+          ${COUNTRY_LIST.map(c => `<li>${c.id}: ${c.name} (${c.nameEn})</li>`).join('')}
+        </ul>
+        <h3>前 5 个俱乐部:</h3>
+        <ul>
+          ${CLUB_TEMPLATES.slice(0, 5).map(c => `<li>${c.id}: ${c.name}</li>`).join('')}
+        </ul>
+      `;
+    } catch (err) {
+      output.innerHTML = `<h2>❌ 错误</h2><pre>${err.stack}</pre>`;
+    }
+  </script>
+</body>
+</html>

@@ -5549,7 +5549,12 @@ export class MatchView {
       const homeId0 = fixture?.home || this.home?.id;
       switch (ev.type) {
         case "kickoff":
+          console.log('[Kickoff] Before transition:', this.fsm.describe());
           this.fsm.transition('PLAYING', 'FREE_PLAY');
+          console.log('[Kickoff] After transition:', this.fsm.describe());
+          console.log('[Kickoff] canAIAct:', this.fsm.canAIAct());
+          console.log('[Kickoff] simDrive:', this.simDrive);
+          console.log('[Kickoff] frozen:', this.frozen);
           this.frozen = false;
           this.setBanner(ev.text || "Kick-off", "info");
           this.setCaption(ev.text || "Kick-off", "info", 1400);
