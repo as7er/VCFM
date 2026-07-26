@@ -282,6 +282,7 @@ export class MatchView {
    */
   applySimSnapshot(sim, opts = {}) {
     if (!this._built || !sim?.players?.length) return false;
+    console.log('[DEBUG applySimSnapshot] Called with sim:', !!sim, 'players:', sim?.players?.length);
     this.simDrive = true;
     this.scriptLock = false;
     this.flight = null;
@@ -1188,6 +1189,7 @@ export class MatchView {
     this.frozen = false;
     this.scriptLock = false;
     this.simDrive = false;  // 重置 SimEngine 模式，使用导演 AI
+    console.log('[DEBUG build] Set simDrive = false');
     this.aftermathUntil = 0;
     this.camMode = "wide";
     this._clearFocus?.();

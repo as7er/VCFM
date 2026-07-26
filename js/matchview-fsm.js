@@ -132,6 +132,15 @@ export class MatchViewFSM {
   }
 
   /**
+   * 检查之前是否在某个状态（用于暂停恢复等场景）
+   * 注意：当前简化实现，只检查当前状态
+   */
+  wasIn(state) {
+    // TODO: 如果需要真正的历史状态跟踪，需要在 transition() 中记录 previousState
+    return this.state === state;
+  }
+
+  /**
    * 当前是否允许 AI 自由行动
    */
   canAIAct() {
