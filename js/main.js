@@ -1238,11 +1238,6 @@ function bindMainOnce() {
     renderTopbar();
   };
 
-  const tableDiv = $("#table-division");
-  if (tableDiv) {
-    tableDiv.onchange = () => renderTable();
-  }
-
   const clubsDiv = $("#clubs-division");
   if (clubsDiv && !clubsDiv._bound) {
     clubsDiv._bound = true;
@@ -4725,6 +4720,7 @@ function renderTable() {
   if (sel && !sel._bound) {
     sel._bound = true;
     sel.addEventListener("change", () => {
+      sel.dataset.touched = "1";
       selectedLeagueDivision = Number(sel.value);
       selectedStatsDivision = sel.value;
       renderTable();
