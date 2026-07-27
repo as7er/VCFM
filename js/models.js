@@ -1768,6 +1768,8 @@ export function createWorld(userClubId, managerName, lang = "zh") {
     // 国家队赛事与历史；旧存档由 intl.ensureInternational 惰性迁移
     international: { version: 1, matches: [], competitions: {}, history: [], activeCompetitionId: null },
     poachBids: [],
+    staffMarket: [],
+    staffApproaches: [],
     managerCareer: {
       seasons: 0,
       matches: 0,

@@ -234,6 +234,10 @@ const dict = {
     "clubs.noFixtures": "暂无赛程",
     "clubs.honors": "俱乐部荣誉",
     "clubs.noHonors": "暂无荣誉记录",
+    "clubs.staff": "教练组",
+    "clubs.staffHintOwn": "解约/聘请请到「职员」页",
+    "clubs.staffHintOther": "对方职员仅供查阅",
+    "clubs.noStaff": "暂无职员资料",
 
     // youth
     "youth.title": "青训学院",
@@ -263,9 +267,12 @@ const dict = {
 
     // staff
     "staff.title": "教练团队",
-    "staff.hint": "教练强化比赛与成长 · 球探优化转会与青训 · 队医降低伤病、加速恢复。周薪计入工资单。",
-    "staff.market": "职员市场",
-    "staff.refresh": "刷新候选人",
+    "staff.hint": "职员有合同年限；解约进自由市场。窗内可接触他队在职职员（付补偿金），窗外仅自由身或合同将尽者。",
+    "staff.market": "自由身市场",
+    "staff.employed": "接触在职职员",
+    "staff.employedHint": "向其他俱乐部提出接触；成功需支付解约/培养补偿，对方可能拒绝。",
+    "staff.compensation": "补偿金",
+    "staff.refresh": "补充候选人",
 
     // training
     "train.focus": "训练重点",
@@ -725,6 +732,10 @@ const dict = {
     "clubs.noFixtures": "No fixtures",
     "clubs.honors": "Club honours",
     "clubs.noHonors": "No honours yet",
+    "clubs.staff": "Coaching staff",
+    "clubs.staffHintOwn": "Release or hire on the Staff tab",
+    "clubs.staffHintOther": "Opponent staff is read-only",
+    "clubs.noStaff": "No staff on file",
 
     "youth.title": "Youth academy",
     "youth.upgrade": "Upgrade facility",
@@ -751,9 +762,12 @@ const dict = {
     "fac.buildNew": "Rebuild to Lv.{lv} ({cost} · {days}d)",
 
     "staff.title": "Coaching staff",
-    "staff.hint": "Coach: matches & growth · Scout: transfers & youth · Doctor: injuries & recovery. Wages count weekly.",
-    "staff.market": "Staff market",
-    "staff.refresh": "Refresh candidates",
+    "staff.hint": "Staff have contracts. Released staff become free agents. Approach employed staff in the window (compensation fee); out of window only free agents or ≤1y deals.",
+    "staff.market": "Free agents",
+    "staff.employed": "Approach employed staff",
+    "staff.employedHint": "Contact another club; you pay compensation and they may refuse.",
+    "staff.compensation": "Fee",
+    "staff.refresh": "Add candidates",
 
     "train.focus": "Training focus",
     "train.delegate": "Delegate to assistant",

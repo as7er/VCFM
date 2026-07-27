@@ -44,6 +44,7 @@ import {
 } from "./media.js";
 import {
   ensureStaff,
+  ensureWorldStaff,
   coachMatchMod,
   coachGrowthBonus,
   scoutBuyMod,
@@ -52,8 +53,19 @@ import {
   doctorInjuryMod,
   staffWageBill,
   generateStaffMarket,
+  refreshStaffMarket,
   hireStaff,
   fireStaff,
+  approachStaff,
+  resolveStaffApproach,
+  processStaffMarketDay,
+  processStaffContractsEndOfSeason,
+  ensureStaffApproaches,
+  pendingStaffApproaches,
+  listApproachableStaff,
+  staffCompensationFee,
+  staffSigningFee,
+  staffTargetRating,
   ROLES,
 } from "./staff.js";
 import { runInternationalBreak, ensureIntl } from "./intl.js";
@@ -179,6 +191,18 @@ import {
   recordManagerSack,
 } from "./career.js";
 import {
+  ensureManagerJob,
+  enterUnemployment,
+  resignManagership,
+  acceptJobOffer,
+  rejectJobOffer,
+  pendingJobOffers,
+  generateJobOffers,
+  processManagerJobsDay,
+  managerReputation,
+  isManagerEmployed,
+} from "./manager-jobs.js";
+import {
   processPoachingDay,
   expirePoachBids,
   acceptPoachBid,
@@ -296,6 +320,16 @@ export {
   checkManagerBadges,
   noteUserMatchResult,
   ensureScoutMissions,
+  ensureManagerJob,
+  enterUnemployment,
+  resignManagership,
+  acceptJobOffer,
+  rejectJobOffer,
+  pendingJobOffers,
+  generateJobOffers,
+  processManagerJobsDay,
+  managerReputation,
+  isManagerEmployed,
 };
 
 function rng() {
@@ -472,8 +506,18 @@ export function releaseYouth(world, clubId, playerId) {
 
 /** 推进一天：训练恢复、AI 比赛、工资 */
 export function advanceDay(world) {
+  // 待业：日历仍推进（生成工作邀请），但不能经营旧队比赛
   if (world.sacked) {
-    return { userMatches: [], sacked: true, events: [] };
+    world.day += 1;
+    ensureManagerJob(world);
+    processManagerJobsDay(world);
+    return {
+      userMatches: [],
+      sacked: true,
+      unemployed: world.managerJob?.status === "unemployed",
+      events: [],
+      offers: pendingJobOffers(world),
+    };
   }
 
   world.day += 1;
@@ -487,6 +531,8 @@ export function advanceDay(world) {
 
   expirePoachBids(world);
   processPoachingDay(world);
+  processStaffMarketDay(world);
+  processManagerJobsDay(world);
   // 信箱：同步挖角、过期、偶发球员/球探邮件
   processInboxDay(world);
   // 关系/氛围 + 可能的约谈信草稿
@@ -613,6 +659,14 @@ export function advanceDay(world) {
     !!(sackedResult && sackedResult.sacked) ||
     !!(finishResult && finishResult.sacked) ||
     !!world.sacked;
+
+  // 解雇/待业：生成工作邀请（保留存档可再就业）
+  if (sacked && world.sacked) {
+    ensureManagerJob(world);
+    if (world.managerJob.status !== "unemployed" || !pendingJobOffers(world).length) {
+      enterUnemployment(world, world.sackedReason || "被董事会解雇", { fromSack: true });
+    }
+  }
   // 标注事件发生日，便于多日推进后的摘要按时间排列
   for (const ev of events) {
     if (ev.day == null) ev.day = world.day;
@@ -896,10 +950,16 @@ export function startNextSeason(world) {
   processTransferWindowDay(world);
   ensurePoachBids(world);
   world.poachBids = [];
+  processStaffContractsEndOfSeason(world);
+  ensureStaffApproaches(world);
+  world.staffApproaches = (world.staffApproaches || []).filter((a) => a.status === "pending");
 
   for (const c of world.clubs) {
     world.table[c.id] = { played: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
     if (!c.division) c.division = 3;
+    if (c.finance && typeof c.finance === "object") {
+      c.finance.seasonTicketIncome = 0;
+    }
     for (const p of c.players) {
       ensureContract(p);
       ensureDiscipline(p);
@@ -1708,31 +1768,41 @@ export function getStatLeaders(world, division = null) {
   return { goals, assists, keepers, ratings };
 }
 
-export function refreshStaffMarket(world) {
-  world.staffMarket = generateStaffMarket(12);
-  return world.staffMarket;
+export function refreshStaffMarketForUser(world) {
+  return refreshStaffMarket(world, 12);
 }
 
 export function hireStaffForUser(world, candidateId) {
   const user = getUserClub(world);
   ensureStaff(user);
-  if (!Array.isArray(world.staffMarket)) refreshStaffMarket(world);
-  const cand = world.staffMarket.find((s) => s.id === candidateId);
-  if (!cand) return { ok: false, msg: "候选人不存在，请刷新市场" };
-  const fee = Math.round(cand.rating * cand.rating * 8000);
-  const res = hireStaff(world, user, cand, fee);
+  ensureWorldStaff(world);
+  const cand = (world.staffMarket || []).find((s) => s.id === candidateId);
+  if (!cand) return { ok: false, msg: "自由身候选人不存在，请刷新市场" };
+  const res = hireStaff(world, user, cand);
   if (res.ok) {
     world.news.unshift({
       day: world.day,
-      text: `👔 职员：聘请 ${cand.name} 担任${ROLES[cand.role].label}（${cand.rating}），签约费 ${formatMoney(fee)}`,
+      text: `👔 职员：${res.msg}`,
     });
   }
   return res;
 }
 
+/** 接触他队在职职员或（备用）自由身 */
+export function approachStaffForUser(world, staffId, fromClubId = null) {
+  const user = getUserClub(world);
+  if (!user) return { ok: false, msg: "无俱乐部" };
+  const res = approachStaff(world, user.id, staffId, fromClubId);
+  return res;
+}
+
+export function respondStaffApproachForUser(world, approachId, accept) {
+  return resolveStaffApproach(world, approachId, accept);
+}
+
 export function fireStaffForUser(world, role) {
   const user = getUserClub(world);
-  const res = fireStaff(user, role);
+  const res = fireStaff(world, user, role);
   if (res.ok) {
     world.news.unshift({
       day: world.day,
@@ -1742,7 +1812,22 @@ export function fireStaffForUser(world, role) {
   return res;
 }
 
-export { ensureStaff, ROLES, ensureIntl, ensureHonors };
+export {
+  ensureStaff,
+  ensureWorldStaff,
+  ROLES,
+  ensureIntl,
+  ensureHonors,
+  listApproachableStaff,
+  pendingStaffApproaches,
+  staffCompensationFee,
+  staffSigningFee,
+  approachStaff,
+  staffTargetRating,
+  processStaffMarketDay,
+  processStaffContractsEndOfSeason,
+  refreshStaffMarket,
+};
 
 /** 球探模糊估值区间（对方球员） */
 export function scoutValueRange(world, player) {

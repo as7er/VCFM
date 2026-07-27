@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=157" />
+  <link rel="stylesheet" href="css/style.css?v=160" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -332,13 +332,14 @@
           <div class="grid-2">
             <div class="card span-2">
               <h2 data-i18n="staff.title">教练团队</h2>
-              <p class="hint" data-i18n="staff.hint">教练强化比赛与成长 · 球探优化转会与青训 · 队医降低伤病、加速恢复。周薪计入工资单。</p>
+              <p class="hint" data-i18n="staff.hint">职员有合同年限；解约进自由市场。窗内可接触他队在职职员（付补偿金），窗外仅自由身或合同将尽者。</p>
+              <div id="staff-approaches" class="staff-approaches hidden"></div>
               <div id="staff-current" class="staff-grid"></div>
             </div>
             <div class="card span-2">
               <div class="row-between">
-                <h2 data-i18n="staff.market">职员市场</h2>
-                <button id="btn-refresh-staff" class="btn small" data-i18n="staff.refresh">刷新候选人</button>
+                <h2 data-i18n="staff.market">自由身市场</h2>
+                <button id="btn-refresh-staff" class="btn small" data-i18n="staff.refresh">补充候选人</button>
               </div>
               <div class="table-wrap">
                 <table id="staff-market-table">
@@ -350,6 +351,26 @@
                       <th data-i18n="th.age">年龄</th>
                       <th data-i18n="th.wage">周薪</th>
                       <th data-i18n="th.fee">签约费</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card span-2">
+              <h2 data-i18n="staff.employed">接触在职职员</h2>
+              <p class="hint" data-i18n="staff.employedHint">向其他俱乐部提出接触；成功需支付解约/培养补偿，对方可能拒绝。</p>
+              <div class="table-wrap">
+                <table id="staff-approach-table">
+                  <thead>
+                    <tr>
+                      <th data-i18n="th.name">姓名</th>
+                      <th data-i18n="th.role">职位</th>
+                      <th data-i18n="th.club">俱乐部</th>
+                      <th data-i18n="th.ovr">能力</th>
+                      <th data-i18n="th.contract">合同</th>
+                      <th data-i18n="staff.compensation">补偿金</th>
                       <th></th>
                     </tr>
                   </thead>
@@ -1141,12 +1162,12 @@
     <div id="season-summary" class="season-summary hidden" role="dialog" aria-modal="true"></div>
   </div>
 
-  <script type="module" src="js/main.js?v=157"></script>
+  <script type="module" src="js/main.js?v=160"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v157";
+        var CURRENT_CACHE = "vcfm-v160";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1156,7 +1177,7 @@
             );
           }).catch(function () {});
         }
-        navigator.serviceWorker.register("./sw.js?v=157").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=160").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1165,8 +1186,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v157")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v157", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v160")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v160", "1");
               location.reload();
             }
           } catch (e) {

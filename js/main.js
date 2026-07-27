@@ -29,8 +29,8 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=157";
-import { nationFlagHtml } from "./flags.js?v=157";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=160";
+import { nationFlagHtml } from "./flags.js?v=160";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -157,10 +157,17 @@ import {
   FACILITY_LABELS,
   startNextSeason,
   ensureStaff,
+  ensureWorldStaff,
   ROLES,
   refreshStaffMarket,
   hireStaffForUser,
   fireStaffForUser,
+  approachStaffForUser,
+  respondStaffApproachForUser,
+  listApproachableStaff,
+  pendingStaffApproaches,
+  staffCompensationFee,
+  staffSigningFee,
   ensureIntl,
   ensureHonors,
   scoutValueRange,
@@ -179,6 +186,14 @@ import {
   processTransferWindowDay,
   ensureManagerCareer,
   managerWinRate,
+  ensureManagerJob,
+  enterUnemployment,
+  resignManagership,
+  acceptJobOffer,
+  rejectJobOffer,
+  pendingJobOffers,
+  generateJobOffers,
+  managerReputation,
   ensureClubHonors,
   acceptPoachBid,
   rejectPoachBid,
@@ -261,7 +276,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=157";
+} from "./avatar.js?v=160";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -291,28 +306,46 @@ if (typeof document !== "undefined" && typeof MutationObserver === "function") {
   }
 }
 
-/** 解雇后回菜单：优先提示换空槽开新档，避免误覆盖 */
+/** 解雇/离职后：进入待业并展示工作邀请（可再就业，不必强制新开档） */
 function handleSacked(result) {
   if (!result || !result.sacked) return false;
-  autosave("sacked");
-  const slot = getActiveSlot();
-  const slots = listSlots();
-  const empty = slots.find((s) => s.empty);
-  let pick = empty?.slot;
-  if (pick) {
-    setActiveSlot(pick);
+  if (!world) return false;
+  try {
+    ensureManagerJob(world);
+    if (world.managerJob.status !== "unemployed" || !pendingJobOffers(world).length) {
+      enterUnemployment(world, result.msg || world.sackedReason || "被董事会解雇", {
+        fromSack: true,
+      });
+    }
+  } catch (err) {
+    console.warn(err);
   }
-  const reason = result.msg || result.sackedResult?.msg || world?.sackedReason || "你已被董事会解雇。";
-  const tip = pick
-    ? `\n\n已自动选中空槽 ${pick} 方便开新档。\n解雇存档仍在槽 ${slot}（可读取回顾）。`
-    : `\n\n三个槽都有存档。开新档会覆盖「当前槽」——建议先选一个不心疼的槽，或先导出备份。\n解雇记录在槽 ${slot}。`;
-  alert(reason + tip);
-  showScreen("start");
-  refreshSlotUI();
-  $("#start-hint").textContent = pick
-    ? `已被解雇。新档将写入槽 ${pick}；槽 ${slot} 保留解雇存档。`
-    : `已被解雇（槽 ${slot}）。请选择要覆盖的槽后开新赛季，或先导出。`;
-  world = null;
+  autosave("sacked");
+  const reason =
+    result.msg || result.sackedResult?.msg || world?.sackedReason || "你已被董事会解雇。";
+  const offers = pendingJobOffers(world) || [];
+  const offerLines = offers
+    .slice(0, 4)
+    .map(
+      (o, i) =>
+        `${i + 1}. ${o.clubName}（${o.divName || ""}）· 周薪约 ${formatMoney(o.wage)}`
+    )
+    .join("\n");
+  alert(
+    `${reason}\n\n你已进入经理市场（待业）。可在「生涯」页查看并接受工作邀请，或回开始菜单开新档。\n\n当前邀请：\n${
+      offerLines || "（正在匹配俱乐部…可推进日程等待新邀请）"
+    }`
+  );
+  // 留在主界面生涯页，便于接受邀请；不再清空 world
+  showScreen("main");
+  enterMain();
+  try {
+    document.querySelector('[data-tab="career"]')?.click();
+  } catch (_) {
+    /* ignore */
+  }
+  renderCareerJobs();
+  toast(getLang() === "en" ? "Unemployed — check Career for job offers" : "已待业 — 请到生涯页查看工作邀请");
   return true;
 }
 
@@ -912,6 +945,16 @@ function migrateWorld(w) {
   if (!w.retiredPlayers) w.retiredPlayers = [];
   ensureMedia(w);
   if (!Array.isArray(w.staffMarket)) refreshStaffMarket(w);
+  try {
+    ensureWorldStaff(w);
+  } catch (_) {
+    /* older engine builds */
+  }
+  try {
+    ensureManagerJob(w);
+  } catch (_) {
+    /* ignore */
+  }
   ensureBoardObjective(w);
   ensureTransferWindow(w);
   ensureManagerCareer(w);
@@ -1289,7 +1332,10 @@ function bindMainOnce() {
     if (staffLink) {
       e.preventDefault();
       e.stopPropagation();
-      showStaffModal(staffLink.dataset.staffLink);
+      showStaffModal(staffLink.dataset.staffLink, {
+        clubId: staffLink.dataset.staffClub || null,
+        returnClubId: staffLink.dataset.staffReturnClub || null,
+      });
       return;
     }
     // 任意界面：点击球员名打开资料
@@ -2390,35 +2436,106 @@ function renderTrainingPrep(club, en) {
 function renderStaff() {
   const club = getUserClub(world);
   const en = getLang() === "en";
+  if (!club) return;
   ensureStaff(club);
-  if (!Array.isArray(world.staffMarket)) refreshStaffMarket(world);
+  try {
+    ensureWorldStaff(world);
+  } catch (_) {
+    if (!Array.isArray(world.staffMarket)) refreshStaffMarket(world);
+  }
+
+  const roles = ["coach", "scout", "doctor"];
+  const roleCopy = {
+    coach: ["Head coach", "Improves match support, development and training plans"],
+    scout: ["Scout", "Improves scouting knowledge and reports"],
+    doctor: ["Doctor", "Reduces injury risk and recovery time"],
+  };
+
+  // 待处理：别人挖本队职员
+  const approachBox = $("#staff-approaches");
+  if (approachBox) {
+    let pending = [];
+    try {
+      pending = pendingStaffApproaches(world) || [];
+    } catch (_) {
+      pending = [];
+    }
+    if (pending.length) {
+      approachBox.classList.remove("hidden");
+      approachBox.innerHTML = `<h3 style="margin:0 0 0.45rem;font-size:0.95rem">${en ? "Incoming approaches" : "收到的接触"}</h3>
+        ${pending
+          .map((a) => {
+            const roleLabel = en ? roleCopy[a.role]?.[0] || a.role : ROLES[a.role]?.label || a.role;
+            return `<div class="staff-approach-banner">
+              <div>
+                <strong>${escapeHtml(a.buyerName || "—")}</strong>
+                ${en ? "want" : "求购"}
+                <strong>${escapeHtml(roleLabel)} ${escapeHtml(a.staffName || "")}</strong>
+                · ${en ? "Compensation" : "补偿"} ${formatMoney(a.compensation || 0)}
+                · ${en ? "Offer wage" : "新周薪"} ${formatMoney(a.wageOffer || 0)}
+                · D${a.expiresDay}
+              </div>
+              <div class="staff-card-actions">
+                <button class="btn small primary" data-staff-accept="${escapeHtml(a.id)}">${en ? "Accept" : "接受"}</button>
+                <button class="btn small" data-staff-reject="${escapeHtml(a.id)}">${en ? "Reject" : "拒绝"}</button>
+              </div>
+            </div>`;
+          })
+          .join("")}`;
+      approachBox.querySelectorAll("[data-staff-accept]").forEach((btn) => {
+        btn.onclick = () => {
+          const res = respondStaffApproachForUser(world, btn.dataset.staffAccept, true);
+          toast(res.msg || (res.ok ? (en ? "Deal done" : "已成交") : (en ? "Failed" : "失败")));
+          if (res.ok) {
+            saveGame(world);
+            refreshAll();
+          }
+        };
+      });
+      approachBox.querySelectorAll("[data-staff-reject]").forEach((btn) => {
+        btn.onclick = () => {
+          const res = respondStaffApproachForUser(world, btn.dataset.staffReject, false);
+          toast(res.msg || (en ? "Rejected" : "已拒绝"));
+          if (res.ok) {
+            saveGame(world);
+            refreshAll();
+          }
+        };
+      });
+    } else {
+      approachBox.classList.add("hidden");
+      approachBox.innerHTML = "";
+    }
+  }
 
   const box = $("#staff-current");
   if (!box) return;
 
-  const roles = ["coach", "scout", "doctor"];
-  const roleCopy = {
-    coach: ["Coach", "Improves player development and training"],
-    scout: ["Scout", "Improves scouting knowledge and reports"],
-    doctor: ["Doctor", "Reduces injury risk and recovery time"],
-  };
   box.innerHTML = roles
     .map((role) => {
       const s = club.staff[role];
       const meta = ROLES[role];
+      const years = s.contractYears != null ? s.contractYears : "—";
+      let comp = 0;
+      try {
+        comp = staffCompensationFee(s);
+      } catch (_) {
+        comp = (s.wage || 0) * 4;
+      }
       return `<div class="staff-card">
         <div class="staff-card-head">
           ${staffAvatarHtml(s, 52)}
           <div>
             <div class="role">${en ? roleCopy[role]?.[0] || role : meta.label}</div>
-            <h3 style="margin:0.15rem 0">${staffLinkHtml(s)}</h3>
+            <h3 style="margin:0.15rem 0">${staffLinkHtml(s, club.id)}</h3>
           </div>
         </div>
         <div class="meta">${en ? "Ability" : "能力"} <strong class="${ovrClass(s.rating)}">${s.rating}</strong> · ${en ? `Age ${s.age}` : `${s.age} 岁`}</div>
-        <div class="meta">${en ? "Wage" : "周薪"} ${formatMoney(s.wage)}</div>
+        <div class="meta">${en ? "Wage" : "周薪"} ${formatMoney(s.wage)} · ${en ? "Contract" : "合同"} ${years}${en ? "y" : " 年"}</div>
+        <div class="meta muted">${en ? "Release cost ~" : "解约约 "}${formatMoney(comp)}</div>
         <p class="hint" style="margin:0.4rem 0">${en ? roleCopy[role]?.[1] || "" : meta.effect}</p>
         <div class="staff-card-actions">
-          <button class="btn small" data-staff-link="${escapeHtml(s.id)}">${en ? "Profile" : "资料"}</button>
+          <button class="btn small" data-staff-link="${escapeHtml(s.id)}" data-staff-club="${escapeHtml(club.id)}">${en ? "Profile" : "资料"}</button>
           <button class="btn small danger" data-fire="${role}">${en ? "Release" : "解约"}</button>
         </div>
       </div>`;
@@ -2427,7 +2544,15 @@ function renderStaff() {
 
   box.querySelectorAll("[data-fire]").forEach((btn) => {
     btn.onclick = () => {
-      if (!confirm(en ? "Release this staff member? Compensation is about four weeks of wages." : "解约需支付约 4 周薪水作为补偿，确认？")) return;
+      if (
+        !confirm(
+          en
+            ? "Release this staff member? They become a free agent; you pay compensation and get a caretaker."
+            : "解约后对方成为自由身进入市场，需支付补偿并上临时工，确认？"
+        )
+      ) {
+        return;
+      }
       const res = fireStaffForUser(world, btn.dataset.fire);
       toast(res.msg);
       if (res.ok) {
@@ -2437,45 +2562,141 @@ function renderStaff() {
     };
   });
 
+  // 自由身市场
   const tbody = $("#staff-market-table tbody");
-  tbody.innerHTML = world.staffMarket
-    .map((s) => {
-      const fee = Math.round(s.rating * s.rating * 8000);
-      return `<tr>
-        <td class="avatar-cell">${staffAvatarHtml(s, 32)} ${staffLinkHtml(s)}</td>
-        <td>${en ? roleCopy[s.role]?.[0] || s.role : ROLES[s.role]?.label || s.role}</td>
-        <td class="${ovrClass(s.rating)}"><strong>${s.rating}</strong></td>
-        <td>${s.age}</td>
-        <td>${formatMoney(s.wage)}</td>
-        <td>${formatMoney(fee)}</td>
-        <td><button class="btn small primary" data-hire="${s.id}">${en ? "Hire" : "聘请"}</button></td>
-      </tr>`;
-    })
-    .join("");
+  if (tbody) {
+    const free = (world.staffMarket || []).filter((s) => s && s.clubId == null);
+    tbody.innerHTML = free.length
+      ? free
+          .map((s) => {
+            let fee = Math.round(s.rating * s.rating * 4000);
+            try {
+              fee = staffSigningFee(s);
+            } catch (_) {}
+            return `<tr>
+              <td class="avatar-cell">${staffAvatarHtml(s, 32)} ${staffLinkHtml(s)}</td>
+              <td>${en ? roleCopy[s.role]?.[0] || s.role : ROLES[s.role]?.label || s.role}</td>
+              <td class="${ovrClass(s.rating)}"><strong>${s.rating}</strong></td>
+              <td>${s.age}</td>
+              <td>${formatMoney(s.wage)}</td>
+              <td>${formatMoney(fee)}</td>
+              <td><button class="btn small primary" data-hire="${s.id}">${en ? "Sign" : "签约"}</button></td>
+            </tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="7" class="muted">${en ? "No free agents — refresh or wait for releases." : "暂无自由身，可补充候选人或等待解约/到期。"}</td></tr>`;
 
-  tbody.querySelectorAll("[data-hire]").forEach((btn) => {
-    btn.onclick = () => {
-      const res = hireStaffForUser(world, btn.dataset.hire);
-      toast(res.msg);
-      if (res.ok) {
-        saveGame(world);
-        refreshAll();
-      }
-    };
-  });
+    tbody.querySelectorAll("[data-hire]").forEach((btn) => {
+      btn.onclick = () => {
+        const res = hireStaffForUser(world, btn.dataset.hire);
+        toast(res.msg);
+        if (res.ok) {
+          saveGame(world);
+          refreshAll();
+        }
+      };
+    });
+  }
+
+  // 在职可挖
+  const empBody = $("#staff-approach-table tbody");
+  if (empBody) {
+    let list = [];
+    try {
+      list = (listApproachableStaff(world, club) || []).filter((row) => !row.freeAgent).slice(0, 40);
+    } catch (_) {
+      list = [];
+    }
+    const windowOpen = typeof isTransferWindowOpen === "function" ? isTransferWindowOpen(world) : true;
+    empBody.innerHTML = list.length
+      ? list
+          .map((row) => {
+            const s = row.staff;
+            const from = row.fromClub;
+            const years = s.contractYears != null ? s.contractYears : "—";
+            return `<tr>
+              <td class="avatar-cell">${staffAvatarHtml(s, 28)} ${staffLinkHtml(s, from?.id, from?.id)}</td>
+              <td>${en ? roleCopy[s.role]?.[0] || s.role : ROLES[s.role]?.label || s.role}</td>
+              <td>${from ? clubLinkHtml(from.id, clubDisplayShortName(from)) : "—"}</td>
+              <td class="${ovrClass(s.rating)}"><strong>${s.rating}</strong></td>
+              <td>${years}${en ? "y" : "年"}</td>
+              <td>${formatMoney(row.compensation || 0)}</td>
+              <td><button class="btn small primary" data-approach="${s.id}" data-from="${from?.id || ""}">${en ? "Approach" : "接触"}</button></td>
+            </tr>`;
+          })
+          .join("")
+      : `<tr><td colspan="7" class="muted">${
+          windowOpen
+            ? en
+              ? "No approachable staff right now."
+              : "当前没有可接触的在职职员。"
+            : en
+              ? "Window closed — only free agents or staff with ≤1 year left."
+              : "转会窗外：仅自由身或合同剩余 ≤1 年的在职职员可接触。"
+        }</td></tr>`;
+
+    empBody.querySelectorAll("[data-approach]").forEach((btn) => {
+      btn.onclick = () => {
+        const fromId = btn.dataset.from || null;
+        const res = approachStaffForUser(world, btn.dataset.approach, fromId);
+        toast(res.msg || (res.ok ? (en ? "Done" : "完成") : en ? "Failed" : "失败"));
+        if (res.ok) {
+          saveGame(world);
+          refreshAll();
+        }
+      };
+    });
+  }
 }
 
-function staffLinkHtml(staff) {
+function staffLinkHtml(staff, clubId = null, returnClubId = null) {
   if (!staff?.id) return escapeHtml(staff?.name || "—");
-  return `<button type="button" class="staff-link" data-staff-link="${escapeHtml(staff.id)}">${escapeHtml(staff.name || "—")}</button>`;
+  const clubAttr = clubId ? ` data-staff-club="${escapeHtml(clubId)}"` : "";
+  const returnAttr = returnClubId ? ` data-staff-return-club="${escapeHtml(returnClubId)}"` : "";
+  return `<button type="button" class="staff-link" data-staff-link="${escapeHtml(staff.id)}"${clubAttr}${returnAttr}>${escapeHtml(staff.name || "—")}</button>`;
 }
 
-function findStaffById(staffId) {
-  const club = getUserClub(world);
-  const current = Object.values(club?.staff || {}).find((staff) => staff?.id === staffId);
-  if (current) return { staff: current, current: true };
-  const candidate = (world.staffMarket || []).find((staff) => staff?.id === staffId);
-  return candidate ? { staff: candidate, current: false } : null;
+/**
+ * 在本队职员、全球俱乐部职员与职员市场中查找。
+ * @returns {{ staff: object, club: object|null, source: "user"|"opponent"|"market", current: boolean }|null}
+ */
+function findStaffById(staffId, preferredClubId = null) {
+  if (!staffId || !world) return null;
+  const pack = (staff, club, source) => ({
+    staff,
+    club: club || null,
+    source,
+    current: source === "user",
+  });
+
+  if (preferredClubId) {
+    const preferred = world.clubs?.find((c) => c.id === preferredClubId);
+    if (preferred) {
+      ensureStaff(preferred);
+      const hit = Object.values(preferred.staff || {}).find((s) => s?.id === staffId);
+      if (hit) {
+        return pack(hit, preferred, preferred.id === world.userClubId ? "user" : "opponent");
+      }
+    }
+  }
+
+  const userClub = getUserClub(world);
+  if (userClub) {
+    ensureStaff(userClub);
+    const mine = Object.values(userClub.staff || {}).find((s) => s?.id === staffId);
+    if (mine) return pack(mine, userClub, "user");
+  }
+
+  for (const club of world.clubs || []) {
+    if (club.id === userClub?.id) continue;
+    ensureStaff(club);
+    const hit = Object.values(club.staff || {}).find((s) => s?.id === staffId);
+    if (hit) return pack(hit, club, "opponent");
+  }
+
+  const candidate = (world.staffMarket || []).find((s) => s?.id === staffId);
+  if (candidate) return pack(candidate, null, "market");
+  return null;
 }
 
 function staffImpactLines(staff, en) {
@@ -2505,40 +2726,107 @@ function staffImpactLines(staff, en) {
   ];
 }
 
-function showStaffModal(staffId) {
-  const found = findStaffById(staffId);
+function staffRoleLabel(role, en) {
+  if (en) {
+    if (role === "coach") return "Head coach";
+    if (role === "scout") return "Scout";
+    if (role === "doctor") return "Doctor";
+    return role || "—";
+  }
+  if (role === "coach") return "主教练";
+  return ROLES[role]?.label || role || "—";
+}
+
+function showStaffModal(staffId, context = {}) {
+  const found = findStaffById(staffId, context.clubId || null);
   if (!found) return;
   activePlayerBrowseContext = null;
-  const { staff, current } = found;
+  const { staff, club, source, current } = found;
   const en = getLang() === "en";
   const meta = ROLES[staff.role] || {};
   const roleCopy = {
-    coach: ["Coach", "Leads first-team coaching and supports the manager's training programme."],
-    scout: ["Scout", "Assesses recruitment targets, supports negotiations and improves youth intake knowledge."],
-    doctor: ["Doctor", "Manages injury prevention, rehabilitation and daily player recovery."],
+    coach: [
+      "Head coach",
+      "Leads first-team coaching and supports the manager's training programme.",
+    ],
+    scout: [
+      "Scout",
+      "Assesses recruitment targets, supports negotiations and improves youth intake knowledge.",
+    ],
+    doctor: [
+      "Doctor",
+      "Manages injury prevention, rehabilitation and daily player recovery.",
+    ],
   };
   const lines = staffImpactLines(staff, en);
   const fee = Math.round(Number(staff.rating || 0) ** 2 * 8000);
+  const statusBadge =
+    source === "user"
+      ? en
+        ? "Your staff"
+        : "本队职员"
+      : source === "opponent"
+        ? en
+          ? "Club staff"
+          : "俱乐部职员"
+        : en
+          ? "Available candidate"
+          : "市场候选人";
+  const clubLine = club
+    ? `${en ? "Club" : "所属"} ${clubLinkHtml(club.id, clubDisplayName(club))}`
+    : "";
+  const returnClubId = context.returnClubId || (source !== "market" ? club?.id : null) || null;
+
   $("#modal-card")?.classList.remove("wide", "search-modal");
   $("#modal-body").innerHTML = `
+    ${
+      returnClubId
+        ? `<div class="staff-profile-nav">
+            <button type="button" class="btn small" data-return-club="${escapeHtml(returnClubId)}">${en ? "← Back to club" : "← 返回俱乐部"}</button>
+          </div>`
+        : ""
+    }
     <div class="staff-profile-head">
       ${staffAvatarHtml(staff, 76)}
       <div>
-        <div class="role">${escapeHtml(en ? roleCopy[staff.role]?.[0] || staff.role : meta.label || staff.role)}</div>
+        <div class="role">${escapeHtml(en ? roleCopy[staff.role]?.[0] || staff.role : staffRoleLabel(staff.role, false))}</div>
         <h2>${escapeHtml(staff.name)}</h2>
-        <p class="muted">${en ? `Age ${staff.age}` : `${staff.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${ovrClass(staff.rating)}">${staff.rating}</strong> / 20</p>
+        <p class="muted">${en ? `Age ${staff.age}` : `${staff.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${ovrClass(staff.rating)}">${staff.rating}</strong> / 20${
+          staff.contractYears != null && staff.clubId
+            ? ` · ${en ? "Contract" : "合同"} ${staff.contractYears}${en ? "y" : " 年"}`
+            : staff.clubId == null
+              ? ` · ${en ? "Free agent" : "自由身"}`
+              : ""
+        }</p>
+        ${clubLine ? `<p class="muted" style="margin:0.2rem 0 0">${clubLine}</p>` : ""}
       </div>
     </div>
     <div class="staff-profile-status">
-      <span class="badge ${current ? "DEF" : "MID"}">${escapeHtml(current ? (en ? "Current staff" : "现任职员") : (en ? "Available candidate" : "市场候选人"))}</span>
+      <span class="badge ${current ? "DEF" : source === "opponent" ? "MID" : "ATT"}">${escapeHtml(statusBadge)}</span>
       <span>${en ? "Weekly wage" : "周薪"} <strong>${formatMoney(staff.wage)}</strong></span>
-      ${current ? "" : `<span>${en ? "Signing fee" : "签约费"} <strong>${formatMoney(fee)}</strong></span>`}
+      ${source === "market" ? `<span>${en ? "Signing fee" : "签约费"} <strong>${formatMoney(fee)}</strong></span>` : ""}
     </div>
     <p>${escapeHtml(en ? roleCopy[staff.role]?.[1] || "" : meta.desc || "")}</p>
     <h3 class="staff-profile-subtitle">${en ? "Current impact" : "当前能力影响"}</h3>
     <div class="staff-impact-list">${lines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>
-    <p class="hint">${escapeHtml(en ? "Effects use the same staff rating that drives matches, transfers, youth development and recovery; there is no separate hidden profile rating." : "资料展示与比赛、转会、青训和恢复实际使用同一职员能力，不存在独立隐藏评分。")}</p>
+    <p class="hint">${escapeHtml(
+      en
+        ? "Effects use the same staff rating that drives matches, transfers, youth development and recovery; there is no separate hidden profile rating."
+        : "资料展示与比赛、转会、青训和恢复实际使用同一职员能力，不存在独立隐藏评分。"
+    )}</p>
+    ${
+      source === "user"
+        ? `<p class="hint">${escapeHtml(en ? "Release or replace staff on the Staff tab." : "解约或改聘请到「职员」页操作。")}</p>`
+        : source === "opponent"
+          ? `<p class="hint">${escapeHtml(en ? "Opponent staff is read-only." : "对方职员仅供查阅，无法操作。")}</p>`
+          : ""
+    }
   `;
+  $("#modal-body")
+    .querySelector("[data-return-club]")
+    ?.addEventListener("click", () => {
+      showClubModal(returnClubId);
+    });
   $("#modal").classList.remove("hidden");
   $("#modal-card").scrollTop = 0;
 }
@@ -2803,8 +3091,21 @@ function renderDashboard() {
   const fin = financeSnapshot(world);
   const finEl = $("#dash-finance");
   if (finEl && fin) {
+    const ticketLine =
+      fin.lastTicket != null
+        ? en
+          ? `Last home gate <strong>${formatMoney(fin.lastTicket)}</strong>${fin.lastTicketDay != null ? ` (D${fin.lastTicketDay})` : ""}`
+          : `最近主场门票 <strong>${formatMoney(fin.lastTicket)}</strong>${fin.lastTicketDay != null ? `（D${fin.lastTicketDay}）` : ""}`
+        : en
+          ? `Est. home gate ~${formatMoney(fin.estTicket || 0)} / match`
+          : `预估主场门票约 ${formatMoney(fin.estTicket || 0)}/场`;
+    const seasonGate = en
+      ? `Season tickets <strong>${formatMoney(fin.seasonTickets || 0)}</strong>`
+      : `本季门票累计 <strong>${formatMoney(fin.seasonTickets || 0)}</strong>`;
     finEl.innerHTML = `
       <div>${en ? "Balance" : "余额"} <strong>${formatMoney(fin.money)}</strong></div>
+      <div class="muted">🎟️ ${ticketLine}</div>
+      <div class="muted">🎟️ ${seasonGate}${fin.capacity ? ` · ${en ? "Cap." : "容量"} ${Number(fin.capacity).toLocaleString()}` : ""}</div>
       <div class="muted">${en ? "Weekly out" : "周支出"} ${formatMoney(fin.weekly)}
         （${en ? "wages" : "薪资"} ${formatMoney(fin.squadWage + fin.youthWage + fin.staffWage)}
         + ${en ? "facilities" : "设施"} ${formatMoney(fin.upkeep)}）</div>
@@ -3631,7 +3932,7 @@ function renderFacilities() {
   if (hint) {
     hint.textContent = en
       ? `Stadium Lv.${club.facilities.stadium} · Training Lv.${club.facilities.training} · Youth Lv.${club.facilities.youth} · Home matches generate gate income; training level affects development and injuries.`
-      : facilitySummaryLine(club) + " · 主场比赛自动收门票；训练等级影响日常训练与伤病。";
+      : facilitySummaryLine(club) + " · 主场比赛自动计入门票收入（概览财政可见累计）；训练等级影响日常训练与伤病。";
   }
 }
 
@@ -4683,7 +4984,9 @@ function showClubModal(clubId) {
 
   ensureKit(club);
   ensureClubHonors(club);
+  ensureStaff(club);
   const me = club.id === world.userClubId;
+  const en = getLang() === "en";
   const div = club.division || 3;
   const divName = t("div." + div) || DIVISIONS[div]?.name || "";
   const table = getSortedTable(world, div);
@@ -4705,6 +5008,31 @@ function showClubModal(clubId) {
   const formation = club.tactics?.formation || "4-3-3";
   const styleKey = club.tactics?.style || "balanced";
   const styleLabel = t("style." + styleKey) || styleKey;
+  const staffRoles = ["coach", "scout", "doctor"];
+  const staffCardsHtml = staffRoles
+    .map((role) => {
+      const s = club.staff?.[role];
+      if (!s) return "";
+      const isHead = role === "coach";
+      const years = s.contractYears != null ? s.contractYears : "—";
+      return `<article class="club-staff-card ${isHead ? "is-head" : ""}">
+        <div class="club-staff-card-main">
+          ${staffAvatarHtml(s, isHead ? 48 : 40)}
+          <div>
+            <div class="role">${escapeHtml(staffRoleLabel(role, en))}</div>
+            <strong class="name">${staffLinkHtml(s, club.id, club.id)}</strong>
+            <div class="meta">
+              ${en ? "Ability" : "能力"} <strong class="${ovrClass(s.rating)}">${s.rating}</strong>
+              · ${en ? `Age ${s.age}` : `${s.age} 岁`}
+              · ${en ? "Wage" : "周薪"} ${formatMoney(s.wage)}
+              · ${en ? "Contract" : "合同"} ${years}${en ? "y" : "年"}
+            </div>
+          </div>
+        </div>
+        <button type="button" class="btn small" data-staff-link="${escapeHtml(s.id)}" data-staff-club="${escapeHtml(club.id)}" data-staff-return-club="${escapeHtml(club.id)}">${en ? "Profile" : "资料"}</button>
+      </article>`;
+    })
+    .join("");
 
   const fixtures = (world.fixtures || [])
     .filter((f) => f.home === club.id || f.away === club.id)
@@ -4781,6 +5109,16 @@ function showClubModal(clubId) {
         <div style="margin-top:0.4rem">${formatFormHtml(club.form)} <span class="muted" style="font-size:0.8rem">${escapeHtml(t("clubs.formHint"))}</span></div>
       </div>
     </div>
+
+    <section class="club-staff-section">
+      <div class="row-between" style="align-items:baseline;gap:0.5rem;flex-wrap:wrap">
+        <h3 style="margin:0;font-size:0.95rem">${escapeHtml(t("clubs.staff"))}</h3>
+        <span class="muted" style="font-size:0.8rem">${escapeHtml(me ? t("clubs.staffHintOwn") : t("clubs.staffHintOther"))}</span>
+      </div>
+      <div class="club-staff-grid">
+        ${staffCardsHtml || `<p class="muted" style="margin:0">${escapeHtml(t("clubs.noStaff"))}</p>`}
+      </div>
+    </section>
 
     <div class="club-modal-grid">
       <div>
@@ -5779,6 +6117,23 @@ function showAdvanceSummary(events, days) {
 
 function onAdvance() {
   if (world.sacked) {
+    // 待业：允许推进日程刷工作邀请
+    try {
+      ensureManagerJob(world);
+    } catch (_) {}
+    if (world.managerJob?.status === "unemployed") {
+      const res = advanceDay(world);
+      autosave("unemployed-advance");
+      const n = (res.offers || pendingJobOffers(world) || []).length;
+      toast(
+        getLang() === "en"
+          ? `Day ${world.day} · ${n} job offer(s)`
+          : `第 ${world.day} 天 · ${n} 个工作邀请`
+      );
+      renderCareer();
+      renderDashboard();
+      return;
+    }
     handleSacked({ sacked: true, msg: world.sackedReason || "你已被解雇" });
     return;
   }
@@ -7859,6 +8214,15 @@ function showMatchReport(report, opts = {}) {
     </table>
     ${scorerHtml ? `<div class="report-scorers"><strong>${t("match.scorers")}</strong>${scorerHtml}</div>` : ""}
     ${
+      report.ticketIncome != null
+        ? `<div class="report-tickets">🎟️ ${getLang() === "en" ? "Gate receipts" : "门票收入"} <strong>${formatMoney(report.ticketIncome)}</strong>${
+            report.ticketStadium
+              ? ` <span class="muted">（${escapeHtml(report.ticketStadium)}${report.ticketCapacity ? ` · ${Number(report.ticketCapacity).toLocaleString()}` : ""}）</span>`
+              : ""
+          }</div>`
+        : ""
+    }
+    ${
       matchPlayback.goals.length
         ? `<p class="hint report-replay-hint">${escapeHtml(t("match.replayHint"))}</p>`
         : ""
@@ -8039,14 +8403,37 @@ function localizeMatchEvent(ev) {
   return s;
 }
 
+function renderCareerJobs() {
+  renderCareer();
+}
+
 function renderCareer() {
   const el = $("#career-panel");
   if (!el || !world) return;
   const mc = ensureManagerCareer(world);
   const club = getUserClub(world);
   const en = getLang() === "en";
-  ensureClubHonors(club);
+  if (club) ensureClubHonors(club);
+  try {
+    ensureManagerJob(world);
+  } catch (_) {
+    /* ignore */
+  }
   const wr = managerWinRate(mc);
+  let rep = 40;
+  try {
+    rep = managerReputation(world);
+  } catch (_) {}
+  const job = world.managerJob || {};
+  const unemployed = job.status === "unemployed" || !!world.sacked;
+  const offers = (() => {
+    try {
+      return pendingJobOffers(world) || [];
+    } catch {
+      return [];
+    }
+  })();
+
   const trophies = (mc.trophies || [])
     .slice(0, 12)
     .map(
@@ -8056,7 +8443,7 @@ function renderCareer() {
         }</div>`
     )
     .join("");
-  const clubHonors = (club.honors || [])
+  const clubHonors = ((club && club.honors) || [])
     .slice(0, 12)
     .map(
       (h) =>
@@ -8065,17 +8452,70 @@ function renderCareer() {
         }</div>`
     )
     .join("");
+
+  const offerHtml = offers.length
+    ? `<div class="job-offer-list">${offers
+        .map((o) => {
+          const kindLabel =
+            o.kind === "prestige"
+              ? en
+                ? "Prestige invite"
+                : "名望邀请"
+              : o.kind === "sack_rehire"
+                ? en
+                  ? "After sacking"
+                  : "再就业"
+                : en
+                  ? "Open role"
+                  : "空缺职位";
+          return `<article class="job-offer-card">
+            <div>
+              <div class="muted" style="font-size:0.78rem">${escapeHtml(kindLabel)}</div>
+              <strong>${escapeHtml(o.clubName)}</strong>
+              <div class="muted">${escapeHtml(o.divName || "")} · ${en ? "Power" : "实力"} ${o.power ?? "—"} · ${en ? "Wage" : "周薪"} ${formatMoney(o.wage)}</div>
+              <div class="hint" style="margin:0.25rem 0 0">${escapeHtml(o.note || "")}</div>
+              <div class="muted" style="font-size:0.78rem">D${o.day} → D${o.expiresDay}</div>
+            </div>
+            <div class="staff-card-actions">
+              <button type="button" class="btn small primary" data-job-accept="${escapeHtml(o.id)}">${en ? "Accept" : "接受"}</button>
+              <button type="button" class="btn small" data-job-reject="${escapeHtml(o.id)}">${en ? "Reject" : "拒绝"}</button>
+            </div>
+          </article>`;
+        })
+        .join("")}</div>`
+    : `<p class="muted">${
+        unemployed
+          ? en
+            ? "No offers yet — advance days to refresh the job market."
+            : "暂无邀请 — 可推进日程等待经理市场刷新。"
+          : en
+            ? "No pending invites. Strong form may attract bigger clubs."
+            : "暂无待处理邀请。战绩出色时可能收到更高水平俱乐部邀请。"
+      }</p>`;
+
   el.innerHTML = `
     <div class="grid-2">
       <div class="card">
-        <h2 data-i18n="career.manager">${en ? "Manager career" : "经理生涯"}</h2>
-        <p><strong>${escapeHtml(world.managerName)}</strong> · ${escapeHtml(clubDisplayName(club))}</p>
+        <h2>${en ? "Manager career" : "经理生涯"}</h2>
+        <p><strong>${escapeHtml(world.managerName || "—")}</strong>
+          · ${
+            unemployed
+              ? `<span class="stat-low">${en ? "Unemployed" : "待业中"}</span>`
+              : escapeHtml(club ? clubDisplayName(club) : "—")
+          }
+          · ${en ? "Rep" : "名望"} <strong>${rep}</strong>/100
+        </p>
+        ${
+          unemployed && job.reason
+            ? `<p class="hint">${escapeHtml(job.reason)}</p>`
+            : ""
+        }
         <ul class="career-stats">
           <li>${en ? "Seasons" : "执教赛季"}${en ? ": " : "："}${mc.seasons}</li>
           <li>${en ? "Record" : "战绩"}${en ? ": " : "："}${mc.wins}W ${mc.draws}D ${mc.losses}L${en ? ` (${mc.matches})` : `（${mc.matches}）`} · ${wr}%</li>
           <li>GF/GA${en ? ": " : "："}${mc.goalsFor || 0} / ${mc.goalsAgainst || 0}</li>
           <li>${en ? "Titles / promos / cups" : "冠军 / 升级 / 杯赛"}${en ? ": " : "："}${mc.titles} / ${mc.promotions} / ${mc.cups}</li>
-          <li>${en ? "Sacked" : "被解雇"}${en ? ": " : "："}${mc.sacked}</li>
+          <li>${en ? "Sacked" : "被解雇"}${en ? ": " : "："}${mc.sacked} · ${en ? "Jobs taken" : "上任次数"} ${job.jobsTaken || 0}</li>
           <li>${
             mc.bestFinish
               ? `${en ? "Best" : "最佳"}${en ? ": " : "："}${mc.bestFinish.season} ${escapeHtml(mc.bestFinish.divName)} #${mc.bestFinish.pos}`
@@ -8084,15 +8524,94 @@ function renderCareer() {
                 : "最佳名次：—"
           }</li>
         </ul>
+        <div class="staff-card-actions" style="margin-top:0.75rem">
+          ${
+            !unemployed
+              ? `<button type="button" class="btn small danger" id="btn-resign-job">${en ? "Resign" : "主动请辞"}</button>`
+              : `<button type="button" class="btn small" id="btn-refresh-jobs">${en ? "Seek offers" : "刷新邀请"}</button>
+                 <button type="button" class="btn small" id="btn-job-advance">${en ? "Advance 1 day" : "推进 1 天"}</button>`
+          }
+        </div>
         <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${en ? "Trophy cabinet" : "荣誉柜"}</h3>
         <div class="honor-list">${trophies || `<p class="muted">${en ? "No trophies yet" : "暂无奖杯"}</p>`}</div>
       </div>
       <div class="card">
-        <h2 data-i18n="career.club">${en ? "Club honours" : "俱乐部荣誉墙"}</h2>
-        <div class="honor-list">${clubHonors || `<p class="muted">${en ? "Win a title or earn promotion to fill this wall" : "夺冠或升级后写入此处"}</p>`}</div>
+        <h2>${en ? "Job offers" : "工作邀请"}</h2>
+        <p class="hint">${
+          en
+            ? "After sacking or resigning you can take a new club. Strong form may draw prestige offers while employed."
+            : "解雇或请辞后可接受新东家；在职且战绩出色时也可能收到更高水平俱乐部邀请。"
+        }</p>
+        ${offerHtml}
+        <h3 style="margin:1.1rem 0 0.4rem;font-size:0.95rem">${en ? "Club honours" : "俱乐部荣誉墙"}</h3>
+        <div class="honor-list">${
+          unemployed
+            ? `<p class="muted">${en ? "Not attached to a club" : "当前无执教俱乐部"}</p>`
+            : clubHonors || `<p class="muted">${en ? "Win a title or earn promotion to fill this wall" : "夺冠或升级后写入此处"}</p>`
+        }</div>
       </div>
     </div>
   `;
+
+  el.querySelector("#btn-resign-job")?.addEventListener("click", () => {
+    if (
+      !confirm(
+        en
+          ? "Resign from your current club and enter the job market?"
+          : "确定辞去现任主帅、进入经理市场？"
+      )
+    ) {
+      return;
+    }
+    const res = resignManagership(world);
+    toast(res.msg || (res.ok ? (en ? "Resigned" : "已请辞") : en ? "Failed" : "失败"));
+    if (res.ok) {
+      saveGame(world);
+      renderCareer();
+      renderDashboard?.();
+      refreshAll();
+    }
+  });
+  el.querySelector("#btn-refresh-jobs")?.addEventListener("click", () => {
+    const created = generateJobOffers(world, { force: true, count: 3 });
+    toast(
+      created.length
+        ? en
+          ? `${created.length} new offer(s)`
+          : `新增 ${created.length} 个邀请`
+        : en
+          ? "No new clubs available"
+          : "暂无新俱乐部"
+    );
+    saveGame(world);
+    renderCareer();
+  });
+  el.querySelector("#btn-job-advance")?.addEventListener("click", () => {
+    onAdvance();
+    renderCareer();
+  });
+  el.querySelectorAll("[data-job-accept]").forEach((btn) => {
+    btn.onclick = () => {
+      const res = acceptJobOffer(world, btn.dataset.jobAccept);
+      toast(res.msg || (res.ok ? (en ? "Hired!" : "已上任") : en ? "Failed" : "失败"));
+      if (res.ok) {
+        saveGame(world);
+        enterMain();
+        refreshAll();
+        renderCareer();
+      }
+    };
+  });
+  el.querySelectorAll("[data-job-reject]").forEach((btn) => {
+    btn.onclick = () => {
+      const res = rejectJobOffer(world, btn.dataset.jobReject);
+      toast(res.msg || (en ? "Rejected" : "已拒绝"));
+      if (res.ok) {
+        saveGame(world);
+        renderCareer();
+      }
+    };
+  });
 }
 
 function maybeShowSeasonSummary() {

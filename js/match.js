@@ -2191,6 +2191,9 @@ function buildReport(state) {
       })),
     ratings: state.matchRatings || null,
     narrative,
+    ticketIncome: state.ticketIncome != null ? state.ticketIncome : null,
+    ticketStadium: state.ticketStadium || null,
+    ticketCapacity: state.ticketCapacity || null,
   };
 }
 
@@ -2572,10 +2575,19 @@ export function finalizeMatch(state) {
       });
 
       me.money += income;
+      if (!me.finance || typeof me.finance !== "object") me.finance = {};
+      me.finance.lastTicketIncome = income;
+      me.finance.lastTicketDay = world.day;
+      me.finance.seasonTicketIncome = (Number(me.finance.seasonTicketIncome) || 0) + income;
+      const stInfo = stadiumInfo(me);
       world.news.unshift({
         day: world.day,
-        text: `🏟️ 主场收入 ${formatMoney(income)}（${stadiumInfo(me).name} · 容量约 ${stadiumInfo(me).capacity.toLocaleString()}）`,
+        text: `🎟️ 门票收入 ${formatMoney(income)}（${stInfo.name} · 容量约 ${stInfo.capacity.toLocaleString()} · 本季累计 ${formatMoney(me.finance.seasonTicketIncome)}）`,
       });
+      // 挂到 state 供赛后报告
+      state.ticketIncome = income;
+      state.ticketStadium = stInfo.name;
+      state.ticketCapacity = stInfo.capacity;
     }
     if (isLeague) {
       mediaAfterUserMatch(world, fixture, me, opp, myG, opG);

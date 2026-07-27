@@ -7,7 +7,7 @@ import { pushInbox, ensureInbox } from "./inbox.js";
 import { pushMedia } from "./media.js";
 import { ensureManagerCareer } from "./career.js";
 import { staffWageBill, ensureStaff } from "./staff.js";
-import { facilityWeeklyUpkeep, ensureFacilities } from "./facilities.js";
+import { facilityWeeklyUpkeep, ensureFacilities, stadiumInfo } from "./facilities.js";
 import { userSquadWageBill } from "./loans.js";
 import { isTransferWindowOpen } from "./transfers.js";
 import { DIVISIONS } from "./data.js";
@@ -198,6 +198,13 @@ export function financeSnapshot(world) {
   const weekly = squadWage + youthWage + staffWage + upkeep;
   const money = club.money || 0;
   const weeksCover = weekly > 0 ? Math.floor(money / weekly) : 99;
+  // 门票（主场比赛日收入）：赛后写入 club.finance
+  const fin = club.finance && typeof club.finance === "object" ? club.finance : {};
+  const seasonTickets = Number(fin.seasonTicketIncome) || 0;
+  const lastTicket = fin.lastTicketIncome != null ? Number(fin.lastTicketIncome) : null;
+  const lastTicketDay = fin.lastTicketDay != null ? Number(fin.lastTicketDay) : null;
+  const st = stadiumInfo(club);
+  const estTicket = st?.matchday != null ? Math.round(st.matchday * 0.88) : null;
   return {
     money,
     squadWage,
@@ -209,6 +216,15 @@ export function financeSnapshot(world) {
     windowOpen: isTransferWindowOpen(world),
     warning: weeksCover < 8,
     critical: weeksCover < 4,
+    /** 本赛季累计门票（主场） */
+    seasonTickets,
+    /** 最近一场主场门票 */
+    lastTicket,
+    lastTicketDay,
+    /** 球场铭牌预估单场票房（非实际） */
+    estTicket,
+    stadiumName: st?.name || "",
+    capacity: st?.capacity || 0,
   };
 }
 
