@@ -14,6 +14,7 @@ import {
   ensurePlayerHistory,
   ensureLeagueStats,
   ensureCompetitionStats,
+  pushRecentRating,
   roleDefForPlayer,
   teamRoleMods,
 } from "./models.js";
@@ -2337,7 +2338,10 @@ function applyMatchRatings(state) {
       r += (rng() - 0.5) * 0.45;
       r = clamp(Math.round(r * 10) / 10, 3.0, 10.0);
 
-      // 场均/最近评分只累计联赛；杯赛仅写入本场报告
+      // 滚动状态：联赛/杯赛/洲际凡出场均计入（手感跨赛事）
+      pushRecentRating(p, r);
+
+      // 场均/最近评分只累计联赛；洲际写入 competitionStats；国内杯仅本场报告
       if (!state.isCup) {
         st.ratingSum = (st.ratingSum || 0) + r;
         st.lastRating = r;

@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=156" />
+  <link rel="stylesheet" href="css/style.css?v=157" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -234,7 +234,7 @@
               <span class="muted" id="squad-count"></span>
             </div>
             <p class="hint" style="margin:0.35rem 0 0.65rem" data-i18n="squad.seasonHint">
-              本赛季联赛数据：出场 / 进球（门将为零封）/ 助攻（门将为失球）/ 场均评分 / 最近评分（不含杯赛）
+              本赛季联赛数据：出场 / 进球（门将为零封）/ 助攻（门将为失球）/ 场均 / 最近；状态为近 5 场滚动评分（含杯赛与洲际）
             </p>
             <div class="table-wrap">
               <table id="squad-table">
@@ -251,6 +251,7 @@
                     <th data-i18n="th.assistsGa" data-i18n-title="th.assistsGaTitle">助攻/失球</th>
                     <th data-i18n="th.avgR" title="本赛季场均评分">场均</th>
                     <th data-i18n="th.lastR" title="最近一场评分">最近</th>
+                    <th data-i18n="th.form" title="近 5 场滚动状态">状态</th>
                     <th data-i18n="th.fit">体能</th>
                     <th data-i18n="th.morale">士气</th>
                     <th data-i18n="th.relation">关系</th>
@@ -1140,12 +1141,12 @@
     <div id="season-summary" class="season-summary hidden" role="dialog" aria-modal="true"></div>
   </div>
 
-  <script type="module" src="js/main.js?v=156"></script>
+  <script type="module" src="js/main.js?v=157"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v156";
+        var CURRENT_CACHE = "vcfm-v157";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1155,7 +1156,7 @@
             );
           }).catch(function () {});
         }
-        navigator.serviceWorker.register("./sw.js?v=156").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=157").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1164,8 +1165,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v156")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v156", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v157")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v157", "1");
               location.reload();
             }
           } catch (e) {

@@ -29,8 +29,8 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=156";
-import { nationFlagHtml } from "./flags.js?v=156";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=157";
+import { nationFlagHtml } from "./flags.js?v=157";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -81,6 +81,10 @@ import {
   seasonAvgRating,
   ratingClass,
   formatRating,
+  playerForm,
+  formClass,
+  formatForm,
+  formToneLabel,
   YOUTH_LEVELS,
   YOUTH_UPGRADE_COST,
   ensureKit,
@@ -257,7 +261,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=156";
+} from "./avatar.js?v=157";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -2869,6 +2873,10 @@ function renderSquad() {
         isGk && colA > 0 ? "stat-low" : !isGk && colA > 0 ? "stat-mid" : "";
       const avgR = seasonAvgRating(p);
       const lastR = s.lastRating != null ? s.lastRating : null;
+      const form = playerForm(p);
+      const formTitle = form == null
+        ? (en ? "Form: no recent ratings yet" : "状态：暂无近期评分")
+        : `${en ? "Form" : "状态"} ${formatForm(form)} · ${formToneLabel(form, en ? "en" : "zh")} (${en ? "last" : "近"}${(s.recentRatings || []).length}${en ? " apps" : "场"})`;
       const num = p.number != null ? p.number : "—";
       const statusBadges = [
         xi.has(p.id) ? `<span class="badge">${en ? "XI" : "首发"}</span>` : "",
@@ -2905,6 +2913,7 @@ function renderSquad() {
         <td class="num-stat ${aCls}" title="${escapeHtml(aTitle)}">${colA}</td>
         <td class="num-stat rating-cell ${ratingClass(avgR)}" title="${escapeHtml(t("squad.avgRTitle") || "本赛季场均评分")}">${formatRating(avgR)}</td>
         <td class="num-stat rating-cell ${ratingClass(lastR)}" title="${escapeHtml(t("squad.lastRTitle") || "最近一场评分")}">${formatRating(lastR)}</td>
+        <td class="num-stat rating-cell ${formClass(form)}" title="${escapeHtml(formTitle)}">${formatForm(form)}</td>
         <td>${Math.round(p.fitness ?? 0)}%</td>
         <td>${Math.round(p.morale ?? 0)}</td>
         <td class="rel-cell rel-${relationTone(p.relation)}">${escapeHtml(relationLabel((ensurePlayerRelation(p), p.relation), getLang() === "en" ? "en" : "zh"))}</td>
@@ -2985,6 +2994,8 @@ function showPlayerModal(playerId, context = {}) {
 
   // 分赛季历史 + 当前未归档赛季
   const curAvgR = seasonAvgRating(player);
+  const curForm = playerForm(player);
+  const recentStrip = Array.isArray(season.recentRatings) ? season.recentRatings : [];
   const historyRows = [...(player.history || [])]
     .sort((a, b) => b.season - a.season)
     .map((h) => {
@@ -3103,6 +3114,16 @@ function showPlayerModal(playerId, context = {}) {
         season.lastRating != null
           ? ` · ${en ? "Latest" : "最近"} <strong class="${ratingClass(season.lastRating)}">${formatRating(season.lastRating)}</strong>`
           : ""
+      }
+    </p>
+    <p class="muted" style="margin:0.35rem 0 0" title="${escapeHtml(en ? "Rolling average of last up to 5 rated appearances (league, cup and continental)" : "最近最多 5 场已评分出场的滚动均值（含联赛/杯赛/洲际）")}">
+      ${en ? "Form" : "状态"}
+      <strong class="${formClass(curForm)}">${formatForm(curForm)}</strong>
+      ${curForm != null ? ` <span class="form-pill ${formClass(curForm)}">${escapeHtml(formToneLabel(curForm, en ? "en" : "zh"))}</span>` : ""}
+      ${
+        recentStrip.length
+          ? ` · ${en ? "Recent" : "近况"} ${recentStrip.map((r) => `<span class="rating-cell ${ratingClass(r)}">${formatRating(r)}</span>`).join(" ")}`
+          : ` · <span class="hint">${en ? "Play matches to build form" : "出场后累积状态"}</span>`
       }
     </p>
 

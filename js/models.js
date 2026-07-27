@@ -339,21 +339,39 @@ export function emptyMatchStats() {
     ratingSum: 0,
     /** 最近一场评分 0–10 */
     lastRating: null,
-    /** 最近 5 场评分记录（用于计算状态）*/
+    /** 最近 5 场评分记录（用于计算状态；跨联赛/杯赛滚动） */
     recentRatings: [],
   };
 }
 
-/** 球员状态（form）：最近 5 场评分平均，用于选人决策与界面显示 */
+const RECENT_FORM_LEN = 5;
+
+/**
+ * 赛后写入滚动状态：任意正式比赛（联赛/杯赛/洲际）出场都计入，
+ * 与「联赛场均」分账分离——状态看手感，场均看联赛口径。
+ */
+export function pushRecentRating(p, rating) {
+  if (!p || rating == null || Number.isNaN(Number(rating))) return null;
+  ensurePlayerHistory(p);
+  const st = p.stats;
+  if (!Array.isArray(st.recentRatings)) st.recentRatings = [];
+  st.recentRatings.push(Math.round(Number(rating) * 10) / 10);
+  if (st.recentRatings.length > RECENT_FORM_LEN) {
+    st.recentRatings = st.recentRatings.slice(-RECENT_FORM_LEN);
+  }
+  return st.recentRatings;
+}
+
+/** 球员状态（form）：最近最多 5 场评分平均，用于选人决策与界面显示 */
 export function playerForm(p) {
   const s = p?.stats || emptyMatchStats();
-  const recent = s.recentRatings || [];
+  const recent = Array.isArray(s.recentRatings) ? s.recentRatings : [];
   if (recent.length === 0) return null;
-  const sum = recent.reduce((acc, r) => acc + (r || 0), 0);
+  const sum = recent.reduce((acc, r) => acc + (Number(r) || 0), 0);
   return Math.round((sum / recent.length) * 10) / 10;
 }
 
-/** 状态颜色档：≥7.3 热（红火）/ ≥6.8 良好 / ≥6.0 正常 / <6.0 低迷（冷） */
+/** 状态颜色档：≥7.3 热 / ≥6.8 良好 / ≥6.0 正常 / <6.0 低迷 */
 export function formClass(form) {
   if (form == null || Number.isNaN(form)) return "";
   if (form >= 7.3) return "form-hot";
@@ -365,6 +383,15 @@ export function formClass(form) {
 export function formatForm(form) {
   if (form == null || Number.isNaN(form)) return "—";
   return Number(form).toFixed(1);
+}
+
+/** 状态文案（中/英） */
+export function formToneLabel(form, lang = "zh") {
+  if (form == null || Number.isNaN(form)) return lang === "en" ? "—" : "—";
+  if (form >= 7.3) return lang === "en" ? "Hot" : "火热";
+  if (form >= 6.8) return lang === "en" ? "Good" : "良好";
+  if (form >= 6.0) return lang === "en" ? "Steady" : "平稳";
+  return lang === "en" ? "Cold" : "低迷";
 }
 
 /** 本赛季场均评分；不足 1 场返回 null */
@@ -645,6 +672,16 @@ export function ensurePlayerHistory(p) {
     for (const k of Object.keys(e)) {
       if (p.stats[k] == null) p.stats[k] = e[k];
     }
+    if (!Array.isArray(p.stats.recentRatings)) p.stats.recentRatings = [];
+    // 旧档只有 lastRating：用其垫一条，避免状态列长期空白
+    if (
+      p.stats.recentRatings.length === 0 &&
+      p.stats.lastRating != null &&
+      Number.isFinite(Number(p.stats.lastRating)) &&
+      (p.stats.apps || 0) > 0
+    ) {
+      p.stats.recentRatings = [Math.round(Number(p.stats.lastRating) * 10) / 10];
+    }
   }
   if (!p.career) {
     p.career = { ...emptyMatchStats() };
@@ -757,7 +794,10 @@ export function archiveAndResetSeasonStats(p, season, clubId, clubName) {
     }
   }
 
+  // 状态是滚动手感，跨赛季保留最近评分；赛季场均/出场则清零
+  const keepForm = Array.isArray(s.recentRatings) ? s.recentRatings.slice(-RECENT_FORM_LEN) : [];
   p.stats = emptyMatchStats();
+  if (keepForm.length) p.stats.recentRatings = keepForm;
   p.leagueStats = {};
   p.leagueStatsVersion = 1;
   p.competitionStats = {};
@@ -768,7 +808,11 @@ export function archiveAndResetSeasonStats(p, season, clubId, clubName) {
 /** @deprecated 使用 archiveAndResetSeasonStats；无赛季信息时仅清零 */
 export function resetSeasonStats(p) {
   ensurePlayerHistory(p);
+  const keepForm = Array.isArray(p.stats?.recentRatings)
+    ? p.stats.recentRatings.slice(-RECENT_FORM_LEN)
+    : [];
   p.stats = emptyMatchStats();
+  if (keepForm.length) p.stats.recentRatings = keepForm;
   p.leagueStats = {};
   p.leagueStatsVersion = 1;
   p.competitionStats = {};

@@ -4449,6 +4449,47 @@ button.player-link.pitch-player-link:hover {
 .rating-ok { color: var(--text); }
 .rating-low { color: var(--bad); font-weight: 600; }
 .rating-cell { font-variant-numeric: tabular-nums; text-align: center; }
+/* 球员滚动状态（近 5 场评分均） */
+.form-hot { color: #f97316; font-weight: 800; }
+.form-good { color: var(--good); font-weight: 700; }
+.form-ok { color: var(--text); font-weight: 600; }
+.form-cold { color: #60a5fa; font-weight: 700; }
+.form-pill.form-hot {
+  background: rgba(249, 115, 22, 0.22);
+  color: #fdba74;
+}
+.form-pill.form-good {
+  background: rgba(61, 214, 140, 0.2);
+  color: #86efac;
+}
+.form-pill.form-ok {
+  background: rgba(148, 163, 184, 0.22);
+  color: #cbd5e1;
+}
+.form-pill.form-cold {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+}
+html[data-theme="light"] .form-hot { color: #c2410c; }
+html[data-theme="light"] .form-good { color: var(--good); }
+html[data-theme="light"] .form-ok { color: var(--text); }
+html[data-theme="light"] .form-cold { color: #1d4ed8; }
+html[data-theme="light"] .form-pill.form-hot {
+  background: rgba(234, 88, 12, 0.14);
+  color: #c2410c;
+}
+html[data-theme="light"] .form-pill.form-good {
+  background: rgba(15, 138, 79, 0.12);
+  color: var(--good);
+}
+html[data-theme="light"] .form-pill.form-ok {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+}
+html[data-theme="light"] .form-pill.form-cold {
+  background: rgba(37, 99, 235, 0.12);
+  color: #1d4ed8;
+}
 .report-ratings {
   margin-top: 0.85rem;
   padding-top: 0.65rem;

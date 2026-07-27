@@ -145,11 +145,19 @@ export function nationalCallupScore(world, player, club = null, latestIds = null
   const intl = player.intl || {};
   const resolvedClub = club || (world.clubs || []).find((item) => item.id === player.clubId) || null;
   const clubPlayed = Number(world.table?.[resolvedClub?.id]?.played) || 0;
-  const recent = latestIds || latestLineupIds(world, player.nationality);
+  const recentLineup = latestIds || latestLineupIds(world, player.nationality);
+
+  // 近期状态（最近最多 5 场评分均）：与阵容「状态」列同源，影响边缘名额
+  const formRatings = Array.isArray(stats.recentRatings) ? stats.recentRatings : [];
+  const form =
+    formRatings.length > 0
+      ? formRatings.reduce((sum, r) => sum + (Number(r) || 0), 0) / formRatings.length
+      : null;
 
   let score = Number(player.ovr) || 10;
   if (avgRating != null && apps >= 3) score += bounded((avgRating - 6.6) * 0.55, -0.8, 0.9);
-  if (lastRating != null) score += bounded((lastRating - 6.5) * 0.18, -0.35, 0.45);
+  if (form != null && formRatings.length >= 2) score += bounded((form - 6.5) * 0.22, -0.4, 0.5);
+  else if (lastRating != null) score += bounded((lastRating - 6.5) * 0.18, -0.35, 0.45);
   if (clubPlayed >= 4) {
     const appearanceRate = bounded(apps / clubPlayed, 0, 1);
     score += bounded((appearanceRate - 0.55) * 0.8, -0.45, 0.35);
@@ -157,7 +165,7 @@ export function nationalCallupScore(world, player, club = null, latestIds = null
   score += bounded((fitness - 82) / 45, -1.15, 0.4);
   score += bounded((morale - 70) / 120, -0.25, 0.25);
   score += Math.min(0.15, (Number(intl.caps) || 0) * 0.006);
-  if (recent.has(player.id)) score += 0.2;
+  if (recentLineup.has(player.id)) score += 0.2;
 
   if ((player.age || 25) <= 23 && (player.potential || 0) > (player.ovr || 0)) {
     score += Math.min(0.24, ((player.potential || 0) - (player.ovr || 0)) * 0.08);
