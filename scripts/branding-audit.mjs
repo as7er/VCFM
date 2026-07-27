@@ -63,14 +63,17 @@ for (const league of Object.values(DIVISIONS)) {
   assert.equal(league.countryCode, country.countryCode);
 }
 
-assert.equal(CLUB_TEMPLATES.length, 188);
-assert.equal(Object.keys(clubBrandingById).length, 188);
-assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.id)).size, 188);
-assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.nameEn)).size, 188);
-assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.nameZh)).size, 188);
-assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.shortName)).size, 188);
-assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.city.en.toLowerCase())).size, 188);
-assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.city.zh)).size, 188);
+// v152 起：11 联赛 × 18 队双循环 = 198 队（对齐德甲/法甲赛制）
+const EXPECTED_CLUBS = 198;
+const EXPECTED_LEAGUE_FIXTURES = 18 * 17 * DIVISION_IDS.length; // 3366
+assert.equal(CLUB_TEMPLATES.length, EXPECTED_CLUBS);
+assert.equal(Object.keys(clubBrandingById).length, EXPECTED_CLUBS);
+assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.id)).size, EXPECTED_CLUBS);
+assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.nameEn)).size, EXPECTED_CLUBS);
+assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.nameZh)).size, EXPECTED_CLUBS);
+assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.shortName)).size, EXPECTED_CLUBS);
+assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.city.en.toLowerCase())).size, EXPECTED_CLUBS);
+assert.equal(new Set(CLUB_TEMPLATES.map((club) => club.city.zh)).size, EXPECTED_CLUBS);
 
 for (const club of CLUB_TEMPLATES) {
   const league = DIVISIONS[club.leagueId];
@@ -94,9 +97,15 @@ const leagueCounts = Object.fromEntries(
   DIVISION_IDS.map((id) => [id, CLUB_TEMPLATES.filter((club) => club.division === id).length])
 );
 assert.deepEqual(leagueCounts, {
-  1: 20, 2: 20, 3: 20,
-  4: 16, 5: 16, 6: 16, 7: 16, 8: 16, 9: 16, 10: 16, 11: 16,
+  1: 18, 2: 18, 3: 18,
+  4: 18, 5: 18, 6: 18, 7: 18, 8: 18, 9: 18, 10: 18, 11: 18,
 });
+
+/** 与 models.calibrateWorldAbilityDistribution 同源的人口缩放配额 */
+function expectedAbilityQuotas(population, reference = 3572) {
+  const scaled = (base) => Math.max(1, Math.round(base * (population / reference)));
+  return { 18: scaled(110), 19: scaled(24), 20: scaled(2) };
+}
 
 const world = createWorld("sunset", "Brand Audit", "zh");
 ensureCompetitions(world);
@@ -110,8 +119,8 @@ for (const club of world.clubs) {
   );
 }
 assert.equal(world.userClubId, "sunset");
-assert.equal(world.clubs.length, 188);
-assert.equal(world.fixtures.length, 3060);
+assert.equal(world.clubs.length, EXPECTED_CLUBS);
+assert.equal(world.fixtures.length, EXPECTED_LEAGUE_FIXTURES);
 assert.equal(world.domesticCups.crownland.name, "英格兰全国杯");
 assert.equal(world.domesticCups.crownland.nameEn, "England National Cup");
 
@@ -127,19 +136,21 @@ legacyWorld.table = Object.fromEntries(
   Object.entries(legacyWorld.table).filter(([clubId]) => englishIds.has(clubId))
 );
 const preservedEnglishFixtures = legacyWorld.fixtures.map((fixture) => fixture.id);
-assert.equal(ensureWorldClubTemplates(legacyWorld, "zh"), 128);
+const englishClubCount = englishIds.size; // 54（3 × 18）
+const nonEnglishClubCount = EXPECTED_CLUBS - englishClubCount; // 144
+assert.equal(ensureWorldClubTemplates(legacyWorld, "zh"), nonEnglishClubCount);
 const expandedFirstTeam = legacyWorld.clubs.flatMap((club) => club.players);
 assert.deepEqual(
   Object.fromEntries([18, 19, 20].map((ovr) => [ovr, expandedFirstTeam.filter((player) => player.ovr === ovr).length])),
-  { 18: 110, 19: 24, 20: 2 },
+  expectedAbilityQuotas(expandedFirstTeam.length),
   "old saves expanded to five countries must be recalibrated as one world"
 );
 assert.equal(legacyWorld.abilityDistributionVersion, 1, "expanded old saves store the ability distribution version");
 assert.equal(ensureWorldClubTemplates(legacyWorld, "zh"), 0, "club expansion is idempotent");
 const addedLegacyFixtures = ensureWorldLeagueFixtures(legacyWorld);
-assert.equal(legacyWorld.clubs.length, 188);
-assert.equal(addedLegacyFixtures.length, 1920);
-assert.equal(legacyWorld.fixtures.length, 3060);
+assert.equal(legacyWorld.clubs.length, EXPECTED_CLUBS);
+assert.equal(addedLegacyFixtures.length, EXPECTED_LEAGUE_FIXTURES - preservedEnglishFixtures.length);
+assert.equal(legacyWorld.fixtures.length, EXPECTED_LEAGUE_FIXTURES);
 assert.deepEqual(
   legacyWorld.fixtures.filter((fixture) => fixture.division <= 3).map((fixture) => fixture.id),
   preservedEnglishFixtures,
@@ -204,7 +215,7 @@ const loaded = loadGame(1);
 assert.ok(loaded);
 const managedBefore = loaded.userClubId;
 const fixtureRefsBefore = loaded.fixtures.map((fixture) => `${fixture.home}|${fixture.away}`);
-assert.equal(applyWorldClubBranding(loaded, clubBrandingById, "zh"), 188);
+assert.equal(applyWorldClubBranding(loaded, clubBrandingById, "zh"), EXPECTED_CLUBS);
 assert.equal(loaded.userClubId, managedBefore);
 assert.equal(loaded.fixtures.length, originalFixtureCount);
 assert.deepEqual(loaded.fixtures.map((fixture) => `${fixture.home}|${fixture.away}`), fixtureRefsBefore);
@@ -246,5 +257,6 @@ console.log(JSON.stringify({
   fixtures: world.fixtures.length,
   players: world.clubs.reduce((sum, club) => sum + club.players.length + club.youth.players.length, 0),
   leagueCounts,
-  oldSaveBrandingsMigrated: 188,
+  oldSaveBrandingsMigrated: EXPECTED_CLUBS,
+  abilityQuotas: expectedAbilityQuotas(world.clubs.reduce((sum, club) => sum + club.players.length, 0)),
 }, null, 2));

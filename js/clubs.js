@@ -1,6 +1,6 @@
 /**
- * 五国 188 家原创俱乐部。旧名称仅保留在 legacyName 迁移字段中；
- * clubId、实力、预算、联赛数量和开局资格不变。
+ * 五国 198 家原创俱乐部（11 联赛 × 18 队，v152 起双循环 34 轮）。
+ * 旧名称仅保留在 legacyName 迁移字段中；clubId 与虚构品牌层稳定。
  */
 
 import { COUNTRY_BRANDING } from "./branding.js";
@@ -502,7 +502,8 @@ const ESP_SECOND_BRANDS = [
   ["Pradera Sol Deportivo", "阳光草原体育"],
   ["Canto del Mar Unión", "海歌联盟"],
   ["Valle Tranquilo CF", "宁静谷足球会"],
-  ["Colina Dorada Unión", "金丘联盟"],
+  // 与顶级「金丘足球会 / Cerro Dorado」区分：中文短名「金岭」全局唯一
+  ["Colina Dorada Unión", "金岭联盟"],
 ];
 
 const GER_TOP_BRANDS = [

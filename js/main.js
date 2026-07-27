@@ -29,8 +29,8 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=155";
-import { nationFlagHtml } from "./flags.js?v=155";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=156";
+import { nationFlagHtml } from "./flags.js?v=156";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -257,7 +257,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=155";
+} from "./avatar.js?v=156";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;

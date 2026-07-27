@@ -3,16 +3,26 @@ import assert from "node:assert/strict";
 import { CLUB_TEMPLATES, DIVISIONS } from "../js/data.js";
 import { createWorld } from "../js/models.js";
 
+const EXPECTED_CLUBS = 198;
+const ABILITY_REFERENCE_POPULATION = 3572;
+
+/** 与 models.calibrateWorldAbilityDistribution 同源的人口缩放配额 */
+function expectedAbilityQuotas(population, reference = ABILITY_REFERENCE_POPULATION) {
+  const scaled = (base) => Math.max(1, Math.round(base * (population / reference)));
+  return { 18: scaled(110), 19: scaled(24), 20: scaled(2) };
+}
+
 const topDivisions = [1, 4, 6, 8, 10];
+// v152：顶级联赛统一 18 队，非线性实力曲线见 js/clubs.js TOP_REALITY_CURVES
 const expectedTopPowers = new Map([
-  [1, [82, 80, 79, 78, 77, 76, 75, 74, 74, 73, 73, 72, 72, 71, 71, 70, 70, 69, 69, 68]],
-  [4, [82, 81, 77, 76, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63]],
-  [6, [82, 78, 77, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63]],
-  [8, [79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64]],
-  [10, [81, 76, 75, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61]],
+  [1, [82, 80, 79, 78, 77, 76, 75, 74, 74, 73, 73, 72, 72, 71, 71, 70, 70, 69]],
+  [4, [82, 81, 77, 76, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61]],
+  [6, [82, 78, 77, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61]],
+  [8, [79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62]],
+  [10, [81, 76, 75, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61, 60, 59]],
 ]);
 
-assert.equal(CLUB_TEMPLATES.length, 188, "the five-country pyramid should keep all 188 clubs");
+assert.equal(CLUB_TEMPLATES.length, EXPECTED_CLUBS, "the five-country pyramid should keep all 198 clubs (11 × 18)");
 assert.ok(CLUB_TEMPLATES.every((club) => club.realityProfile?.version === 1), "every club needs a reality profile");
 const slots = CLUB_TEMPLATES.map((club) => club.realityProfile.referenceSlot);
 assert.equal(new Set(slots).size, CLUB_TEMPLATES.length, "anonymous reality slots must be unique");
@@ -27,6 +37,7 @@ assert.ok(
 
 for (const division of topDivisions) {
   const clubs = CLUB_TEMPLATES.filter((club) => club.division === division);
+  assert.equal(clubs.length, 18, `division ${division} should have 18 clubs`);
   assert.deepEqual(clubs.map((club) => club.power), expectedTopPowers.get(division), `division ${division} power curve`);
   assert.ok(clubs.every((club, index) => club.realityProfile.domesticRankSeed === index + 1), `division ${division} stable rank slots`);
   assert.ok(clubs.every((club, index) => index === 0 || club.money <= clubs[index - 1].money), `division ${division} finance order`);
@@ -43,7 +54,7 @@ for (let run = 0; run < 4; run++) worlds.push(createWorld(startClub.id, `Reality
 const abilityRuns = worlds.map((world) => {
   const players = world.clubs.flatMap((club) => club.players);
   const counts = Object.fromEntries([18, 19, 20].map((ovr) => [ovr, players.filter((player) => player.ovr === ovr).length]));
-  assert.deepEqual(counts, { 18: 110, 19: 24, 20: 2 }, "world ability scarcity quotas");
+  assert.deepEqual(counts, expectedAbilityQuotas(players.length), "world ability scarcity quotas scale with first-team population");
   assert.ok(world.clubs.every((club) => club.realityProfile?.referenceSlot), "runtime clubs retain anonymous mappings");
   assert.ok(
     world.clubs.every((club) => club.youth.level === club.realityProfile.youthLevel),
@@ -61,7 +72,7 @@ const abilityRuns = worlds.map((world) => {
     return [tier, Number((tierPlayers.reduce((sum, player) => sum + player.ovr, 0) / tierPlayers.length).toFixed(2))];
   }));
   assert.ok(tierAverages[1] > tierAverages[2] && tierAverages[2] > tierAverages[3], "league tiers retain a realistic ability gradient");
-  return { counts, byPosition, tierAverages };
+  return { counts, byPosition, tierAverages, population: players.length };
 });
 
 const eliteByPosition = abilityRuns.reduce((totals, run) => {

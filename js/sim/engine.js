@@ -647,52 +647,113 @@ export class SimEngine {
     a.fsm = "home";
   }
 
-  /** 门将分发：有压迫必大脚；否则才短传发动。杜绝门口与前锋「互传」 */
+  /**
+   * 门将分发：近身压迫时大脚解围，否则优先短传发动。
+   * 大脚必须落在场内可争顶/可接的通道——旧实现固定瞄 x=22/78 且力量 30–44，
+   * 落地后仍带 ~20 速度，经常直接滚出边线（用户可见的「门将开大脚出界」）。
+   */
   _gkDistribute(a) {
     const b = this.ball;
-    // 身边有对方出球员 → 绝不短传（画面上像门将和前锋传球互动）
     let pressureNear = 0;
+    let nearestOpp = 99;
     for (const o of this.agents) {
-      if (o.team === a.team || o.role === "GK") continue;
-      if (dist(o.x, o.y, a.x, a.y) < 11) pressureNear++;
+      if (o.team === a.team || o.role === "GK" || o.sentOff) continue;
+      const dOpp = dist(o.x, o.y, a.x, a.y);
+      if (dOpp < nearestOpp) nearestOpp = dOpp;
+      // 9 码内才算贴身压迫（旧 11 过宽，门球时前场逼抢也常误触大脚）
+      if (dOpp < 9) pressureNear++;
     }
-    const passTo = pressureNear === 0 ? this._bestPass(a) : null;
+    const underHeavyPressure = nearestOpp < 6.5 || pressureNear >= 2;
+    const passTo = underHeavyPressure ? null : this._bestPass(a);
     // 有安全接球人且不太靠后 → 手抛/短传发动进攻
-    if (passTo && passTo.value > 0.22 && pressureNear === 0) {
-      // 接球人也不能贴在小禁区里（否则又像互传）
+    if (passTo && passTo.value > 0.22) {
       const recv = passTo.agent;
       const recvOk =
         recv &&
         (a.team === "home" ? recv.y < 82 : recv.y > 18) &&
-        dist(recv.x, recv.y, a.x, a.y) > 10;
+        dist(recv.x, recv.y, a.x, a.y) > 8;
       if (recvOk) {
         this._pass(a, passTo);
         return;
       }
     }
-    // 大脚开到中场边路（远离己方球门，打破死循环）
-    const dir = this.attackDir(a.team);
-    const targetY = 50 + dir * -8; // 中场略偏己方一侧
-    const targetX = Math.random() < 0.5 ? 22 : 78; // 开向边路
+
+    // —— 大脚解围：瞄中场安全通道，优先落点靠近本方前插队友 ——
+    // 落点禁区：x∈[30,70]、y∈[38,62]，远离边线/底线，给落地滚动留余量
+    const dir = this.attackDir(a.team); // home 攻 y↓ 为 -1
+    let targetX = 50;
+    let targetY = clamp(50 + dir * -8, 40, 60);
+    let receiver = null;
+    let bestScore = -Infinity;
+    for (const m of this.agents) {
+      if (m === a || m.team !== a.team || m.role === "GK" || m.sentOff) continue;
+      // 必须明显离开门区，朝进攻方向推进
+      const progress = a.team === "home" ? a.y - m.y : m.y - a.y;
+      if (progress < 14) continue;
+      // 偏好半身位更居中的通道，极端贴边会滚出界
+      const central = 1 - Math.min(1, Math.abs(m.x - 50) / 42);
+      const roleBonus = m.role === "MID" ? 8 : m.role === "ATT" ? 4 : 1;
+      const score = progress * 0.5 + central * 22 + roleBonus;
+      if (score > bestScore) {
+        bestScore = score;
+        // 落点略向中路收，略前于接应者；硬夹在安全区内
+        const inward = m.x < 50 ? 1 : m.x > 50 ? -1 : 0;
+        targetX = clamp(m.x + inward * 6, 30, 70);
+        targetY = clamp(m.y + dir * 2, 38, 62);
+        receiver = m;
+      }
+    }
+    if (!receiver) {
+      // 无人可瞄：开向中路偏一侧的安全通道（绝不到旧实现的 22/78 贴边）
+      const sideBias = (b.x >= 50 ? 1 : -1) * (0.45 + Math.random() * 0.4);
+      targetX = clamp(50 + sideBias * (8 + Math.random() * 10), 32, 68);
+      targetY = clamp(50 + dir * -(5 + Math.random() * 8), 40, 60);
+    }
+
     const dx = targetX - b.x;
     const dy = targetY - b.y;
     const d = Math.hypot(dx, dy) || 1;
-    const power = clamp(30 + a.attr.kicking * 12, 30, 44);
+    const kick = a.attr.kicking || 0.5;
+    // 力量按「飞到落点附近即衰减」估算：比场员长传更克制，避免落地残速滚出界
+    // d≈40 → ~19–22；上限 26，远低于旧大脚 30–44
+    const power = clamp(d * 0.46 + 2, 15, 26) * (0.92 + 0.1 * kick);
+    const err = (1 - kick) * 2.8;
+    const nx = (Math.random() - 0.5) * err;
+    const ny = (Math.random() - 0.5) * err;
+
+    // 先清旧传球/越位快照，再写入本脚大脚落点（门将开球依法不受越位限制）
+    this._clearBallTarget();
     b.owner = null;
-    b.vx = (dx / d) * power;
-    b.vy = (dy / d) * power;
-    b.z = 0.45;
-    b.vz = 15 + a.attr.kicking * 6; // 大脚解围高吊 peak ~6–8
+    b.vx = (dx / d) * power + nx;
+    b.vy = (dy / d) * power + ny;
+    b.z = 0.35;
+    // 吊高越过第一波逼抢；峰值受控，落地残速不会像旧大脚那样滚出边线
+    b.vz = clamp(7.5 + d * 0.08 + kick * 2, 8.5, 13.5);
+    b.receiverId = receiver?.id || null;
+    b.targetX = targetX;
+    b.targetY = targetY;
+    b.expectedAt = this.t + clamp(d / Math.max(1, power) * 1.15, 0.4, 2.2);
     b.lastKicker = a.id;
     b.kickTeam = a.team;
     b.kickX = b.x;
     b.kickY = b.y;
-    // 门将大脚开球不受越位限制：清空越位快照，避免残留上次传球的旧线导致误判。
-    b.offsideLineY = null;
     b.state = "pass";
-    this._clearBallTarget();
+    b.isThroughPass = false;
+    b.isCrossPass = false;
     b.offsideExemptRestart = false;
     b.restartType = null;
+    if (receiver) {
+      receiver.intent = {
+        type: "receive",
+        tx: targetX,
+        ty: targetY,
+        targetId: receiver.id,
+      };
+      receiver.tx = targetX;
+      receiver.ty = targetY;
+      receiver.fsm = "receive";
+      receiver.attackThinkUntil = (b.expectedAt || this.t) + 0.5;
+    }
     a.intent = null;
     a.pose = "kick";
     a.poseUntil = this.t + 0.45;

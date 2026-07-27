@@ -224,7 +224,10 @@ export function getActiveSlot() {
 }
 
 export function setActiveSlot(slot) {
-  const s = Math.max(1, Math.min(SLOT_COUNT, Number(slot) || 1));
+  const n = Math.trunc(Number(slot));
+  const s = Number.isFinite(n)
+    ? Math.max(1, Math.min(SLOT_COUNT, n))
+    : 1;
   localStorage.setItem(ACTIVE_KEY, String(s));
   return s;
 }
@@ -286,10 +289,18 @@ export function hasSave(slot = null) {
   return pendingJsonBySlot.has(Number(slot)) || !!localStorage.getItem(slotKey(slot));
 }
 
+/** 仅允许 1..SLOT_COUNT；非法值回落到活动槽或 1，避免写出 vcfm_slot_0 等孤儿键 */
+function resolveSlot(slot) {
+  if (slot == null || slot === "") return getActiveSlot();
+  const n = Math.trunc(Number(slot));
+  if (!Number.isFinite(n)) return getActiveSlot();
+  return Math.max(1, Math.min(SLOT_COUNT, n));
+}
+
 export function saveGame(world, slot = null, { immediate = false } = {}) {
   try {
     migrateKeyNames();
-    const s = slot != null ? slot : getActiveSlot();
+    const s = resolveSlot(slot);
     if (!immediate && queueSave(world, s)) {
       setActiveSlot(s);
       return true;
@@ -315,7 +326,7 @@ export function loadGame(slot = null) {
   try {
     migrateKeyNames();
     migrateLegacySave();
-    const s = slot != null ? slot : getActiveSlot();
+    const s = resolveSlot(slot);
     const pending = pendingJsonBySlot.get(s);
     let raw = pending || localStorage.getItem(slotKey(s));
     if (!raw && s === 1) raw = localStorage.getItem(LEGACY_KEY);

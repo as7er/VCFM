@@ -282,7 +282,6 @@ export class MatchView {
    */
   applySimSnapshot(sim, opts = {}) {
     if (!this._built || !sim?.players?.length) return false;
-    console.log('[DEBUG applySimSnapshot] Called with sim:', !!sim, 'players:', sim?.players?.length, 'ball:', sim.ball ? `(${sim.ball.x.toFixed(1)}, ${sim.ball.y.toFixed(1)})` : 'null');
     this.simDrive = true;
     this.scriptLock = false;
     this.flight = null;
@@ -1189,7 +1188,6 @@ export class MatchView {
     this.frozen = false;
     this.scriptLock = false;
     this.simDrive = false;  // 重置 SimEngine 模式，使用导演 AI
-    console.log('[DEBUG build] Set simDrive = false');
     this.aftermathUntil = 0;
     this.camMode = "wide";
     this._clearFocus?.();
@@ -5099,14 +5097,8 @@ export class MatchView {
     // scriptLock：关键事件预演，只朝脚本目标跑，不跑自由 AI
     // pre / idle / pause：钉阵型；UI frozen：冻结当前帧
 
-    // DEBUG: 诊断开球后不动的问题
-    if (livePlay) {
-      console.log('[DEBUG update] livePlay=true, simDrive=' + this.simDrive + ', frozen=' + this.frozen + ', scriptLock=' + this.scriptLock + ', FSM=' + this.fsm.describe());
-    }
-
     // —— 真空间投影：位置由 playSimTimeline 写入；软跟镜 + Canvas ——
     if (this.simDrive && (livePlay || staged) && !this.frozen) {
-      console.log('[DEBUG update SimEngine path] Rendering', this.players.length, 'players, ball at', this.ball.x.toFixed(1), this.ball.y.toFixed(1));
       for (const pl of this.players) {
         if (pl.el.classList.contains("sent-off")) continue;
         this._applyPlayer(pl);
@@ -5552,7 +5544,6 @@ export class MatchView {
     // —— 真空间投影：只横幅/音效/贴帧，不瞬移编舞 ——
     // 只有当 snap.sim 真正有数据时才开启 simDrive（Canvas 球员渲染）
     // 不能仅根据 snap.engine === "v2" 判断，因为 v2 引擎也可以只提供事件不提供空间数据
-    console.log('[DEBUG onEvent]', ev.type, 'snap.engine=', snap?.engine, 'snap.sim=', !!snap?.sim, 'this.simDrive=', this.simDrive);
     if (this.simDrive || snap?.sim || ev?.fromSim) {
       if (snap?.sim) this.applySimSnapshot(snap.sim);
       // 无帧时也钉死 simDrive，阻断 update() 旧 AI
