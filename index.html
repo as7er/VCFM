@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=165" />
+  <link rel="stylesheet" href="css/style.css?v=166" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -701,7 +701,7 @@
               </div>
             </div>
             <p class="hint" style="margin:0.5rem 0 0.75rem" data-i18n="clubs.hint">
-              浏览三级联赛全部球队：积分、阵容实力、近期赛程。也可从积分榜或赛程点击队名打开。
+              浏览五国联赛全部球队：积分、阵容实力、近期赛程。也可从积分榜或赛程点击队名打开。
             </p>
             <div class="table-wrap">
               <table id="clubs-table">
@@ -1187,12 +1187,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=165"></script>
+  <script type="module" src="js/main.js?v=166"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v165";
+        var CURRENT_CACHE = "vcfm-v166";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1203,7 +1203,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=165").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=166").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1212,8 +1212,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v165")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v165", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v166")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v166", "1");
               location.reload();
             }
           } catch (e) {

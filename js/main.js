@@ -29,8 +29,8 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=165";
-import { nationFlagHtml } from "./flags.js?v=165";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=166";
+import { nationFlagHtml } from "./flags.js?v=166";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -282,7 +282,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=165";
+} from "./avatar.js?v=166";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -1013,12 +1013,12 @@ function migrateWorld(w) {
     w.abilityDistributionVersion = ABILITY_DISTRIBUTION_VERSION;
   }
   applyWorldClubBranding(w, clubBrandingById, getLang());
-  // 旧档若不足三级结构，提示开新档体验完整升降级
+  // 旧档若缺少当前五国联赛结构，提示开新档体验完整升降级
   const counts = { 1: 0, 2: 0, 3: 0 };
   for (const c of w.clubs || []) counts[c.division || 3]++;
   if (counts[1] < 4 || counts[2] < 4 || counts[3] < 4) {
     // 仍可玩，但升降级可能跳过
-    console.warn("存档联赛结构不完整，建议开新档体验三级联赛");
+    console.warn("存档联赛结构不完整，建议开新档体验完整五国联赛");
   }
 }
 
@@ -2222,6 +2222,16 @@ function renderInbox() {
   });
 }
 
+function injuryDays(player) {
+  return Math.max(0, Math.ceil(Number(player?.injured) || 0));
+}
+
+function injuryStatusText(player, en = getLang() === "en") {
+  const days = injuryDays(player);
+  if (!days) return "";
+  return en ? `Inj ${days}d` : `伤 ${days}天`;
+}
+
 function renderTraining() {
   const club = getUserClub(world);
   if (!club) return;
@@ -2313,7 +2323,7 @@ function renderTraining() {
         .map((p) => {
           const fit = Math.round(p.fitness || 0);
           const lowCls = fit < 65 || p.injured > 0 ? " low" : "";
-          const tag = p.injured > 0 ? (en ? " Inj" : " 伤") : "";
+          const tag = injuryDays(p) ? ` ${injuryStatusText(p, en)}` : "";
           return `<div class="training-fit-row${lowCls}">
             <span>${playerLinkHtml(p.id, playerDisplaySurname(p.name, p.nationality) + tag)}</span>
             <div class="bar"><i style="width:${fit}%"></i></div>
@@ -2915,6 +2925,50 @@ function renderTopbar() {
   $("#btn-global-search")?.setAttribute("aria-label", t("search.open"));
 }
 
+function ticketFactorsText(factors, en = getLang() === "en") {
+  if (!Array.isArray(factors) || !factors.length) return "";
+  const labels = en
+    ? {
+        cupBase: "cup base",
+        "cup-final": "final",
+        "cup-semi": "semi-final",
+        "cup-quarter": "quarter-final",
+        "cup-r16": "round of 16",
+        derby: "derby",
+        relegation: "relegation battle",
+        title: "title race",
+        form: "league form",
+        season: "run-in",
+        tier1: "top tier",
+        tier2: "second tier",
+        cap: "income cap",
+      }
+    : {
+        cupBase: "杯赛基础",
+        "cup-final": "决赛",
+        "cup-semi": "半决赛",
+        "cup-quarter": "八强",
+        "cup-r16": "十六强",
+        derby: "德比",
+        relegation: "保级战",
+        title: "争冠战",
+        form: "联赛表现",
+        season: "赛季冲刺",
+        tier1: "顶级联赛",
+        tier2: "第二级联赛",
+        cap: "收入封顶",
+      };
+  return factors
+    .map((factor) => {
+      const label = labels[factor?.key];
+      if (!label) return "";
+      if (factor.key === "cap" || !Number.isFinite(Number(factor.multiplier))) return label;
+      return `${label} ×${Number(factor.multiplier).toFixed(2)}`;
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function renderDashboard() {
   const club = getUserClub(world);
   const en = getLang() === "en";
@@ -3132,6 +3186,7 @@ function renderDashboard() {
     const seasonGate = en
       ? `Season tickets <strong>${formatMoney(fin.seasonTickets || 0)}</strong>${fin.seasonHomeGates ? ` · ${fin.seasonHomeGates} home` : ""}`
       : `本季门票 <strong>${formatMoney(fin.seasonTickets || 0)}</strong>${fin.seasonHomeGates ? ` · ${fin.seasonHomeGates} 场主场` : ""}`;
+    const ticketFactors = ticketFactorsText(fin.lastTicketFactors, en);
     const tvPrizeTotal = (fin.seasonBroadcast || 0) + (fin.seasonPrize || 0);
     const tvPrizeLine =
       tvPrizeTotal > 0
@@ -3157,6 +3212,7 @@ function renderDashboard() {
       <div>${en ? "Balance" : "余额"} <strong>${formatMoney(fin.money)}</strong>
         <span class="muted"> · ${en ? "Season net ~" : "本季净额约 "}<strong class="${net >= 0 ? "stat-high" : "stat-low"}">${formatMoney(net)}</strong></span></div>
       <div class="muted">🎟️ ${ticketLine}</div>
+      ${ticketFactors ? `<div class="muted">↳ ${escapeHtml(ticketFactors)}</div>` : ""}
       <div class="muted">🎟️ ${seasonGate}</div>
       <div class="muted">📺 ${tvPrizeLine}</div>
       <div class="muted">🔁 ${xferTxt}</div>
@@ -3234,10 +3290,13 @@ function renderSquad() {
         ? (en ? "Form: no recent ratings yet" : "状态：暂无近期评分")
         : `${en ? "Form" : "状态"} ${formatForm(form)} · ${formToneLabel(form, en ? "en" : "zh")} (${en ? "last" : "近"}${(s.recentRatings || []).length}${en ? " apps" : "场"})`;
       const num = p.number != null ? p.number : "—";
+      const injuredDays = injuryDays(p);
       const statusBadges = [
         xi.has(p.id) ? `<span class="badge">${en ? "XI" : "首发"}</span>` : "",
         p.loan ? `<span class="badge loan" title="${escapeHtml(t("contract.loanIn") || "租借")}">${escapeHtml(t("contract.loanIn") || "租借")}</span>` : "",
-        p.injured > 0 ? `<span class="badge ATT">${en ? "Inj" : "伤"}</span>` : "",
+        injuredDays
+          ? `<span class="badge ATT" title="${escapeHtml(en ? `Expected return in ${injuredDays} days` : `预计 ${injuredDays} 天后恢复`)}">${escapeHtml(injuryStatusText(p, en))}</span>`
+          : "",
         (p.suspendedMatches || 0) > 0
           ? `<span class="badge ATT" title="${en ? "Suspended" : "停赛"}">${en ? "Sus" : "停"}${p.suspendedMatches}</span>`
           : "",
@@ -3427,6 +3486,7 @@ function showPlayerModal(playerId, context = {}) {
       </div>
     </div>
     <p>${en ? "Value" : "身价"} ${fromOther ? formatScoutValue(world, player) : formatMoney(player.value)} · ${en ? "Wage" : "周薪"} ${formatMoney(player.wage)} · ${en ? "Fitness" : "体能"} ${Math.round(player.fitness ?? 0)}% · ${en ? "Morale" : "士气"} ${Math.round(player.morale ?? 0)}
+      ${injuryDays(player) ? ` · <span class="badge ATT">${escapeHtml(injuryStatusText(player, en))}</span>` : ""}
       ${
         (player.suspendedMatches || 0) > 0
           ? ` · <span class="badge ATT">${en ? `Suspended ${player.suspendedMatches}` : `停赛 ${player.suspendedMatches} 场`}</span>`
@@ -4611,7 +4671,7 @@ function renderTactics() {
             const fit = Math.round(p.fitness ?? 100);
             const status =
               (p.injured || 0) > 0
-                ? `<em class="tac-chip-bad">${getLang() === "en" ? "INJ" : "伤"}</em>`
+                ? `<em class="tac-chip-bad">${escapeHtml(injuryStatusText(p, getLang() === "en"))}</em>`
                 : (p.suspendedMatches || 0) > 0
                   ? `<em class="tac-chip-bad">${getLang() === "en" ? "SUS" : "停"}</em>`
                   : fit < 62
@@ -5300,7 +5360,7 @@ function renderTable() {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="10" class="muted">${en ? "No clubs in this division. Start a new save to use the complete league structure." : "该级别暂无球队（请开新档体验完整三级联赛）"}</td></tr>`;
+    : `<tr><td colspan="10" class="muted">${en ? "No clubs in this division. Start a new save to use the complete five-nation league structure." : "该级别暂无球队（请开新档体验完整五国联赛）"}</td></tr>`;
 }
 
 function setLeagueCentreView(view) {
@@ -8358,6 +8418,7 @@ function showMatchReport(report, opts = {}) {
   const reviewBadge = review
     ? `<span class="report-review-badge">${escapeHtml(t("fix.viewReport") || (getLang() === "en" ? "Archive" : "历史战报"))}</span>`
     : "";
+  const ticketFactors = ticketFactorsText(report.ticketFactors, getLang() === "en");
 
   el.innerHTML = `
     <h3>${t("match.report")}${reviewBadge}</h3>
@@ -8394,7 +8455,7 @@ function showMatchReport(report, opts = {}) {
               : report.ticketStadium
                 ? ` <span class="muted">（${escapeHtml(report.ticketStadium)}）</span>`
                 : ""
-          }</div>`
+          }${ticketFactors ? `<div class="muted">${getLang() === "en" ? "Factors: " : "系数："}${escapeHtml(ticketFactors)}</div>` : ""}</div>`
         : ""
     }
     ${

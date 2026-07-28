@@ -206,6 +206,9 @@ export function financeSnapshot(world) {
   const lastAttendance = fin.lastAttendance != null ? Number(fin.lastAttendance) : null;
   const lastCapacity = fin.lastCapacity != null ? Number(fin.lastCapacity) : null;
   const lastFillPct = fin.lastFillPct != null ? Number(fin.lastFillPct) : null;
+  const lastTicketFactors = Array.isArray(fin.lastTicketFactors)
+    ? fin.lastTicketFactors.filter((item) => item && typeof item.key === "string")
+    : [];
   const seasonWageOut = Number(fin.seasonWageOut) || 0;
   const seasonFacilityOut = Number(fin.seasonFacilityOut) || 0;
   const seasonTransferNet = Number(fin.seasonTransferNet) || 0;
@@ -245,6 +248,7 @@ export function financeSnapshot(world) {
     lastAttendance,
     lastCapacity,
     lastFillPct,
+    lastTicketFactors,
     estTicket,
     stadiumName: st?.name || "",
     capacity: st?.capacity || 0,

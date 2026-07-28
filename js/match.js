@@ -2198,6 +2198,7 @@ function buildReport(state) {
     ticketCapacity: state.ticketCapacity || null,
     ticketAttendance: state.ticketAttendance != null ? state.ticketAttendance : null,
     ticketFillPct: state.ticketFillPct != null ? state.ticketFillPct : null,
+    ticketFactors: Array.isArray(state.ticketFactors) ? state.ticketFactors : [],
   };
 }
 
@@ -2402,6 +2403,29 @@ export function finalizeMatch(state) {
   if (state.finished) return state.report;
   const { world, fixture, home, away, isCup, isLeague, isKnockout, hg, ag, events } = state;
 
+  // 上座与票价只能由开赛前已知的信息决定。这里先锁定上下文，稍后再做账，
+  // 避免 applyResult 把本场赛果和更新后的积分榜倒灌进门票收入。
+  let homeWinStreak = 0;
+  const recentHomeForm = (home.form || []).slice(-5);
+  for (let i = recentHomeForm.length - 1; i >= 0 && recentHomeForm[i] === "W"; i--) {
+    homeWinStreak++;
+  }
+  const homeGateContext = fixture.home === world.userClubId
+    ? {
+        isCup,
+        isDerby: state.derby,
+        isRelegationBattle: checkRelegationBattle(world, home),
+        isTitleRace: checkTitleRace(world, home),
+        cupStage: fixture.roundLabel === "决赛" ? "final" :
+                  fixture.roundLabel === "半决赛" ? "semi" :
+                  fixture.roundLabel === "1/4决赛" ? "quarter" : null,
+        winStreak: homeWinStreak,
+        opponentStrength: away.strength || 50,
+        formBonus: getFormBonus(world, home.id),
+        seasonPhaseBonus: getSeasonPhaseBonus(world),
+      }
+    : null;
+
   // 国内联赛和洲际赛事分别记账；国内杯暂不设球员榜。
   if (!isCup) {
     const countApps = (club) => {
@@ -2556,26 +2580,8 @@ export function finalizeMatch(state) {
       text: `${tag}：对阵 ${opp.name} ${myG}-${opG} ${result}${ctx.length ? `（${ctx.join("·")}）` : ""}`,
     });
     if (isHome) {
-      // 计算连胜场次
-      const winStreak = (me.form || []).slice(-5).filter(r => r === 'W').length;
-
-      // 判断是否保级大战或争冠关键战
-      const isRelegationBattle = checkRelegationBattle(world, me);
-      const isTitleRace = checkTitleRace(world, me);
-
       const gate = matchdayIncome(me, {
-        isCup,
-        won: myG > opG || (isKnockout && fixture.winner === userId),
-        isDerby: state.derby,
-        isRelegationBattle,
-        isTitleRace,
-        cupStage: fixture.roundLabel === '决赛' ? 'final' :
-                  fixture.roundLabel === '半决赛' ? 'semi' :
-                  fixture.roundLabel === '1/4决赛' ? 'quarter' : null,
-        winStreak,
-        opponentStrength: opp.strength || 50,
-        formBonus: getFormBonus(world, me.id),
-        seasonPhaseBonus: getSeasonPhaseBonus(world),
+        ...homeGateContext,
         detail: true,
       });
       const income = typeof gate === "object" ? gate.income : gate;
@@ -2590,6 +2596,7 @@ export function finalizeMatch(state) {
       me.finance.lastAttendance = attendance;
       me.finance.lastCapacity = capacity;
       me.finance.lastFillPct = fillPct;
+      me.finance.lastTicketFactors = Array.isArray(gate?.factors) ? gate.factors : [];
       me.finance.seasonTicketIncome = (Number(me.finance.seasonTicketIncome) || 0) + income;
       me.finance.seasonHomeGates = (Number(me.finance.seasonHomeGates) || 0) + 1;
       const stInfo = stadiumInfo(me);
@@ -2606,6 +2613,7 @@ export function finalizeMatch(state) {
       state.ticketCapacity = capacity;
       state.ticketAttendance = attendance;
       state.ticketFillPct = fillPct;
+      state.ticketFactors = Array.isArray(gate?.factors) ? gate.factors : [];
     }
     if (isLeague) {
       mediaAfterUserMatch(world, fixture, me, opp, myG, opG);

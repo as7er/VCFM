@@ -666,7 +666,7 @@ export const CONTINENTAL_COMPETITIONS = {
   },
 };
 
-/** 五国 188 队名单与完整品牌迁移映射见 clubs.js */
+/** 五国 198 队名单与完整品牌迁移映射见 clubs.js */
 export { CLUB_TEMPLATES, clubBrandingById } from "./clubs.js";
 
 /** 阵型：位置槽位 { pos: GK|DEF|MID|ATT, x: 0-100, y: 0-100 } y=0 己方球门 */

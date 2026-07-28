@@ -260,7 +260,6 @@ export function facilityWeeklyUpkeep(club) {
  * @param {Object} club - 俱乐部对象
  * @param {Object} options - 比赛选项
  * @param {boolean} options.isCup - 是否杯赛
- * @param {boolean} options.won - 是否赢球
  * @param {boolean} options.isDerby - 是否德比（同城/同级别对手）
  * @param {boolean} options.isRelegationBattle - 是否保级大战
  * @param {boolean} options.isTitleRace - 是否争冠关键战
@@ -273,7 +272,6 @@ export function facilityWeeklyUpkeep(club) {
 export function matchdayIncome(club, options = {}) {
   const {
     isCup = false,
-    won = false,
     isDerby = false,
     isRelegationBattle = false,
     isTitleRace = false,
@@ -286,9 +284,13 @@ export function matchdayIncome(club, options = {}) {
 
   const st = stadiumInfo(club);
   let base = st.matchday || 40_000;
+  const factors = [];
 
   // 基础收入调整
-  if (isCup) base *= 0.75;
+  if (isCup) {
+    base *= 0.75;
+    factors.push({ key: "cupBase", multiplier: 0.75 });
+  }
 
   // 上座率：基础 75%–100%
   let fillMin = 0.75;
@@ -324,9 +326,6 @@ export function matchdayIncome(club, options = {}) {
   const gateIncome = Math.round(base * fill);
   let income = gateIncome;
 
-  // 胜利奖金
-  if (won) income = Math.round(income * 1.08);
-
   // 杯赛阶段加成
   if (isCup && cupStage) {
     const cupBonus = {
@@ -336,38 +335,53 @@ export function matchdayIncome(club, options = {}) {
       r16: 1.15,       // 十六强
       group: 1.0,      // 小组赛
     };
-    income = Math.round(income * (cupBonus[cupStage] || 1.0));
+    const multiplier = cupBonus[cupStage] || 1.0;
+    income = Math.round(income * multiplier);
+    if (multiplier !== 1) factors.push({ key: `cup-${cupStage}`, multiplier });
   }
 
   // 德比额外加成（票价溢价）
   if (isDerby) {
     income = Math.round(income * 1.25);
+    factors.push({ key: "derby", multiplier: 1.25 });
   }
 
   // 保级/争冠紧张氛围加成
   if (isRelegationBattle) {
     income = Math.round(income * 1.3);
+    factors.push({ key: "relegation", multiplier: 1.3 });
   } else if (isTitleRace) {
     income = Math.round(income * 1.2);
+    factors.push({ key: "title", multiplier: 1.2 });
   }
 
   // 表现加成（最近战绩）- v154新增
   if (formBonus !== 1.0) {
     income = Math.round(income * formBonus);
+    factors.push({ key: "form", multiplier: formBonus });
   }
 
   // 赛季阶段加成（赛季末冲刺期）- v154新增
   if (seasonPhaseBonus !== 1.0) {
     income = Math.round(income * seasonPhaseBonus);
+    factors.push({ key: "season", multiplier: seasonPhaseBonus });
   }
-
-  // 上限：单场票房最高为基础票房的 2.5 倍（欧冠决赛级别），避免加成连乘失控
-  income = Math.min(income, Math.round(gateIncome * 2.5));
 
   // 联赛级别微调
   const tier = DIVISIONS[club.division || 3]?.tier || 3;
-  if (tier === 1) income = Math.round(income * 1.25);
-  else if (tier === 2) income = Math.round(income * 1.1);
+  if (tier === 1) {
+    income = Math.round(income * 1.25);
+    factors.push({ key: "tier1", multiplier: 1.25 });
+  } else if (tier === 2) {
+    income = Math.round(income * 1.1);
+    factors.push({ key: "tier2", multiplier: 1.1 });
+  }
+
+  // 所有加成都必须受同一上限约束，避免顶级联赛系数在封顶后再次放大。
+  const incomeCap = Math.round(gateIncome * 2.5);
+  const capped = income > incomeCap;
+  income = Math.min(income, incomeCap);
+  if (capped) factors.push({ key: "cap", multiplier: null });
 
   // options.detail === true 时返回明细（上座/容量），默认仍返回金额以兼容旧调用
   if (options.detail) {
@@ -378,6 +392,8 @@ export function matchdayIncome(club, options = {}) {
       fill: Math.round(fill * 1000) / 10,
       stadiumName: st.name || "",
       gateBase: gateIncome,
+      factors,
+      capped,
     };
   }
   return income;

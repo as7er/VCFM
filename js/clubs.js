@@ -207,7 +207,7 @@ const D2 = [
   // 删除最后2队以达到18队（bastion 和 mirage）
 ];
 
-/** 乙级 18（开局可选）— 小镇 / 码头 / 矿区气质（三级联赛，18队更合理） */
+/** 英格兰第三级 18（开局可选）— 小镇 / 码头 / 矿区气质 */
 const D3 = [
   ["sunset", "Westend Town", "Westend", 55, 3_800_000],
   ["mill", "Millford United", "Millford", 54, 3_500_000],

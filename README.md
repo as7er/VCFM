@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v165** · 比赛真实性校准 |
+| 当前版本 | **v166** · 赛前票房因果与伤停信息 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -49,11 +49,12 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **真实战术因果**：主客队运行同一套 AI；阵型、角色、能力、状态、体能、士气和战术共同影响场上表现，没有只为界面结果服务的隐藏球队加权。
 - **可读的转播表现**：俯视球场、真空间录帧、倍速、暂停、中场调整、进球回放、庆祝、球轨迹、xG、控球和射门统计。
 - **v165 真实性校准**：远射意愿随距离衰减，射门高度与门将反应时间进入结算；抢断、点球、角球和开球站位经过固定种子批量审计。
+- **v166 赛前票房因果**：上座与门票系数只读取开赛前状态，不再受本场赛果倒灌；战报和财政概览展示杯赛、德比、争冠、联赛层级等收入系数。
 - **后台比赛保持轻量**：非用户场次使用快速概率引擎，避免推进赛程时为整轮比赛运行空间模拟。
 
 ### 球队管理
 
-- **阵容与球员**：体能、士气、伤病、停赛、潜力、号码、合同、赛季数据和近 5 场滚动状态；自动阵容同时考虑能力、位置、体能和近期表现。
+- **阵容与球员**：体能、士气、伤病、停赛、潜力、号码、合同、赛季数据和近 5 场滚动状态；球员资料、阵容、训练与战术席显示预计伤停天数；自动阵容同时考虑能力、位置、体能和近期表现。
 - **战术**：阵型、风格、压迫、节奏、宽度、防线、槽位角色、核心球员与战术板拖拽换位。
 - **训练与青训**：训练重点、强度、赛前备战、青训名单和球员成长；可委托助理教练按赛程与阵容短板安排。
 - **转会与合同**：夏窗、冬窗、续约、外租、自由球员和 AI 报价；买入经过卖方审核转会费、球员审核合同、还价或拒绝等分阶段谈判。
@@ -128,7 +129,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v165** · match-realism calibration |
+| Current version | **v166** · pre-match gate causality and injury status |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -161,11 +162,12 @@ Repository: https://github.com/as7er/vcfm
 - **Shared tactical causality**: both teams run the same AI. Formation, roles, ability, form, fitness, morale, and tactics drive performance without UI-only team weighting.
 - **Broadcast presentation**: top-down pitch, recorded spatial frames, speed controls, pause, half-time changes, replays, celebrations, ball trails, xG, possession, and shot statistics.
 - **v165 realism calibration**: long-shot intent decays with distance; shot height and goalkeeper reaction time affect outcomes; tackles, penalties, corners, and kickoff positions are covered by seeded batch audits.
+- **v166 pre-match gate causality**: attendance and gate modifiers now use only information known before kickoff; match reports and the finance overview expose cup, derby, title-race, league-tier, and other income factors.
 - **Fast background simulation**: non-user fixtures retain the probabilistic engine so advancing a full round remains quick.
 
 ### Club management
 
-- **Squad and players**: fitness, morale, injuries, suspensions, potential, numbers, contracts, season statistics, and rolling five-match form. Auto-selection considers ability, position, fitness, and form.
+- **Squad and players**: fitness, morale, injuries, suspensions, potential, numbers, contracts, season statistics, and rolling five-match form. Profiles, squad lists, training, and the tactics bench show expected injury days. Auto-selection considers ability, position, fitness, and form.
 - **Tactics**: formation, style, pressing, tempo, width, defensive line, slot roles, core player, and drag-and-drop changes.
 - **Training and youth**: training focus, intensity, match preparation, youth development, and assistant-manager delegation based on schedule and squad weaknesses.
 - **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Incoming transfers now pass through seller fee review, player contract review, counters, and rejection stages.
