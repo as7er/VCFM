@@ -6,9 +6,9 @@
 
 ## 中文
 
-轻量网页足球经理（**V**C **F**ootball **M**anager 缩写），灵感来自 [Football Manager](https://www.footballmanager.com/)。纯前端、无后端，适合通勤摸鱼：手机浏览器打开就能玩。
+VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏，灵感来自 [Football Manager](https://www.footballmanager.com/)。项目完全运行在浏览器中，无后端、无构建步骤，手机、平板和电脑都可以直接游玩。
 
-> 粉丝向简化娱乐作品，与 Sports Interactive / SEGA 无关联。
+> 粉丝向简化娱乐作品，与 Sports Interactive / SEGA 无关联。俱乐部、球员与赛事品牌均为虚构内容。
 
 ### 在线游玩
 
@@ -16,92 +16,111 @@
 
 | 说明 | 详情 |
 |------|------|
-| 设备 | 手机 / 平板 / 电脑浏览器均可 |
-| 存档 | 当前浏览器 `localStorage`，**3 个槽位** |
-| 换机 | 游戏内 **导出 / 导入** JSON（清缓存会丢进度） |
-| 安装 | 支持 PWA：浏览器「添加到主屏幕」更像 App |
-| 语言 | 中文 / English · 日间 / 夜间主题 |
+| 当前版本 | **v165** · 比赛真实性校准 |
+| 设备 | 手机 / 平板 / 电脑浏览器 |
+| 存档 | 当前浏览器 `localStorage`，3 个槽位 |
+| 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
+| 安装 | 支持 PWA，可使用浏览器“添加到主屏幕” |
+| 语言与主题 | 中文 / English · 日间 / 夜间 |
 
 仓库：https://github.com/as7er/vcfm
 
-> 旧地址 `vc-football-manager` 在仓库重命名后会跳转一段时间；书签请改用上方新链接。
+### 快速开始
 
-### 怎么玩（30 秒）
+1. 从五国任一低级别联赛选择一家俱乐部，创建经理并开始赛季。
+2. 在阵容和战术板安排首发、阵型、槽位角色与核心球员。
+3. 推进一天或推进到比赛日；紧急信箱、伤病和比赛会自动中断推进。
+4. 比赛日选择直播、快速高光或一键完赛：直播和快速高光使用同一套空间事件，一键完赛直接生成纯战报。
+5. 中场可以换人、换阵和调整战术；赛后查看评分、xG、上座率和完整报告。
+6. 经营转会、职员、训练、设施和财政，也可以请辞、待业并接受其他俱乐部邀请。
 
-1. 选乙级球队 → **开始新赛季**
-2. **推进一天** / **推进到比赛日**（有比赛时会停）
-3. **战术板** 设阵型 / 角色 / **核心球员 ⭐**，再 **进入比赛**
-4. 赛前简报 → **直播**（高光跳播）/ 快速模拟 / 一键完赛
-5. 可 **暂停**；中场改战术与换人（最多 5 次）；赛后看报告与评分
-6. 随时 **存档**；换设备请 **导出** JSON
+### 游戏世界
 
-### 主要系统
+- **五国联赛体系**：11 个联赛、每个联赛 18 队，共 198 家虚构俱乐部；包含升降级、国内杯赛和完整赛程。
+- **俱乐部洲际赛事**：欧冠、欧联和欧协联采用 8 场联赛阶段与淘汰赛，资格由五国顶级联赛排名决定。
+- **国家队**：俱乐部球员与国家队共享同一能力、状态和伤病数据；包含世界国家杯、欧洲杯、国际比赛日、征召与赛事数据榜。
+- **联赛与赛事中心**：可查看积分、赛程、赛果、射手、助攻、评分和门将榜；国内联赛、杯赛、洲际赛分别记账。
+- **现实层级、虚构品牌**：球队实力、财政和人才分布参考现实竞争层级，但不保存或展示现实俱乐部身份。
 
-- **联赛**：超联 / 甲级 / 乙级，升降级 + **VCFM 杯**
-- **俱乐部浏览器**：积分榜 / 赛程 / 数据榜点队名，或「俱乐部」页筛选搜索
-- **比赛日（空间模拟 + FMM 风表现）**
-  - **用户场**：`SimEngine` 10Hz 空间模拟（持球决策、无球跑位、防守压迫、越位/死球）→ 真实空间事件直接写入比分、报告与积分
-  - **直播**：半场预跑后按 **高光窗口** 细看（进球 / 射门 / 扑救等），平淡段短跳，整场约十分钟量级墙钟
-  - **真空间投影**：录帧 + 插值，俯视球场画布；主客 **同一套跑位 AI**（非单方面）
-  - 跑位包括：前锋回撤接应、**边锋回撤拿球内切** 射/传、边后卫前插传中、中场前插与远射
-  - **球队协同**：统一上抢职责与球权稳定窗；边锋保持宽度、中场分通道接应，减少围球与连续反抢
-  - **完整越位快照**：按队友出脚瞬间记录球、防线和越位球员；定位球首脚按规则豁免
-  - **紧凑进球流程**：短高光、最长 9.5 秒自动回放、自然庆祝；比分与画面使用同一批空间事件
-  - **核心球员**（主客各可有一名）：梅西 / C 罗式进攻绝对权——更爱拿球盘带射门，队友更愿意喂球；未指定时开赛自动选进攻最强者
-  - 广播计分板、实时 **xG / 控球 / 射门**、轻量音效、进球撞网与助攻回放
-  - **赛前简报**、中场换人换阵、赛后 MOTM / 评分；赛程可回看旧战报
-  - 后台 AI 对 AI 场次仍用快速概率引擎（保证推进日不卡）
-- **战术**
-  - 阵型、风格、压迫 / 节奏 / 宽度 / 防线
-  - **槽位角色**（边后卫套边、边路爆破、内切前锋、支点等）
-  - 战术板拖拽换人 + **⭐ 指定核心**
-- **纪律**：累计黄牌停赛、红牌停赛；60'/75' 教练席提示
-- **阵容**：体能、士气、伤病、潜力、球衣号、自动阵容；本赛季出场 / 进球·零封 / 助攻·失球
-- **姓名生成**：按国籍拼音 / 罗马字（中日韩等），短名按姓显示
-- **球员资料**：阵容、青训、数据榜、转会、战术板等处 **点名字** 打开详情
-- **设施 / 转会 / 经营 / 生涯**：球场升级、夏冬窗、续约外租、董事会、职员训练、荣誉与经理战绩
-- **存档**：多槽、自动存、导出提醒
+### 比赛日
+
+- **用户比赛使用空间引擎**：`SimEngine` 模拟持球决策、跑位、压迫、传射、门将、越位、犯规、伤病和定位球；比分、画面、统计与战报来自同一批事件。
+- **三种观看方式**：直播保留完整高光节奏；快速高光跳过平淡时段但细看真实进球与扑救；一键完赛不播放球场动画，直接进入赛后报告。
+- **真实战术因果**：主客队运行同一套 AI；阵型、角色、能力、状态、体能、士气和战术共同影响场上表现，没有只为界面结果服务的隐藏球队加权。
+- **可读的转播表现**：俯视球场、真空间录帧、倍速、暂停、中场调整、进球回放、庆祝、球轨迹、xG、控球和射门统计。
+- **v165 真实性校准**：远射意愿随距离衰减，射门高度与门将反应时间进入结算；抢断、点球、角球和开球站位经过固定种子批量审计。
+- **后台比赛保持轻量**：非用户场次使用快速概率引擎，避免推进赛程时为整轮比赛运行空间模拟。
+
+### 球队管理
+
+- **阵容与球员**：体能、士气、伤病、停赛、潜力、号码、合同、赛季数据和近 5 场滚动状态；自动阵容同时考虑能力、位置、体能和近期表现。
+- **战术**：阵型、风格、压迫、节奏、宽度、防线、槽位角色、核心球员与战术板拖拽换位。
+- **训练与青训**：训练重点、强度、赛前备战、青训名单和球员成长；可委托助理教练按赛程与阵容短板安排。
+- **转会与合同**：夏窗、冬窗、续约、外租、自由球员和 AI 报价；买入经过卖方审核转会费、球员审核合同、还价或拒绝等分阶段谈判。
+- **职员体系**：主教练、球探和队医拥有能力、工资与合同；可以签自由职员、接触其他俱乐部在职职员并支付补偿。
+- **经理生涯**：董事会目标、名望、成就与执教历史；被解雇或主动请辞后进入待业市场，也可能在任时收到更高水平球队邀请。
+
+### 经营与体验
+
+- **财政**：门票、转会净额、工资、设施支出、转播分成和排名奖金使用同一份俱乐部财务数据；赛后显示上座人数与上座率。
+- **设施**：球场、训练、青训、医疗等设施可以升级，并影响收入、成长、恢复和伤病。
+- **信息系统**：信箱、世界新闻、媒体、球探任务、关注列表、球员对话、全局搜索和可连续浏览的球员资料。
+- **存档**：3 个槽位、自动保存、手动保存、JSON 导出与导入；旧存档会在加载时补齐新增字段。
+- **离线支持**：Web App Manifest + Service Worker；版本缓存由入口和审计脚本统一检查。
 
 ### 本地运行
 
-ES Module 需通过 HTTP 打开（不要直接双击 `index.html`）。
+ES Modules 必须通过 HTTP 提供，不要直接双击 `index.html`。
 
-```bash
-# Python
-python -m http.server 8080
-# open http://localhost:8080
+Windows 推荐使用仓库自带脚本，它会清理占用端口、启动 no-store 服务并打开浏览器：
 
-# or Node
-npx serve .
+```powershell
+pwsh -File start-local.ps1
+# http://127.0.0.1:8765/
 ```
 
-开发预览空间引擎（原始未缩放手感）：打开同目录下的 `sim-viewer.html`。
+其他环境可以直接使用 Python：
 
-推送到 `master` 后 GitHub Pages 会更新在线版（可能有缓存，请 **Ctrl+F5** 强刷）。
+```bash
+python -m http.server 8765 --bind 127.0.0.1
+# http://127.0.0.1:8765/
+```
+
+原始空间引擎手感预览：`http://127.0.0.1:8765/sim-viewer.html`
+
+### 验证与审计
+
+```bash
+node scripts/match-realism-audit.mjs 24
+node scripts/transfer-negotiations-audit.mjs
+node scripts/cache-audit.mjs
+node _smoke_p1.mjs
+```
+
+比赛真实性审计使用固定随机种子，检查进球、射门距离与转化率、抢断、犯规、点球、角球、伤病、卡死和强弱队差距。v165 的 24 场等强校准样本为 3.04 球/场、10.5% 射门转化率、37.5% 禁区外射门，30+ 距离零进球。
 
 ### 技术栈
 
-- 静态站点：HTML + CSS + ES Modules（无构建）
-- 比赛核心：`js/sim/engine.js`（空间模拟）+ `js/sim/adapt.js`（接入 match / 直播）
-- 进度：浏览器 `localStorage`
-- 部署：[GitHub Pages](https://pages.github.com/)
-- 可选离线：`manifest.webmanifest` + Service Worker
+- HTML + CSS + 原生 ES Modules，无框架、无构建步骤
+- `js/sim/engine.js`：用户比赛空间模拟
+- `js/sim/adapt.js`：比赛系统、统计与高光接入
+- `localStorage`：本地存档
+- GitHub Pages：在线部署
+- Web App Manifest + Service Worker：安装与离线缓存
 
-### 许可证
+### 许可证与反馈
 
-**[MIT License](./LICENSE)** — 可自由使用、修改、分发（含商业用途），请保留版权与许可证声明。游戏内随机生成的名称仅为玩法素材。
+**[MIT License](./LICENSE)**：可自由使用、修改和分发（包括商业用途），请保留版权和许可证声明。
 
-### 反馈
-
-https://github.com/as7er/vcfm/issues
+问题与建议：https://github.com/as7er/vcfm/issues
 
 ---
 
 ## English
 
-A lightweight browser football manager (**V**C **F**ootball **M**anager). Inspired by [Football Manager](https://www.footballmanager.com/). Pure frontend, no backend — open it on your phone and play on the commute.
+VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-management game inspired by [Football Manager](https://www.footballmanager.com/). It runs entirely in the browser with no backend and no build step, on phones, tablets, and desktop browsers.
 
-> Fan-made simplified entertainment. Not affiliated with Sports Interactive / SEGA.
+> A fan-made simplified game, not affiliated with Sports Interactive or SEGA. Clubs, players, and competition brands are fictional.
 
 ### Play online
 
@@ -109,75 +128,100 @@ A lightweight browser football manager (**V**C **F**ootball **M**anager). Inspir
 
 | | |
 |--|--|
+| Current version | **v165** · match-realism calibration |
 | Devices | Phone, tablet, or desktop browser |
-| Saves | Browser `localStorage`, **3 slots** |
-| Switch device | In-game **export / import** JSON (clearing cache wipes progress) |
-| Install | PWA — “Add to Home Screen” for an app-like feel |
-| Language | Chinese / English · day / night theme |
+| Saves | Browser `localStorage`, 3 slots |
+| Move devices | In-game JSON export / import; export before clearing browser data |
+| Install | PWA support through “Add to Home Screen” |
+| Language and theme | Chinese / English · day / night |
 
-Repo: https://github.com/as7er/vcfm
+Repository: https://github.com/as7er/vcfm
 
-> The old repo name `vc-football-manager` may redirect for a while after the rename; update bookmarks to the link above.
+### Quick start
 
-### How to play (30 seconds)
+1. Choose a club from any of the five nations' lower divisions and create your manager.
+2. Set the lineup, formation, slot roles, and core player on the tactics board.
+3. Advance one day or to matchday; urgent inbox items, injuries, and matches stop progression automatically.
+4. Choose Live, Quick Highlights, or Instant Finish. Live and Quick Highlights share the same spatial events; Instant Finish opens a report without playing the pitch animation.
+5. Make substitutions and tactical changes at half-time, then review ratings, xG, attendance, and the full match report.
+6. Manage transfers, staff, training, facilities, and finances, or resign and continue your career at another club.
 
-1. Pick a Division 3 club → **New season**
-2. **Advance one day** / **Advance to matchday** (stops when you have a match)
-3. Set formation / roles / **core player ⭐** on the tactics board → **Enter match**
-4. Pre-match briefing → **live** (highlight skip) / quick sim / instant finish
-5. **Pause**; half-time tactics & subs (max 5); post-match report & ratings
-6. **Save** often; **export** JSON when changing devices
+### Game world
 
-### Features
+- **Five-nation pyramid**: 11 leagues, 18 clubs per league, and 198 fictional clubs in total, with promotion, relegation, domestic cups, and full schedules.
+- **Continental club competitions**: Champions League, Europa League, and Conference League with an eight-match league phase and knockouts. Qualification comes from top-flight finishes.
+- **International football**: national teams share the same player ability, form, fitness, and injury data as clubs. Includes the World Nations Cup, European Championship, international breaks, call-ups, and competition leaderboards.
+- **Competition centres**: tables, fixtures, results, scorers, assists, ratings, and goalkeeper rankings, with separate domestic-league, cup, and continental stat ledgers.
+- **Realistic hierarchy, fictional identity**: competitive level, finances, and talent distribution follow explainable real-world tiers without storing or displaying real club identities.
 
-- **Leagues**: three tiers with promotion/relegation + **VCFM Cup**
-- **Club browser**: click names on the table / fixtures / stats, or use the **Clubs** tab
-- **Matchday (spatial sim + FMM-style presentation)**
-  - **User matches**: 10Hz `SimEngine` (on-ball decisions, off-ball runs, pressing, offside/restarts) → spatial events directly drive score, reports, and table
-  - **Live**: half pre-simulated, then **highlight windows** (goals / shots / saves) with short skips — full match roughly ~10 minutes wall-clock
-  - **True spatial projection**: recorded frames + interpolation on a top-down canvas; **same AI for both teams**
-  - Movement: strikers drop to link, **wingers drop & cut inside** to shoot/pass, fullbacks overlap/cross, midfield runs & long shots
-  - **Team coordination**: one coordinated presser, possession-stability windows, wide wingers, and lane-based midfield support
-  - **Kick-time offside snapshots**: ball, defensive line, and offside attackers are frozen at the teammate's touch; restart exemptions follow the laws
-  - **Compact goal flow**: short highlights, auto replays capped at 9.5 seconds, and natural celebrations; score and visuals share one spatial event source
-  - **Core player** (one per side): Messi/Ronaldo-style attack rights — more touches, dribbles, shots; teammates feed them. Auto-picked if unset
-  - Scoreboard, live **xG / possession / shots**, light SFX, goal net FX & assist replays
-  - Pre-match briefing, HT changes, MOTM / ratings; rewatch past reports from fixtures
-  - AI-vs-AI background fixtures still use the fast probabilistic engine (calendar stays snappy)
-- **Tactics**: formation, style, sliders, **slot roles**, pitch drag + **⭐ core**
-- **Discipline**, **squad**, nationality-based **names**, click-through **profiles**
-- **Facilities / transfers / board / career** as before
-- **Saves**: multi-slot, autosave, export reminder
+### Matchday
+
+- **Spatial engine for user matches**: `SimEngine` handles on-ball choices, off-ball movement, pressing, passing, shooting, goalkeepers, offside, fouls, injuries, and restarts. Score, visuals, statistics, and reports use the same events.
+- **Three viewing modes**: Live keeps the full highlight rhythm; Quick Highlights skips quiet periods while showing real goals and saves; Instant Finish goes straight to the report.
+- **Shared tactical causality**: both teams run the same AI. Formation, roles, ability, form, fitness, morale, and tactics drive performance without UI-only team weighting.
+- **Broadcast presentation**: top-down pitch, recorded spatial frames, speed controls, pause, half-time changes, replays, celebrations, ball trails, xG, possession, and shot statistics.
+- **v165 realism calibration**: long-shot intent decays with distance; shot height and goalkeeper reaction time affect outcomes; tackles, penalties, corners, and kickoff positions are covered by seeded batch audits.
+- **Fast background simulation**: non-user fixtures retain the probabilistic engine so advancing a full round remains quick.
+
+### Club management
+
+- **Squad and players**: fitness, morale, injuries, suspensions, potential, numbers, contracts, season statistics, and rolling five-match form. Auto-selection considers ability, position, fitness, and form.
+- **Tactics**: formation, style, pressing, tempo, width, defensive line, slot roles, core player, and drag-and-drop changes.
+- **Training and youth**: training focus, intensity, match preparation, youth development, and assistant-manager delegation based on schedule and squad weaknesses.
+- **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Incoming transfers now pass through seller fee review, player contract review, counters, and rejection stages.
+- **Staff**: managers, scouts, and physios have ability, wages, and contracts. Hire free agents or approach employed staff with compensation.
+- **Manager career**: board objectives, reputation, achievements, and job history. Sacking or resignation leads to unemployment and new offers; successful employed managers may receive prestige approaches.
+
+### Operations and usability
+
+- **Finances**: tickets, transfer net spend, wages, facility costs, broadcast distributions, and prize money share one financial ledger. Match reports include attendance and occupancy.
+- **Facilities**: stadium, training, youth, and medical upgrades affect revenue, development, recovery, and injuries.
+- **Information systems**: inbox, world news, media, scouting missions, shortlist, player talks, global search, and continuous player-profile browsing.
+- **Saves**: 3 slots, autosave, manual save, and JSON export/import. Older saves are migrated with defaults for new fields.
+- **Offline support**: Web App Manifest and Service Worker, with cache versions checked by an audit script.
 
 ### Run locally
 
-Serve over HTTP (don’t open `index.html` as a file).
+ES Modules must be served over HTTP; do not open `index.html` directly.
 
-```bash
-# Python
-python -m http.server 8080
-# open http://localhost:8080
+On Windows, the included script clears the configured port, starts a no-store server, and opens the browser:
 
-# or Node
-npx serve .
+```powershell
+pwsh -File start-local.ps1
+# http://127.0.0.1:8765/
 ```
 
-Dev preview of the raw spatial engine: open `sim-viewer.html` in the same folder.
+On other platforms:
 
-Pushing to `master` updates GitHub Pages (hard-refresh with **Ctrl+F5** if cached).
+```bash
+python -m http.server 8765 --bind 127.0.0.1
+# http://127.0.0.1:8765/
+```
+
+Raw spatial-engine preview: `http://127.0.0.1:8765/sim-viewer.html`
+
+### Validation and audits
+
+```bash
+node scripts/match-realism-audit.mjs 24
+node scripts/transfer-negotiations-audit.mjs
+node scripts/cache-audit.mjs
+node _smoke_p1.mjs
+```
+
+The seeded realism audit measures goals, shot distance and conversion, tackles, fouls, penalties, corners, injuries, stalls, and strong-vs-weak performance. The v165 24-match equal-strength baseline produced 3.04 goals per match, 10.5% shot conversion, 37.5% shots from outside the box, and no goals from 30+ distance.
 
 ### Stack
 
-- Static site: HTML + CSS + ES Modules (no build step)
-- Match core: `js/sim/engine.js` + `js/sim/adapt.js`
-- Progress: browser `localStorage`
-- Hosting: [GitHub Pages](https://pages.github.com/)
-- Optional offline: `manifest.webmanifest` + Service Worker
+- HTML + CSS + native ES Modules, with no framework or build step
+- `js/sim/engine.js`: spatial simulation for user matches
+- `js/sim/adapt.js`: match-system, statistics, and highlight integration
+- `localStorage`: local saves
+- GitHub Pages: deployment
+- Web App Manifest + Service Worker: installation and offline cache
 
-### License
+### License and feedback
 
-**[MIT License](./LICENSE)** — free to use, modify, and distribute (including commercially), with copyright and license notice retained. Generated player/club names are fictional gameplay content only.
+**[MIT License](./LICENSE)**: free to use, modify, and distribute, including commercially, with the copyright and license notice retained.
 
-### Feedback
-
-https://github.com/as7er/vcfm/issues
+Issues and suggestions: https://github.com/as7er/vcfm/issues
