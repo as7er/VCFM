@@ -399,7 +399,7 @@ const dict = {
 
     // transfer
     "tr.market": "转会市场",
-    "tr.hint": "夏窗 D1–D50 · 冬窗 D130–D160；窗外无法买卖（AI 同样受限）。买入可谈合同年限与周薪。",
+    "tr.hint": "夏窗 D1–D50 · 冬窗 D90–D125；窗外无法买卖（AI 同样受限）。买入报价由俱乐部与球员分阶段审核。",
     "tr.poach": "来自其他俱乐部的报价",
     "tr.allPos": "全部位置",
     "tr.refresh": "刷新列表",
@@ -888,7 +888,7 @@ const dict = {
     "stats.scopeOneHint": "{name} · league matches only; cups excluded",
 
     "tr.market": "Transfer market",
-    "tr.hint": "Summer D1–35 · Winter D120–145. No buys/sells outside the window (AI included). Negotiate contract years & wages when buying.",
+    "tr.hint": "Summer D1–50 · Winter D90–125. No buys/sells outside the window (AI included). Club and player review incoming offers in stages.",
     "tr.poach": "Incoming bids",
     "tr.allPos": "All positions",
     "tr.refresh": "Refresh list",

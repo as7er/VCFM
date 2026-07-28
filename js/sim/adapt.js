@@ -391,11 +391,21 @@ export function buildHighlightWindows(opts = {}) {
     saveN++;
   }
 
-  // 威胁射门：半场最多 2 次（略加长推镜窗）
-  const shots = raw.filter((e) => e.type === "shot").sort((a, b) => a.t - b.t);
+  // 威胁射门：按同源空间信息排序，避免固定步长反复选中普通超远射。
+  const shotThreat = (e) => {
+    if (e.penalty) return 1;
+    const d = Number.isFinite(Number(e.distance)) ? Number(e.distance) : e.long ? 28 : 16;
+    let threat = 0.55 * Math.exp(-d / 14);
+    if (e.openGoal) threat = Math.max(threat, 0.55);
+    if (e.offTarget) threat *= 0.25;
+    if (e.long) threat *= 0.78;
+    return threat;
+  };
+  const shots = raw
+    .filter((e) => e.type === "shot")
+    .sort((a, b) => shotThreat(b) - shotThreat(a) || a.t - b.t);
   let shotN = 0;
-  const shotStride = Math.max(1, Math.floor(shots.length / 4));
-  for (let i = 0; i < shots.length && shotN < 2; i += shotStride) {
+  for (let i = 0; i < shots.length && shotN < 2; i++) {
     const e = shots[i];
     if (!farFromExisting(e.t, 30)) continue;
     windows.push({

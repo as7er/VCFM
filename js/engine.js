@@ -233,9 +233,18 @@ import {
   resolveInboxAction,
   markInboxRead,
   syncPoachBidsToInbox,
+  syncTransferNegotiationsToInbox,
   pushInbox,
   inboxCatLabel,
 } from "./inbox.js";
+import {
+  ensureTransferNegotiations,
+  findActiveTransferNegotiation,
+  listTransferNegotiations,
+  processTransferNegotiationsDay,
+  respondTransferNegotiation,
+  submitTransferNegotiation,
+} from "./transfer-negotiations.js";
 import {
   processRelationsDay,
   ensureSquadRelations,
@@ -306,8 +315,14 @@ export {
   resolveInboxAction,
   markInboxRead,
   syncPoachBidsToInbox,
+  syncTransferNegotiationsToInbox,
   pushInbox,
   inboxCatLabel,
+  ensureTransferNegotiations,
+  findActiveTransferNegotiation,
+  listTransferNegotiations,
+  respondTransferNegotiation,
+  submitTransferNegotiation,
   processRelationsDay,
   ensureSquadRelations,
   clubAtmosphere,
@@ -514,6 +529,7 @@ export function advanceDay(world) {
   // 待业：日历仍推进（生成工作邀请），但不能经营旧队比赛
   if (world.sacked) {
     world.day += 1;
+    processTransferNegotiationsDay(world);
     ensureManagerJob(world);
     processManagerJobsDay(world);
     return {
@@ -531,6 +547,7 @@ export function advanceDay(world) {
   // 转会窗开/关提示
   ensureTransferWindow(world);
   processTransferWindowDay(world);
+  processTransferNegotiationsDay(world);
   const twEvent = checkTransferWindowEvent(world);
   if (twEvent) events.push(twEvent);
 

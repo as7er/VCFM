@@ -9,6 +9,10 @@ import { acceptPoachBid, rejectPoachBid, ensurePoachBids } from "./poaching.js";
 import { pushMedia } from "./media.js";
 import { isAvailable } from "./discipline.js";
 import { applyPlayerTalk } from "./relations.js";
+import {
+  ensureTransferNegotiations,
+  respondTransferNegotiation,
+} from "./transfer-negotiations.js";
 
 const CAT_LABEL = {
   board: "董事会",
@@ -172,6 +176,116 @@ export function syncPoachBidsToInbox(world) {
   }
 }
 
+function transferNegotiationMail(world, negotiation) {
+  const seller = world.clubs?.find((club) => club.id === negotiation.sellerClubId);
+  const buyer = world.clubs?.find((club) => club.id === negotiation.buyerClubId);
+  const player = (world.clubs || [])
+    .flatMap((club) => club.players || [])
+    .find((candidate) => candidate.id === negotiation.playerId);
+  const playerName = player?.name || negotiation.playerId;
+  const sellerName = seller?.name || negotiation.sellerClubId;
+  const sellerNameEn = seller?.nameEn || sellerName;
+  const buyerName = buyer?.name || negotiation.buyerClubId;
+  const buyerNameEn = buyer?.nameEn || buyerName;
+  const fee = formatMoney(negotiation.fee);
+  const wage = formatMoney(negotiation.wage);
+  const terms = `${negotiation.years} 年 · 周薪 ${wage}`;
+  const termsEn = `${negotiation.years} year(s) · wage ${wage}`;
+
+  if (negotiation.status === "club_counter") {
+    return {
+      priority: 3,
+      title: `${sellerName} 对 ${playerName} 提出还价`,
+      titleEn: `${sellerNameEn} counter your offer for ${playerName}`,
+      body: `对方要求转会费 ${fee}。当前合同报价为 ${terms}。${negotiation.reason || ""}`,
+      bodyEn: `The club want ${fee}. Your contract offer is ${termsEn}. Accepting sends the deal to the player.`,
+      actions: [
+        { id: "accept", label: "接受还价", labelEn: "Accept counter", primary: true },
+        { id: "reject", label: "退出谈判", labelEn: "Walk away" },
+      ],
+    };
+  }
+  if (negotiation.status === "player_counter") {
+    return {
+      priority: 3,
+      title: `${playerName} 提出合同还价`,
+      titleEn: `${playerName} counters the contract offer`,
+      body: `球员要求 ${terms}，签约奖 ${formatMoney(negotiation.signingBonus)}。接受后将立即完成转会。`,
+      bodyEn: `The player wants ${termsEn}, with a ${formatMoney(negotiation.signingBonus)} signing bonus. Accepting completes the transfer.`,
+      actions: [
+        { id: "accept", label: "接受合同", labelEn: "Accept terms", primary: true },
+        { id: "reject", label: "退出谈判", labelEn: "Walk away" },
+      ],
+    };
+  }
+  if (negotiation.status === "completed") {
+    return {
+      priority: 2,
+      title: `${playerName} 已加盟 ${buyerName}`,
+      titleEn: `${playerName} completes move to ${buyerNameEn}`,
+      body: `转会费 ${fee} · ${terms}。俱乐部与球员均已签署协议。`,
+      bodyEn: `Fee ${fee} · ${termsEn}. Club and player have signed the agreement.`,
+    };
+  }
+  if (negotiation.status === "rejected") {
+    const rejected = negotiation.rejectedBy === "player" ? "球员" : "卖方俱乐部";
+    const rejectedEn = negotiation.rejectedBy === "player" ? "The player" : "The selling club";
+    return {
+      priority: 2,
+      title: `${playerName} 的转会谈判破裂`,
+      titleEn: `Talks for ${playerName} break down`,
+      body: `${rejected}拒绝了条款。${negotiation.reason || ""}`,
+      bodyEn: `${rejectedEn} rejected the terms. The negotiation is over.`,
+    };
+  }
+  if (negotiation.status === "cancelled") {
+    return {
+      priority: 2,
+      title: `${playerName} 的转会谈判已取消`,
+      titleEn: `Talks for ${playerName} are cancelled`,
+      body: negotiation.reason || "交易条件已不再成立。",
+      bodyEn: `The deal can no longer proceed: ${negotiation.reason || "conditions changed"}.`,
+    };
+  }
+  return null;
+}
+
+/** 将买入谈判的还价与终局结果同步进信箱。 */
+export function syncTransferNegotiationsToInbox(world) {
+  if (!world) return;
+  ensureInbox(world);
+  const negotiations = ensureTransferNegotiations(world);
+  for (const negotiation of negotiations) {
+    const related = world.inbox.filter(
+      (mail) =>
+        mail.ref?.kind === "transfer_negotiation" &&
+        mail.ref.negotiationId === negotiation.id
+    );
+    for (const mail of related) {
+      if (
+        (mail.status === "pending" || mail.status === "read") &&
+        mail.ref.negotiationRevision !== negotiation.revision
+      ) {
+        finishMail(mail, "谈判状态已更新");
+      }
+    }
+    if (negotiation.userHandledRevision === negotiation.revision) continue;
+    if (related.some((mail) => mail.ref?.negotiationRevision === negotiation.revision)) continue;
+    const article = transferNegotiationMail(world, negotiation);
+    if (!article) continue;
+    pushInbox(world, {
+      category: "transfer",
+      ...article,
+      dedupeKey: `transfer_negotiation_${negotiation.id}_${negotiation.revision}`,
+      ref: {
+        kind: "transfer_negotiation",
+        negotiationId: negotiation.id,
+        negotiationRevision: negotiation.revision,
+      },
+    });
+  }
+}
+
 /** 过期待办 */
 export function expireInbox(world) {
   ensureInbox(world);
@@ -212,6 +326,18 @@ export function resolveInboxAction(world, mailId, actionId) {
     if (act === "reject") {
       const res = rejectPoachBid(world, mail.ref.bidId);
       if (res.ok) finishMail(mail, res.msg);
+      return res;
+    }
+  }
+
+  // —— 用户买入谈判还价 ——
+  if (mail.ref?.kind === "transfer_negotiation") {
+    if (act === "accept" || act === "reject") {
+      const res = respondTransferNegotiation(world, mail.ref.negotiationId, act);
+      if (res.ok) {
+        mail.ref.negotiationRevision = res.negotiation?.revision;
+        finishMail(mail, res.msg);
+      }
       return res;
     }
   }
@@ -329,6 +455,7 @@ export function processInboxDay(world) {
   ensureInbox(world);
   expireInbox(world);
   syncPoachBidsToInbox(world);
+  syncTransferNegotiationsToInbox(world);
 
   const user = world.clubs?.find((c) => c.id === world.userClubId);
   if (!user) return;

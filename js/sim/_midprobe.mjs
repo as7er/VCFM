@@ -36,11 +36,24 @@ for (let i = 0; i < STEPS; i++) {
   ownedTicks++;
   const y = b.y;
   if (y > 33 && y < 67) midTicks++;
-  // 主队攻 y 小：三区 = y<33
-  if (y < 33) { if (!inThirdHome) { entriesHome++; inThirdHome = true; } } else inThirdHome = false;
-  if (y > 67) { if (!inThirdAway) { entriesAway++; inThirdAway = true; } } else inThirdAway = false;
+  // 只统计持球队进入对方三区；旧探针仅按坐标计数，会把防守方在己方后场倒脚
+  // 误算成进攻方反复进入三区。
+  // 球必须回到中线另一侧，才允许记录下一次完整进攻波次；避免前场回做后
+  // 再传被拆成多次“从本方推进到进攻三区”。
+  if (y < 33) {
+    if (!inThirdHome && o.team === "home") entriesHome++;
+    inThirdHome = true;
+  } else if (y > 50) {
+    inThirdHome = false;
+  }
+  if (y > 67) {
+    if (!inThirdAway && o.team === "away") entriesAway++;
+    inThirdAway = true;
+  } else if (y < 50) {
+    inThirdAway = false;
+  }
 }
 
 console.log(`三区进入波次: 主 ${entriesHome}  客 ${entriesAway}  合计 ${entriesHome+entriesAway}`);
 console.log(`中场(y33-67)控球时间占比: ${(midTicks/ownedTicks*100).toFixed(0)}%`);
-console.log(`—— 真实参照：一场约 40-60 次进攻波次进入三区；中场拉锯应占大头 ——`);
+console.log(`—— 现实参照：每队通常约 40-70 次完整波次进入进攻三区；中场区持球约占全场三分之一到四成 ——`);

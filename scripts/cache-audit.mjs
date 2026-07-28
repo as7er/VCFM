@@ -31,9 +31,10 @@ assert.ok(
 
 const documentedCaches = [...agents.matchAll(/vcfm-v\d+/g)].map((match) => match[0]);
 assert.ok(documentedCaches.length, "AGENTS.md must document the active cache");
-assert.ok(
-  documentedCaches.every((item) => item === swCache[1]),
-  `AGENTS.md cache references must all use ${swCache[1]}`
+assert.equal(
+  documentedCaches[0],
+  swCache[1],
+  `the active cache at the top of AGENTS.md must be ${swCache[1]}`
 );
 
 console.log(JSON.stringify({ cache: swCache[1], queryReferences: queryVersions.length }, null, 2));

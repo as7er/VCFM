@@ -29,8 +29,8 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=161";
-import { nationFlagHtml } from "./flags.js?v=161";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=165";
+import { nationFlagHtml } from "./flags.js?v=165";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -124,7 +124,6 @@ import {
   getSortedTable,
   getUserClub,
   getNextUserMatch,
-  buyPlayer,
   sellPlayer,
   getMarketPlayers,
   getStatLeaders,
@@ -206,7 +205,12 @@ import {
   resolveInboxAction,
   markInboxRead,
   syncPoachBidsToInbox,
+  syncTransferNegotiationsToInbox,
   inboxCatLabel,
+  findActiveTransferNegotiation,
+  listTransferNegotiations,
+  respondTransferNegotiation,
+  submitTransferNegotiation,
   clubAtmosphere,
   atmosphereLabel,
   relationLabel,
@@ -278,7 +282,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=161";
+} from "./avatar.js?v=165";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -2094,6 +2098,7 @@ function renderInbox() {
   if (!world) return;
   ensureInbox(world);
   syncPoachBidsToInbox(world);
+  syncTransferNegotiationsToInbox(world);
   const en = getLang() === "en";
   const pendingOnly = inboxFilter === "pending";
   const list = listInbox(world, { pendingOnly, limit: 50 });
@@ -2180,8 +2185,16 @@ function renderInbox() {
     btn.onclick = () => {
       const id = btn.dataset.inboxId;
       const act = btn.dataset.inboxAct;
-      if (act === "accept" && !confirm(en ? "Accept offer and sell the player?" : "确认接受报价并放走球员？")) {
-        return;
+      const mail = world.inbox?.find((item) => item.id === id);
+      if (act === "accept") {
+        const promptText = mail?.ref?.kind === "transfer_negotiation"
+          ? en
+            ? "Accept these transfer terms?"
+            : "确认接受这组转会条款？"
+          : en
+            ? "Accept offer and sell the player?"
+            : "确认接受报价并放走球员？";
+        if (!confirm(promptText)) return;
       }
       const res = resolveInboxAction(world, id, act);
       toast(res.msg || (res.ok ? "OK" : "失败"));
@@ -5447,6 +5460,12 @@ function renderStats() {
     : `<tr><td colspan="9" class="muted">${en ? "No goalkeeper data yet in this scope. This table updates after matches." : "当前范围暂无门将数据，踢完比赛后更新"}</td></tr>`;
 }
 
+function parseMoneyInput(value) {
+  const cleaned = String(value ?? "").replace(/[^\d.-]/g, "");
+  const amount = Number(cleaned);
+  return Number.isFinite(amount) ? Math.round(amount) : 0;
+}
+
 function openBuyNegotiator(playerId, fromClubId) {
   const en = getLang() === "en";
   const deal = previewBuyDeal(world, playerId, fromClubId, 3, 1.1);
@@ -5454,38 +5473,139 @@ function openBuyNegotiator(playerId, fromClubId) {
     toast(en ? "Unable to preview this deal" : "无法预览该交易");
     return;
   }
-  const years = prompt(
+  const feeIn = prompt(
     en
-      ? `${deal.player.name}\nScout estimate ${formatMoney(deal.price)}\nContract length (1–5, default 3):`
-      : `${deal.player.name}\n球探估值约 ${formatMoney(deal.price)}\n合同年限（1–5，默认 3）：`,
+      ? `${deal.player.name}\nScout estimate ${formatMoney(deal.price)}\nTransfer-fee offer:`
+      : `${deal.player.name}\n球探估值约 ${formatMoney(deal.price)}\n请输入转会费报价：`,
+    String(deal.price)
+  );
+  if (feeIn == null) return;
+  const fee = parseMoneyInput(feeIn);
+  const years = prompt(
+    en ? "Contract length (1–5, default 3):" : "合同年限（1–5，默认 3）：",
     "3"
   );
   if (years == null) return;
   const y = Math.max(1, Math.min(5, parseInt(years, 10) || 3));
   const wageIn = prompt(
     en
-      ? `Wage multiplier (0.95–1.4, default 1.1; a low offer may be rejected):\nEstimated wage ${formatMoney(deal.newWage)}`
-      : `周薪倍率（0.95–1.4，默认 1.1；过低可能被拒）：\n预估周薪约 ${formatMoney(deal.newWage)}`,
-    "1.1"
+      ? `Weekly-wage offer (market estimate ${formatMoney(deal.newWage)}):`
+      : `请输入周薪报价（市场参考约 ${formatMoney(deal.newWage)}）：`,
+    String(deal.newWage)
   );
   if (wageIn == null) return;
-  const wm = Math.max(0.9, Math.min(1.5, parseFloat(wageIn) || 1.1));
-  const finalDeal = previewBuyDeal(world, playerId, fromClubId, y, wm);
+  const wage = parseMoneyInput(wageIn);
+  const signingBonus = Math.round(wage * y * 0.5);
   if (
     !confirm(
       en
-        ? `Sign ${finalDeal.player.name}?\nFee ${formatMoney(finalDeal.price)}\nSigning bonus ${formatMoney(finalDeal.signingBonus)}\n${y} years · wage ${formatMoney(finalDeal.newWage)}\nTotal about ${formatMoney(finalDeal.total)}`
-        : `确认签下 ${finalDeal.player.name}？\n转会费 ${formatMoney(finalDeal.price)}\n签约奖 ${formatMoney(finalDeal.signingBonus)}\n${y} 年 · 周薪 ${formatMoney(finalDeal.newWage)}\n合计约 ${formatMoney(finalDeal.total)}`
+        ? `Submit an offer for ${deal.player.name}?\nFee ${formatMoney(fee)}\nSigning bonus ${formatMoney(signingBonus)}\n${y} years · wage ${formatMoney(wage)}\nThe club and player will reply in stages.`
+        : `向 ${deal.player.name} 提交报价？\n转会费 ${formatMoney(fee)}\n签约奖 ${formatMoney(signingBonus)}\n${y} 年 · 周薪 ${formatMoney(wage)}\n俱乐部与球员将分阶段答复。`
     )
   ) {
     return;
   }
-  const res = buyPlayer(world, playerId, fromClubId, { years: y, wageMult: wm });
-  toast(en ? (res.ok ? `${finalDeal.player.name} signed` : "Transfer failed") : res.msg);
+  const res = submitTransferNegotiation(world, playerId, fromClubId, {
+    fee,
+    years: y,
+    wage,
+  });
+  toast(en && res.ok ? `Offer submitted for ${deal.player.name}` : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
   }
+}
+
+function transferNegotiationStatus(negotiation, en) {
+  const labels = {
+    club_review: en ? "Club reviewing offer" : "俱乐部审核报价",
+    club_counter: en ? "Club counter-offer" : "俱乐部还价",
+    player_review: en ? "Player reviewing contract" : "球员审核合同",
+    player_counter: en ? "Player counter-offer" : "球员合同还价",
+    completed: en ? "Completed" : "已成交",
+    rejected: en ? "Rejected" : "已拒绝",
+    cancelled: en ? "Cancelled" : "已取消",
+  };
+  return labels[negotiation.status] || negotiation.status;
+}
+
+function renderTransferNegotiations() {
+  const box = $("#transfer-negotiations");
+  if (!box) return;
+  const en = getLang() === "en";
+  const title = $("#transfer-negotiations-title");
+  if (title) title.textContent = en ? "Transfer negotiations" : "买入谈判";
+  const hint = $("#transfer-negotiations-hint");
+  if (hint) {
+    hint.textContent = en
+      ? "The selling club reviews the fee first, then the player reviews the contract. Counter-offers arrive in your inbox."
+      : "报价先由卖方俱乐部审核，再由球员审核合同；还价会进入信箱。";
+  }
+  const negotiations = listTransferNegotiations(world, { limit: 12 });
+  if (!negotiations.length) {
+    box.innerHTML = `<p class="muted" style="margin:0">${en ? "No negotiations yet." : "暂无买入谈判"}</p>`;
+    return;
+  }
+  box.innerHTML = negotiations
+    .map((negotiation) => {
+      const seller = world.clubs?.find((club) => club.id === negotiation.sellerClubId);
+      const player = (world.clubs || [])
+        .flatMap((club) => club.players || [])
+        .find((candidate) => candidate.id === negotiation.playerId);
+      const playerName = player?.name || negotiation.playerId;
+      const waiting = negotiation.status === "club_review" || negotiation.status === "player_review";
+      const counter = negotiation.status === "club_counter" || negotiation.status === "player_counter";
+      const actionHtml = counter
+        ? `<div class="poach-actions">
+            <button class="btn small primary" data-negotiation-accept="${escapeHtml(negotiation.id)}">${en ? "Accept" : "接受"}</button>
+            <button class="btn small" data-negotiation-reject="${escapeHtml(negotiation.id)}">${en ? "Walk away" : "退出"}</button>
+          </div>`
+        : waiting
+          ? `<div class="poach-actions"><button class="btn small" data-negotiation-withdraw="${escapeHtml(negotiation.id)}">${en ? "Withdraw" : "撤回报价"}</button></div>`
+          : "";
+      const reply = waiting && negotiation.decisionDay
+        ? en
+          ? ` · reply by D${negotiation.decisionDay}`
+          : ` · 预计 D${negotiation.decisionDay} 答复`
+        : "";
+      const reason = negotiation.reason && !en
+        ? `<div class="muted" style="margin-top:0.2rem">${escapeHtml(negotiation.reason)}</div>`
+        : "";
+      return `<div class="poach-row">
+        <div>
+          <strong>${escapeHtml(playerName)}</strong> · ${escapeHtml(seller ? clubDisplayName(seller) : negotiation.sellerClubId)}
+          <div class="muted">${escapeHtml(transferNegotiationStatus(negotiation, en))}${reply} · ${en ? "fee" : "转会费"} ${formatMoney(negotiation.fee)} · ${negotiation.years}${en ? "y" : "年"} / ${en ? "wage" : "周薪"} ${formatMoney(negotiation.wage)}</div>
+          ${reason}
+        </div>
+        ${actionHtml}
+      </div>`;
+    })
+    .join("");
+
+  const handle = (id, action) => {
+    const target = negotiations.find((item) => item.id === id);
+    if (!target) return;
+    if (
+      action === "accept" &&
+      !confirm(en ? "Accept these terms? This may complete the transfer." : "确认接受这些条款？若为球员还价，转会将立即完成。")
+    ) return;
+    const res = respondTransferNegotiation(world, id, action);
+    toast(en ? (res.ok ? "Negotiation updated" : res.msg) : res.msg);
+    if (res.ok) {
+      saveGame(world);
+      refreshAll();
+    }
+  };
+  box.querySelectorAll("[data-negotiation-accept]").forEach((button) => {
+    button.onclick = () => handle(button.dataset.negotiationAccept, "accept");
+  });
+  box.querySelectorAll("[data-negotiation-reject]").forEach((button) => {
+    button.onclick = () => handle(button.dataset.negotiationReject, "reject");
+  });
+  box.querySelectorAll("[data-negotiation-withdraw]").forEach((button) => {
+    button.onclick = () => handle(button.dataset.negotiationWithdraw, "withdraw");
+  });
 }
 
 function renderTransfer() {
@@ -5496,6 +5616,7 @@ function renderTransfer() {
     statusEl.textContent = transferWindowLabel(world, getLang());
     statusEl.className = open ? "transfer-window-box open" : "transfer-window-box closed";
   }
+  renderTransferNegotiations();
 
   // 球探任务 + 关注列表
   const enTr = getLang() === "en";
@@ -5609,6 +5730,11 @@ function renderTransfer() {
   const userClub = getUserClub(world);
   ensureStaff(userClub);
   const buyDisabled = !open || world.sacked;
+  const activeNegotiationIds = new Set(
+    listTransferNegotiations(world, { limit: 100 })
+      .filter((negotiation) => findActiveTransferNegotiation(world, negotiation.playerId))
+      .map((negotiation) => negotiation.playerId)
+  );
   const en = getLang() === "en";
   const watchFilter = $("#filter-watch-only");
   if (watchFilter && !watchFilter.dataset.bound) {
@@ -5619,7 +5745,8 @@ function renderTransfer() {
     .map(({ player: p, club }) => {
       const valTxt = formatScoutValue(world, p);
       const ovrTxt = formatScoutOvr(world, p);
-      const loanable = !p.loan && !buyDisabled;
+      const negotiating = activeNegotiationIds.has(p.id);
+      const loanable = !p.loan && !buyDisabled && !negotiating;
       return `<tr>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}</span></td>
         <td>${nationLabel(p)}</td>
@@ -5631,8 +5758,8 @@ function renderTransfer() {
         <td class="tr-actions">
           <button class="btn small" data-player-link="${p.id}">${en ? "Info" : "详情"}</button>
           <button class="btn small primary" data-buy="${p.id}" data-from="${club.id}" ${
-            buyDisabled ? "disabled" : ""
-          }>${open ? (en ? "Buy" : "谈判买入") : en ? "Closed" : "窗关"}</button>
+            buyDisabled || negotiating ? "disabled" : ""
+          }>${negotiating ? (en ? "In talks" : "谈判中") : open ? (en ? "Bid" : "谈判买入") : en ? "Closed" : "窗关"}</button>
           <button class="btn small" data-loan-in="${p.id}" data-from="${club.id}" ${
             loanable ? "" : "disabled"
           }>${open ? (en ? "Loan" : "租入") : en ? "Closed" : "窗关"}</button>
