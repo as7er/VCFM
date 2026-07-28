@@ -1506,8 +1506,18 @@ export function teamRoleMods(club) {
   return mods;
 }
 
+/**
+ * 自动阵容选人分：能力 × 体能 × 士气 × 近况状态。
+ * form 为最近评分均值（约 5–8）；以 6.5 为中性，温和放大/缩小，不压过 OVR 主轴。
+ */
 function xiSortScore(p) {
-  return (p.ovr || 10) * ((p.fitness || 100) / 100) * (0.85 + (p.morale || 70) / 500);
+  const base =
+    (p.ovr || 10) * ((p.fitness || 100) / 100) * (0.85 + (p.morale || 70) / 500);
+  const form = playerForm(p);
+  if (form == null || Number.isNaN(Number(form))) return base;
+  // form 5.0 → 0.93 · 6.5 → 1.00 · 7.5 → 1.045 · 8.5 → 1.09（钳制 0.88–1.12）
+  const formMul = Math.max(0.88, Math.min(1.12, 1 + (Number(form) - 6.5) * 0.045));
+  return base * formMul;
 }
 
 export function autoLineup(club) {

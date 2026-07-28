@@ -319,6 +319,8 @@ export function matchdayIncome(club, options = {}) {
   }
 
   const fill = fillMin + Math.random() * (fillMax - fillMin);
+  const capacity = st.capacity || 0;
+  const attendance = Math.max(0, Math.round(capacity * fill));
   const gateIncome = Math.round(base * fill);
   let income = gateIncome;
 
@@ -367,6 +369,17 @@ export function matchdayIncome(club, options = {}) {
   if (tier === 1) income = Math.round(income * 1.25);
   else if (tier === 2) income = Math.round(income * 1.1);
 
+  // options.detail === true 时返回明细（上座/容量），默认仍返回金额以兼容旧调用
+  if (options.detail) {
+    return {
+      income,
+      attendance,
+      capacity,
+      fill: Math.round(fill * 1000) / 10,
+      stadiumName: st.name || "",
+      gateBase: gateIncome,
+    };
+  }
   return income;
 }
 
@@ -391,6 +404,99 @@ export function facilitySummaryLine(club) {
     .join(" · ");
   const base = `球场 Lv.${st.level} · 训练 Lv.${tr.level} · 青训 Lv.${y.level}`;
   return building ? `${base}（${building}）` : base;
+}
+
+/**
+ * 联赛转播分成 + 名次奖金（赛季末、升降级前按最终积分榜结算）。
+ * 现实口径：转播约一半均分、一半按名次；奖金随名次递减；顶级联赛体量远大于次级。
+ *
+ * @param {number} position 1-based 名次
+ * @param {number} nTeams 联赛队数
+ * @param {number} tier 联赛层级 1|2|3
+ * @returns {{ broadcast: number, prize: number, total: number }}
+ */
+export function leagueEndSeasonPayout(position, nTeams = 18, tier = 2) {
+  const n = Math.max(2, Math.round(Number(nTeams) || 18));
+  const pos = Math.max(1, Math.min(n, Math.round(Number(position) || n)));
+  const t = Math.max(1, Math.min(3, Math.round(Number(tier) || 2)));
+
+  // 联赛转播总池 / 名次奖金总池（与开局资金、门票量级对齐）
+  const TV_POT = { 1: 54_000_000, 2: 12_000_000, 3: 3_200_000 };
+  const PRIZE_POT = { 1: 10_000_000, 2: 2_400_000, 3: 700_000 };
+  const tvPot = TV_POT[t] || TV_POT[2];
+  const prizePot = PRIZE_POT[t] || PRIZE_POT[2];
+
+  // 转播：50% 均分 + 50% 名次权重（第1名权重 n … 末名 1）
+  const equalShare = tvPot * 0.5 / n;
+  const weight = n - pos + 1;
+  const weightSum = (n * (n + 1)) / 2;
+  const meritShare = (tvPot * 0.5) * (weight / weightSum);
+  const broadcast = Math.round(equalShare + meritShare);
+
+  // 名次奖金：权重平方，冠军显著更高（接近现实）
+  const prizeWeight = weight * weight;
+  let prizeWeightSum = 0;
+  for (let i = 1; i <= n; i++) prizeWeightSum += i * i;
+  const prize = Math.round(prizePot * (prizeWeight / prizeWeightSum));
+
+  return { broadcast, prize, total: broadcast + prize };
+}
+
+/**
+ * 为世界内全部俱乐部结算赛季转播/名次奖金，写入 money 与 finance 账本。
+ * 须在升降级改写 division 之前调用。
+ * @returns {{ userPayout: object|null, paidClubs: number }}
+ */
+export function applySeasonLeagueFinance(world, getSortedTableFn) {
+  if (!world?.clubs?.length || typeof getSortedTableFn !== "function") {
+    return { userPayout: null, paidClubs: 0 };
+  }
+  let paidClubs = 0;
+  let userPayout = null;
+  const divIds = [
+    ...new Set(
+      world.clubs.map((c) => c.division).filter((d) => d != null)
+    ),
+  ];
+
+  for (const divId of divIds) {
+    const ranked = getSortedTableFn(world, divId) || [];
+    if (!ranked.length) continue;
+    const tier = DIVISIONS[divId]?.tier || 2;
+    const n = ranked.length;
+    const divName = DIVISIONS[divId]?.name || `联赛${divId}`;
+
+    ranked.forEach((row, idx) => {
+      const pos = idx + 1;
+      const club = world.clubs.find((c) => c.id === row.id);
+      if (!club) return;
+      const pay = leagueEndSeasonPayout(pos, n, tier);
+      if (pay.total <= 0) return;
+      club.money = (Number(club.money) || 0) + pay.total;
+      if (!club.finance || typeof club.finance !== "object") club.finance = {};
+      club.finance.seasonBroadcastIncome =
+        (Number(club.finance.seasonBroadcastIncome) || 0) + pay.broadcast;
+      club.finance.seasonPrizeIncome =
+        (Number(club.finance.seasonPrizeIncome) || 0) + pay.prize;
+      club.finance.lastBroadcastPayout = pay.broadcast;
+      club.finance.lastPrizePayout = pay.prize;
+      club.finance.lastPrizePos = pos;
+      club.finance.lastPrizeDivision = divId;
+      club.finance.lastPrizeDivisionName = divName;
+      club.finance.lastLeaguePayoutSeason = world.season;
+      paidClubs++;
+      if (club.id === world.userClubId) {
+        userPayout = {
+          club,
+          pos,
+          divName,
+          tier,
+          ...pay,
+        };
+      }
+    });
+  }
+  return { userPayout, paidClubs };
 }
 
 export { LABELS as FACILITY_LABELS };

@@ -198,13 +198,36 @@ export function financeSnapshot(world) {
   const weekly = squadWage + youthWage + staffWage + upkeep;
   const money = club.money || 0;
   const weeksCover = weekly > 0 ? Math.floor(money / weekly) : 99;
-  // 门票（主场比赛日收入）：赛后写入 club.finance
+  // 赛季账本：赛后/发薪/转会写入 club.finance（无隐藏账）
   const fin = club.finance && typeof club.finance === "object" ? club.finance : {};
   const seasonTickets = Number(fin.seasonTicketIncome) || 0;
   const lastTicket = fin.lastTicketIncome != null ? Number(fin.lastTicketIncome) : null;
   const lastTicketDay = fin.lastTicketDay != null ? Number(fin.lastTicketDay) : null;
+  const lastAttendance = fin.lastAttendance != null ? Number(fin.lastAttendance) : null;
+  const lastCapacity = fin.lastCapacity != null ? Number(fin.lastCapacity) : null;
+  const lastFillPct = fin.lastFillPct != null ? Number(fin.lastFillPct) : null;
+  const seasonWageOut = Number(fin.seasonWageOut) || 0;
+  const seasonFacilityOut = Number(fin.seasonFacilityOut) || 0;
+  const seasonTransferNet = Number(fin.seasonTransferNet) || 0;
+  const seasonHomeGates = Number(fin.seasonHomeGates) || 0;
+  const seasonBroadcast = Number(fin.seasonBroadcastIncome) || 0;
+  const seasonPrize = Number(fin.seasonPrizeIncome) || 0;
+  const lastBroadcast = fin.lastBroadcastPayout != null ? Number(fin.lastBroadcastPayout) : null;
+  const lastPrize = fin.lastPrizePayout != null ? Number(fin.lastPrizePayout) : null;
+  const lastPrizePos = fin.lastPrizePos != null ? Number(fin.lastPrizePos) : null;
+  const lastPrizeDivName = fin.lastPrizeDivisionName || null;
+  const lastLeaguePayoutSeason =
+    fin.lastLeaguePayoutSeason != null ? Number(fin.lastLeaguePayoutSeason) : null;
   const st = stadiumInfo(club);
   const estTicket = st?.matchday != null ? Math.round(st.matchday * 0.88) : null;
+  // 粗算：本季净额 ≈ 门票 + 转播/奖金 + 转会净 − 已记账工资/设施
+  const seasonNetApprox =
+    seasonTickets +
+    seasonBroadcast +
+    seasonPrize +
+    seasonTransferNet -
+    seasonWageOut -
+    seasonFacilityOut;
   return {
     money,
     squadWage,
@@ -216,15 +239,27 @@ export function financeSnapshot(world) {
     windowOpen: isTransferWindowOpen(world),
     warning: weeksCover < 8,
     critical: weeksCover < 4,
-    /** 本赛季累计门票（主场） */
     seasonTickets,
-    /** 最近一场主场门票 */
     lastTicket,
     lastTicketDay,
-    /** 球场铭牌预估单场票房（非实际） */
+    lastAttendance,
+    lastCapacity,
+    lastFillPct,
     estTicket,
     stadiumName: st?.name || "",
     capacity: st?.capacity || 0,
+    seasonWageOut,
+    seasonFacilityOut,
+    seasonTransferNet,
+    seasonHomeGates,
+    seasonBroadcast,
+    seasonPrize,
+    lastBroadcast,
+    lastPrize,
+    lastPrizePos,
+    lastPrizeDivName,
+    lastLeaguePayoutSeason,
+    seasonNetApprox,
   };
 }
 

@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=160" />
+  <link rel="stylesheet" href="css/style.css?v=163" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -1141,9 +1141,9 @@
             <button type="button" id="btn-match-sfx" class="btn small" data-i18n="match.sfx" data-i18n-title="match.sfxHint" aria-pressed="false">音效</button>
           </div>
           <div class="match-actions" id="match-main-actions">
-            <button id="btn-sim-fast" class="btn primary" data-i18n="match.fast">快速模拟（中场可调）</button>
+            <button id="btn-sim-fast" class="btn primary" data-i18n="match.fast">快速高光（中场可调）</button>
             <button id="btn-sim-live" class="btn" data-i18n="match.live">直播（中场可调）</button>
-            <button id="btn-sim-instant" class="btn" data-i18n="match.instant">一键完赛</button>
+            <button id="btn-sim-instant" class="btn" data-i18n="match.instant">一键战报</button>
             <button id="btn-match-continue" class="btn" disabled data-i18n="match.continue">赛后继续</button>
           </div>
         </footer>
@@ -1162,12 +1162,32 @@
     <div id="season-summary" class="season-summary hidden" role="dialog" aria-modal="true"></div>
   </div>
 
-  <script type="module" src="js/main.js?v=160"></script>
+  <script>
+    // 启动失败时写到登录页提示，避免「下拉空白却无报错」
+    (function () {
+      function showBootError(msg) {
+        var h = document.getElementById("start-hint");
+        if (h) {
+          h.textContent = "启动失败： " + msg + "（请用 http://127.0.0.1:端口/ 打开，勿双击 html；并 Ctrl+F5 强刷）";
+          h.style.color = "#f87171";
+        }
+        try { console.error("[VCFM boot]", msg); } catch (e) {}
+      }
+      window.addEventListener("error", function (e) {
+        showBootError(e.message || String(e));
+      });
+      window.addEventListener("unhandledrejection", function (e) {
+        var r = e.reason;
+        showBootError((r && r.message) ? r.message : String(r));
+      });
+    })();
+  </script>
+  <script type="module" src="js/main.js?v=163"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v160";
+        var CURRENT_CACHE = "vcfm-v163";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1177,7 +1197,8 @@
             );
           }).catch(function () {});
         }
-        navigator.serviceWorker.register("./sw.js?v=160").then(function (reg) {
+        // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
+        navigator.serviceWorker.register("./sw.js?v=163").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1186,8 +1207,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v160")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v160", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v161")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v161", "1");
               location.reload();
             }
           } catch (e) {

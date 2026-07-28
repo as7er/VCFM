@@ -462,6 +462,23 @@ export function listApproachableStaff(world, buyerClub) {
       const windowOpen = isTransferWindowOpen(world);
       if (!windowOpen && (s.contractYears || 1) > 1) continue;
       const comp = staffCompensationFee(s);
+      const years = s.contractYears || 1;
+      const st = club.realityProfile?.stature || "";
+      const tags = [];
+      if (years <= 1) tags.push({ id: "short", zh: "短合同易挖", en: "Short deal" });
+      if (st === "global_power" || st === "title_contender") {
+        tags.push({ id: "elite", zh: "豪门惜售", en: "Elite club" });
+      }
+      if ((s.rating || 0) >= 16) tags.push({ id: "star", zh: "高能力", en: "Top rated" });
+      if ((club.power || 0) + 8 < (buyerClub.power || 0)) {
+        tags.push({ id: "weaker", zh: "弱队更易放", en: "Weaker seller" });
+      }
+      const difficulty =
+        (st === "global_power" || st === "title_contender") && (s.rating || 0) >= 16
+          ? "hard"
+          : years <= 1
+            ? "easy"
+            : "normal";
       out.push({
         staff: s,
         fromClub: club,
@@ -469,6 +486,20 @@ export function listApproachableStaff(world, buyerClub) {
         compensation: comp,
         signingFee: 0,
         totalCost: comp,
+        tags,
+        difficulty,
+        hintZh:
+          difficulty === "hard"
+            ? "豪门高能力职员：即使溢价也可能拒绝"
+            : difficulty === "easy"
+              ? "合同将尽，成交概率较高"
+              : "按公允补偿接触，结果看对方态度",
+        hintEn:
+          difficulty === "hard"
+            ? "Elite high-rated staff may refuse even strong bids"
+            : difficulty === "easy"
+              ? "Expiring contract — higher chance"
+              : "Fair compensation; outcome depends on the club",
       });
     }
   }
@@ -606,13 +637,39 @@ export function approachStaff(world, buyerClubId, staffId, fromClubId = null) {
     approach.status = "rejected";
     world.staffApproaches.unshift(approach);
     if (world.staffApproaches.length > 24) world.staffApproaches.length = 24;
+    const reasons = staffRejectReasons(fromClub, staff, compensation, buyer);
     return {
       ok: false,
-      msg: `${clubNameOf(fromClub)} 拒绝放人（报价 ${formatMoney(compensation)} 未达预期，可提高时机或等合同更短）`,
+      reason: "refused",
+      reasons,
+      msg: `${clubNameOf(fromClub)} 拒绝放走 ${staff.name}：${reasons.join("；")}`,
       approach,
     };
   }
-  return completeStaffMove(world, approach);
+  const done = completeStaffMove(world, approach);
+  if (done.ok) {
+    done.msg = `${done.msg}（对方接受了 ${formatMoney(compensation)} 补偿）`;
+  }
+  return done;
+}
+
+/** 拒绝原因（给 UI/toast，可解释） */
+export function staffRejectReasons(fromClub, staff, compensation, buyer) {
+  const reasons = [];
+  const fair = staffCompensationFee(staff) || 1;
+  const ratio = compensation / fair;
+  const years = staff.contractYears || 1;
+  const st = fromClub?.realityProfile?.stature || "";
+  if (ratio < 1.05) reasons.push("补偿未达心理预期");
+  if (years >= 3) reasons.push(`合同仍有 ${years} 年`);
+  if ((st === "global_power" || st === "title_contender") && (staff.rating || 0) >= 16) {
+    reasons.push("豪门不愿放走核心职员");
+  }
+  if ((buyer.power || 0) + 5 < (fromClub.power || 0)) {
+    reasons.push("认为你的平台更低");
+  }
+  if (!reasons.length) reasons.push("董事会暂时无意放人，可稍后再试或等合同更短");
+  return reasons;
 }
 
 function aiSellerAcceptChance(fromClub, staff, compensation, buyer) {
@@ -693,6 +750,10 @@ export function completeStaffMove(world, approach) {
 
   // 买方原岗位 → 自由身
   const displaced = buyer.staff[role];
+  const displacedName =
+    displaced && displaced.id !== staff.id ? displaced.name : null;
+  const displacedRating =
+    displaced && displaced.id !== staff.id ? displaced.rating : null;
   if (displaced && displaced.id !== staff.id) {
     pushFreeAgent(world, { ...displaced, clubId: null, contractYears: 0 });
   }
@@ -728,10 +789,28 @@ export function completeStaffMove(world, approach) {
     ? `已签下自由身 ${staff.name} 任${ROLES[role].label}（${feeTxt}，周薪 ${formatMoney(wageOffer)}，${years} 年）`
     : `已从 ${approach.fromClubName} 签下 ${staff.name} 任${ROLES[role].label}（${feeTxt}，周薪 ${formatMoney(wageOffer)}，${years} 年）`;
 
-  world.news?.unshift({
-    day: world.day,
-    text: `👔 ${clubNameOf(buyer)}：${msg}`,
-  });
+  // 主教练变动写入更醒目的「换帅」世界新闻（AI/用户共用同一通道）
+  if (role === "coach") {
+    const fromBit = approach.freeAgent
+      ? "自由市场"
+      : approach.fromClubName || clubNameOf(fromClub);
+    const outBit = displacedName
+      ? `，原主教练 ${displacedName}${displacedRating != null ? `（${displacedRating}）` : ""} 离任`
+      : "";
+    const sellerBit =
+      fromClub && !approach.freeAgent
+        ? `；${clubNameOf(fromClub)} 暂由临时主帅接管`
+        : "";
+    world.news?.unshift({
+      day: world.day,
+      text: `📢 换帅：${clubNameOf(buyer)} 任命 ${staff.name}（${staff.rating}）为主教练，来自${fromBit}${outBit}${sellerBit}。${feeTxt}，周薪 ${formatMoney(wageOffer)}，合同 ${years} 年。`,
+    });
+  } else {
+    world.news?.unshift({
+      day: world.day,
+      text: `👔 ${clubNameOf(buyer)}：${msg}`,
+    });
+  }
 
   return { ok: true, msg, approach, staff: buyer.staff[role] };
 }

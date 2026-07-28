@@ -669,12 +669,6 @@ export class MatchView {
     const sp = this._simPlay;
 
     if (kind === "goal") {
-      this.camMode = "follow";
-      this.camBoostUntil = now + 4200;
-      this.fsm.transition('GOAL_SEQUENCE', 'STRIKE');
-      this._netHitDone = false;
-      this.fieldEl?.classList.add("mp-replay-slow");
-      // 先播 3s 助攻→射门→入网，再庆祝（勿立刻聚拢抢戏）
       const fixture = opts.fixture;
       const homeId = fixture?.home || this.home?.id;
       const attHome =
@@ -683,20 +677,54 @@ export class MatchView {
           : opts.ev?.teamId
             ? opts.ev.teamId === homeId
             : true;
+      const scorer =
+        (opts.ev?.playerId && this.players.find((p) => p.id === opts.ev.playerId)) ||
+        null;
+
+      // 空间投影已有真实射门帧：禁止 _beginGoalBeat 瞬移重演，只做轻慢镜点缀
+      if (this.simDrive || this._simPlay) {
+        this.camMode = "follow";
+        this.camBoostUntil = now + 1800;
+        this.fsm.transition('GOAL_SEQUENCE', 'STRIKE');
+        this.fieldEl?.classList.add("mp-replay-slow");
+        if (scorer) {
+          scorer.el.classList.add("scorer", "highlight");
+          this._setFocus([scorer], 1600);
+        }
+        if (sp) {
+          sp.eventRateMul = 0.55;
+          sp.eventSlowUntil = now + 1200;
+          sp.rateMul = Math.min(sp.rateMul || 1, 0.55);
+          sp.directorPhase = "impact";
+          sp.assistId = opts.ev?.assistId || sp.assistId || null;
+          sp.scorerId = opts.ev?.playerId || scorer?.id || null;
+        }
+        // 约 1.2s 后清掉 slow 角标，避免整段高光都挂着紫色 SLOW-MO
+        setTimeout(() => {
+          if (!this._simPlay) this._clearDirectorChrome();
+          else if (performance.now() > (this._simPlay.eventSlowUntil || 0)) {
+            this.fieldEl?.classList.remove("mp-replay-slow");
+          }
+        }, 1300);
+        return;
+      }
+
+      // 无真帧时：旧编舞助攻→射门→入网
+      this.camMode = "follow";
+      this.camBoostUntil = now + 4200;
+      this.fsm.transition('GOAL_SEQUENCE', 'STRIKE');
+      this._netHitDone = false;
+      this.fieldEl?.classList.add("mp-replay-slow");
       this._beginGoalBeat(opts.ev || {}, { attHome, lang });
-      // 横幅稍晚由 beat 入网时打出；此处兜底文案
       this.setFmmTicker?.(
         lang === "en" ? "GOAL!!" : "入球了!!",
         "goal",
         0
       );
-      const scorer =
-        (opts.ev?.playerId && this.players.find((p) => p.id === opts.ev.playerId)) ||
-        null;
       if (sp) {
-        sp.eventRateMul = 0.32;
-        sp.eventSlowUntil = now + 3200;
-        sp.rateMul = Math.min(sp.rateMul || 1, 0.32);
+        sp.eventRateMul = 0.42;
+        sp.eventSlowUntil = now + 2400;
+        sp.rateMul = Math.min(sp.rateMul || 1, 0.42);
         sp.directorPhase = "impact";
         sp.assistId = opts.ev?.assistId || sp.assistId || null;
         sp.scorerId = opts.ev?.playerId || scorer?.id || null;
@@ -887,16 +915,21 @@ export class MatchView {
         sp.directorPhase = "slow";
         this.camMode = wide ? "follow" : "box";
         this.camBoostUntil = Math.max(this.camBoostUntil, now + 700);
-        scriptMul = isBig ? 0.38 : isSave ? 0.45 : isChance ? 0.5 : 0.58;
+        // 进球慢镜略收：迷你球场上 0.38 太「电影预告片」，易与真帧脱节
+        scriptMul = isBig ? 0.52 : isSave ? 0.45 : isChance ? 0.5 : 0.58;
         if (isBig || isSave) this.fieldEl?.classList.add("mp-replay-slow");
         if (isBig && sp.scorerId) {
           const sc = this.players.find((p) => p.id === sp.scorerId);
-          if (sc) this._setFocus([sc], 2200);
+          if (sc) this._setFocus([sc], 1800);
         }
-      } else if (after < (isBig ? 2.8 : isSave ? 1.8 : 1.2)) {
+      } else if (after < (isBig ? 1.6 : isSave ? 1.8 : 1.2)) {
         sp.directorPhase = "impact";
         this.camMode = wide ? "follow" : "box";
-        scriptMul = isBig ? 0.4 : isSave ? 0.52 : 0.65;
+        scriptMul = isBig ? 0.58 : isSave ? 0.52 : 0.65;
+        // 入网后尽快去掉 SLOW-MO 角标，让庆祝/复位更干净
+        if (isBig && after > 0.55) {
+          this.fieldEl?.classList.remove("mp-replay-slow");
+        }
       } else {
         sp.directorPhase = "settle";
         scriptMul = 0.9;
@@ -5567,21 +5600,24 @@ export class MatchView {
           setTimeout(() => this.setBanner(""), 1600);
           break;
         case "goal": {
-          this.camMode = "box";
-          this.camBoostUntil = performance.now() + 1400;
+          // 真帧路径：入网/站位已由 sim 时间轴决定，UI 只做轻提示，避免再叠「假射门/大横幅/硬切 box」
+          this.camMode = "follow";
+          this.camBoostUntil = performance.now() + 1600;
           const scorer = ev.playerId && this.players.find((p) => p.id === ev.playerId);
           if (scorer) {
             scorer.el.classList.add("scorer", "highlight");
-            this._setFocus([scorer], 2000);
-            setTimeout(() => scorer.el.classList.remove("scorer", "highlight"), 2200);
+            this._setFocus([scorer], 1600);
+            setTimeout(() => scorer.el.classList.remove("scorer", "highlight"), 1800);
           }
-          this.setBanner("⚽ GOAL!", "goal");
-          // 进球只保留中央主提示 + 底栏事件文案；不再把同一句话复制到场内字幕。
+          // 底栏事件句即可；中央不打巨型 GOAL，减少与真实入网叠戏
           this.setCaption("");
-          this.setFmmTicker(ev.text || "GOAL", "goal", 1800);
+          this.setBanner("");
+          this.setFmmTicker(ev.text || "GOAL", "goal", 2000);
           this.playSfx("goal");
-          this.playSfx("cheer");
-          setTimeout(() => this.setBanner(""), 1800);
+          // cheer 略延迟，避免与 netHit 音效糊成一片
+          setTimeout(() => {
+            if (this._built) this.playSfx("cheer");
+          }, 180);
           break;
         }
         case "save":
@@ -6816,56 +6852,36 @@ export class MatchView {
     return { gx: clamp(gx, 42, 58), gy: clamp(gy, 0.6, 99.4) };
   }
 
-  /** 进球入网特效：球门网撞击 + 网纹 + 球门区域轻闪 */
+  /** 进球入网特效：克制版——球门微颤 + 单层网 + 轻闪（避免迷你球场上的街机光污染） */
   _goalNetEffect(gx, gy, attHome) {
-    this._burst(gx, gy, "goal");
-    // 永久球门口“被撞凹”再回弹
+    // 永久球门口微颤
     const mouthSel = attHome ? ".mp-goal-mouth.top" : ".mp-goal-mouth.bot";
     const mouth = this.fieldEl?.querySelector(mouthSel);
     if (mouth) {
       mouth.classList.remove("mp-goal-mouth-hit");
-      // 强制重启动画
       void mouth.offsetWidth;
       mouth.classList.add("mp-goal-mouth-hit");
-      setTimeout(() => mouth.classList.remove("mp-goal-mouth-hit"), 1000);
+      setTimeout(() => mouth.classList.remove("mp-goal-mouth-hit"), 520);
     }
-    // 球门端轻闪；CSS 已限制范围和透明度。
+    // 球门端极轻径向闪
     if (this.fieldEl) {
       this.fieldEl.style.setProperty("--goal-flash-y", attHome ? "6%" : "94%");
       this.fieldEl.classList.remove("mp-goal-flash");
       void this.fieldEl.offsetWidth;
       this.fieldEl.classList.add("mp-goal-flash");
-      setTimeout(() => this.fieldEl?.classList.remove("mp-goal-flash"), 350);
+      setTimeout(() => this.fieldEl?.classList.remove("mp-goal-flash"), 280);
     }
     if (!this.fxLayer) return;
-    // 大块球网涟漪（比旧版更大更久）
+    // 单层小网涟漪（去掉第二层大网 + 爆炸光环 + 绿色 burst）
     const net = document.createElement("div");
     net.className = `mp-goal-net ${attHome ? "top" : "bottom"}`;
     net.style.left = `${gx}%`;
     net.style.top = `${gy}%`;
     this.fxLayer.appendChild(net);
-    setTimeout(() => net.remove(), 1200);
-    // 第二层稍大、稍晚，增强撞击层次
-    const net2 = document.createElement("div");
-    net2.className = `mp-goal-net ${attHome ? "top" : "bottom"}`;
-    net2.style.left = `${gx}%`;
-    net2.style.top = `${gy}%`;
-    net2.style.width = "68px";
-    net2.style.height = "40px";
-    net2.style.margin = "-12px 0 0 -34px";
-    net2.style.opacity = "0.85";
-    this.fxLayer.appendChild(net2);
-    setTimeout(() => net2.remove(), 1300);
-    // 入网光环
-    const ring = document.createElement("div");
-    ring.className = "mp-goal-ring";
-    ring.style.left = `${gx}%`;
-    ring.style.top = `${gy}%`;
-    this.fxLayer.appendChild(ring);
-    setTimeout(() => ring.remove(), 1000);
-    // 球本身闪一下
+    setTimeout(() => net.remove(), 720);
+    // 球轻微强调即可
     this.ball.el?.classList.add("mp-ball-goal");
-    setTimeout(() => this.ball.el?.classList.remove("mp-ball-goal"), 1000);
+    setTimeout(() => this.ball.el?.classList.remove("mp-ball-goal"), 520);
   }
 
   _playGoalShot(ev, snap, fixture, { celebrateMs = 2800, skipReset = false } = {}) {

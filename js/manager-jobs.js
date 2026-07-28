@@ -52,6 +52,23 @@ export function ensureManagerJob(world) {
   return j;
 }
 
+/** 名望档位文案 */
+export function reputationTierLabel(rep, lang = "zh") {
+  const r = Number(rep) || 0;
+  if (lang === "en") {
+    if (r >= 75) return "Elite";
+    if (r >= 60) return "Established";
+    if (r >= 45) return "Promising";
+    if (r >= 30) return "Developing";
+    return "Fringe";
+  }
+  if (r >= 75) return "顶级名帅";
+  if (r >= 60) return "成名教头";
+  if (r >= 45) return "新锐主帅";
+  if (r >= 30) return "成长中";
+  return "边缘人选";
+}
+
 /** 0–100 名望：决定邀请档次 */
 export function managerReputation(world) {
   const c = ensureManagerCareer(world);
@@ -97,17 +114,21 @@ function offerWage(rep, club) {
 
 function makeOffer(world, club, kind, note) {
   const rep = managerReputation(world);
+  const tier = clubTier(club);
+  const repTier = reputationTierLabel(rep, "zh");
   return {
     id: uid(),
     clubId: club.id,
     clubName: club.name || club.nameZh || club.id,
     division: club.division,
     divName: DIVISIONS[club.division]?.name || "",
-    tier: clubTier(club),
+    tier,
     power: club.power,
     kind, // sack_rehire | resign | prestige | lateral
     wage: offerWage(rep, club),
     note: note || "",
+    repAtOffer: rep,
+    repTier,
     day: world.day || 1,
     expiresDay: (world.day || 1) + 12,
     status: "pending",
@@ -160,18 +181,19 @@ export function generateJobOffers(world, { force = false, count = 3 } = {}) {
     : "prestige";
 
   const n = force ? count : Math.min(count, unemployed ? 4 : 2);
+  const repLabel = reputationTierLabel(rep, "zh");
   for (let i = 0; i < Math.min(n, pool.length); i++) {
     const { club, tier } = pool[i];
     let note;
     if (kind === "prestige") {
       note =
         tier === 1
-          ? "看好你的执教成绩，邀请执教顶级联赛球队"
-          : "希望你能带队冲击更高目标";
+          ? `以你目前「${repLabel}」名望（${rep}），特邀执教顶级联赛`
+          : `认可近况，邀请冲击更高目标（名望 ${rep} · ${repLabel}）`;
     } else if (kind === "sack_rehire") {
-      note = "董事会认可你的能力，提供重新上任机会";
+      note = `再就业机会：按你的名望（${rep} · ${repLabel}）匹配的俱乐部`;
     } else {
-      note = "自由身经理市场中的合适空缺";
+      note = `请辞后的空缺：名望 ${rep}（${repLabel}）档可选东家`;
     }
     const offer = makeOffer(world, club, kind, note);
     job.offers.unshift(offer);
@@ -235,17 +257,42 @@ export function resignManagership(world) {
     return { ok: false, msg: "你已处于待业状态" };
   }
   const day = world.day || 1;
-  if (day < (world.managerJob.resignCooldownUntil || 0)) {
-    return { ok: false, msg: "刚换东家不久，董事会不允许立即解约跳槽" };
+  const coolUntil = world.managerJob.resignCooldownUntil || 0;
+  if (day < coolUntil) {
+    const left = coolUntil - day;
+    return {
+      ok: false,
+      reason: "cooldown",
+      daysLeft: left,
+      msg: `跳槽冷却中：还需 ${left} 天（至 D${coolUntil}）董事会才允许解约`,
+    };
   }
   const club = world.clubs?.find((c) => c.id === world.userClubId);
-  // 赛季初 10 天内或刚上任限制
   if ((world.managerJob.jobsTaken || 0) > 0 && day - (world.managerJob.lastAcceptDay || 0) < 20) {
-    return { ok: false, msg: "上任未满 20 天，不宜请辞" };
+    const left = 20 - (day - (world.managerJob.lastAcceptDay || 0));
+    return {
+      ok: false,
+      reason: "new_job",
+      daysLeft: left,
+      msg: `上任未满 20 天，还需 ${left} 天方可请辞`,
+    };
   }
   return enterUnemployment(world, `主动辞去 ${club?.name || "俱乐部"} 主帅职务`, {
     fromSack: false,
   });
+}
+
+/** 距可请辞还剩几天；0 表示可以 */
+export function resignCooldownLeft(world) {
+  ensureManagerJob(world);
+  if (world.managerJob.status === "unemployed" || world.sacked) return 0;
+  const day = world.day || 1;
+  const a = Math.max(0, (world.managerJob.resignCooldownUntil || 0) - day);
+  const b =
+    (world.managerJob.jobsTaken || 0) > 0 && world.managerJob.lastAcceptDay != null
+      ? Math.max(0, 20 - (day - world.managerJob.lastAcceptDay))
+      : 0;
+  return Math.max(a, b);
 }
 
 /**
@@ -295,12 +342,23 @@ export function acceptJobOffer(world, offerId) {
   world.news = world.news || [];
   world.news.unshift({
     day: world.day,
-    text: `✍️ 你已接受 ${club.name} 的邀请，正式上任（周薪约 ${formatMoney(offer.wage)}）。${
-      prev && prev.id !== club.id ? `此前执教 ${prev.name}。` : ""
+    text: `✍️ 上任公告：${world.managerName || "经理"} 正式执教 ${club.name}（${DIVISIONS[club.division]?.name || ""}），周薪约 ${formatMoney(offer.wage)}。${
+      prev && prev.id !== club.id ? `此前离开 ${prev.name}。` : ""
     }董事会目标：${world.board?.label || "竞争中游"}。`,
   });
+  if (prev && prev.id !== club.id) {
+    world.news.unshift({
+      day: world.day,
+      text: `📰 ${prev.name} 方面表示尊重 ${world.managerName || "前主帅"} 的选择，已开始物色继任者。`,
+    });
+  }
 
-  return { ok: true, club, offer, msg: `已上任 ${club.name}` };
+  return {
+    ok: true,
+    club,
+    offer,
+    msg: `已上任 ${club.name}（${DIVISIONS[club.division]?.name || ""}）· 周薪 ${formatMoney(offer.wage)}`,
+  };
 }
 
 export function rejectJobOffer(world, offerId) {

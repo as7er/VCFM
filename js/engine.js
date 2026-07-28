@@ -146,6 +146,7 @@ import {
   processFacilityDay,
   facilityWeeklyUpkeep,
   matchdayIncome,
+  applySeasonLeagueFinance,
   trainingGrowthBonus,
   trainingHealBonus,
   trainingInjuryMod,
@@ -200,6 +201,8 @@ import {
   generateJobOffers,
   processManagerJobsDay,
   managerReputation,
+  reputationTierLabel,
+  resignCooldownLeft,
   isManagerEmployed,
 } from "./manager-jobs.js";
 import {
@@ -329,6 +332,8 @@ export {
   generateJobOffers,
   processManagerJobsDay,
   managerReputation,
+  reputationTierLabel,
+  resignCooldownLeft,
   isManagerEmployed,
 };
 
@@ -630,6 +635,11 @@ export function advanceDay(world) {
     const facUpkeep = facilityWeeklyUpkeep(user);
     const total = wageBill + youthWage + staffWage + facUpkeep;
     user.money -= total;
+    if (!user.finance || typeof user.finance !== "object") user.finance = {};
+    user.finance.seasonWageOut =
+      (Number(user.finance.seasonWageOut) || 0) + wageBill + youthWage + staffWage;
+    user.finance.seasonFacilityOut =
+      (Number(user.finance.seasonFacilityOut) || 0) + facUpkeep;
     world.news.unshift({
       day: world.day,
       text: `发放周薪 ${formatMoney(total)}（一线 ${formatMoney(wageBill)} + 青训 ${formatMoney(youthWage)} + 职员 ${formatMoney(staffWage)} + 设施 ${formatMoney(facUpkeep)}），资金 ${formatMoney(user.money)}`,
@@ -787,6 +797,9 @@ export function finishSeason(world) {
   // 大陆席位取升降级前的本赛季最终排名。
   world._nextContinentalQualifiers = buildContinentalQualifiers(world);
 
+  // 转播分成 + 名次奖金：须在升降级改写 division 之前，按本赛季最终积分榜
+  const leaguePay = applySeasonLeagueFinance(world, getSortedTable);
+
   // 先算本级排名与升降级（在年龄变化前，用本赛季积分）
   const promoNews = applyPromotionRelegation(world);
 
@@ -801,6 +814,13 @@ export function finishSeason(world) {
     day: world.day,
     text: `🏆 ${world.season} 赛季结束！${userClub.name} 在${divName}排名第 ${pos} 名。可进入下一赛季。`,
   });
+  if (leaguePay?.userPayout) {
+    const up = leaguePay.userPayout;
+    world.news.unshift({
+      day: world.day,
+      text: `📺 联赛分红：第 ${up.pos} 名 · 转播分成 ${formatMoney(up.broadcast)} + 名次奖金 ${formatMoney(up.prize)} = ${formatMoney(up.total)}（已入账）`,
+    });
+  }
   mediaSeasonAwards(world, userClub, pos, divName);
   const boardSettle = settleBoardObjective(world, pos, getSortedTable);
   for (const t of promoNews) {
@@ -959,6 +979,12 @@ export function startNextSeason(world) {
     if (!c.division) c.division = 3;
     if (c.finance && typeof c.finance === "object") {
       c.finance.seasonTicketIncome = 0;
+      c.finance.seasonHomeGates = 0;
+      c.finance.seasonWageOut = 0;
+      c.finance.seasonFacilityOut = 0;
+      c.finance.seasonTransferNet = 0;
+      c.finance.seasonBroadcastIncome = 0;
+      c.finance.seasonPrizeIncome = 0;
     }
     for (const p of c.players) {
       ensureContract(p);
@@ -1572,6 +1598,9 @@ export function buyPlayer(world, playerId, fromClubId, options = {}) {
 
   user.money -= price + signingBonus;
   from.money += price;
+  if (!user.finance || typeof user.finance !== "object") user.finance = {};
+  user.finance.seasonTransferNet =
+    (Number(user.finance.seasonTransferNet) || 0) - (price + signingBonus);
   from.players.splice(idx, 1);
   player.clubId = user.id;
   player.morale = Math.min(100, player.morale + 8);
@@ -1653,6 +1682,8 @@ export function sellPlayer(world, playerId) {
   }
   user.players.splice(idx, 1);
   user.money += price;
+  if (!user.finance || typeof user.finance !== "object") user.finance = {};
+  user.finance.seasonTransferNet = (Number(user.finance.seasonTransferNet) || 0) + price;
   player.clubId = buyer.id;
   player.number = null;
   buyer.players.push(player);

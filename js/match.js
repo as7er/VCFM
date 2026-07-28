@@ -1004,11 +1004,12 @@ async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighl
   wireSimInjuries(state);
   if (fromMin >= 46) resyncSimAfterHalfTime(state);
 
-  const liveStream = !!(state._liveMode && onEvent);
-  // 直播：事件驱动密采（高光邻域 10Hz），平淡不落盘；非直播不录帧
+  // 直播 / 快速模拟：有高光播放器则录帧并细播；一键完赛等无 playHighlightPlan 不录
+  const highlightStream = !!(onEvent && typeof playHighlightPlan === "function");
+  // 事件驱动密采（高光邻域 10Hz），平淡不落盘
   const period = runSimPeriodRaw(state.simEng, fromMin, toMin, {
-    record: liveStream,
-    adaptive: liveStream,
+    record: highlightStream,
+    adaptive: highlightStream,
   });
   const { scaled, flavor, tStart, tEnd } = period;
 
@@ -1077,8 +1078,9 @@ async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighl
     });
   }
 
-  // —— 直播：高光细播 + 平淡跳过 ——
-  if (liveStream && typeof playHighlightPlan === "function") {
+  // —— 直播/快速：高光细播 + 平淡跳过（快速同样走真帧，倍速由播放器读取）——
+  if (highlightStream) {
+    state._highlightStream = true;
     let cueIdx = 0;
     let lastMinDone = fromMin - 1;
     const minutesDone = new Set();
@@ -1178,7 +1180,7 @@ async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighl
     return;
   }
 
-  // —— 非直播（快速/无画面）：按分钟写事件 ——
+  // —— 无高光播放器（一键完赛/后台）：按分钟记账，不驱动画面 ——
   /** @type {Record<number, Array>} */
   const byMin = {};
   for (let m = fromMin; m <= toMin; m++) byMin[m] = [];
@@ -2194,6 +2196,8 @@ function buildReport(state) {
     ticketIncome: state.ticketIncome != null ? state.ticketIncome : null,
     ticketStadium: state.ticketStadium || null,
     ticketCapacity: state.ticketCapacity || null,
+    ticketAttendance: state.ticketAttendance != null ? state.ticketAttendance : null,
+    ticketFillPct: state.ticketFillPct != null ? state.ticketFillPct : null,
   };
 }
 
@@ -2559,7 +2563,7 @@ export function finalizeMatch(state) {
       const isRelegationBattle = checkRelegationBattle(world, me);
       const isTitleRace = checkTitleRace(world, me);
 
-      const income = matchdayIncome(me, {
+      const gate = matchdayIncome(me, {
         isCup,
         won: myG > opG || (isKnockout && fixture.winner === userId),
         isDerby: state.derby,
@@ -2572,22 +2576,36 @@ export function finalizeMatch(state) {
         opponentStrength: opp.strength || 50,
         formBonus: getFormBonus(world, me.id),
         seasonPhaseBonus: getSeasonPhaseBonus(world),
+        detail: true,
       });
+      const income = typeof gate === "object" ? gate.income : gate;
+      const attendance = typeof gate === "object" ? gate.attendance : null;
+      const capacity = typeof gate === "object" ? gate.capacity : stadiumInfo(me).capacity;
+      const fillPct = typeof gate === "object" ? gate.fill : null;
 
       me.money += income;
       if (!me.finance || typeof me.finance !== "object") me.finance = {};
       me.finance.lastTicketIncome = income;
       me.finance.lastTicketDay = world.day;
+      me.finance.lastAttendance = attendance;
+      me.finance.lastCapacity = capacity;
+      me.finance.lastFillPct = fillPct;
       me.finance.seasonTicketIncome = (Number(me.finance.seasonTicketIncome) || 0) + income;
+      me.finance.seasonHomeGates = (Number(me.finance.seasonHomeGates) || 0) + 1;
       const stInfo = stadiumInfo(me);
+      const crowdTxt =
+        attendance != null && capacity
+          ? `上座 ${attendance.toLocaleString()}/${capacity.toLocaleString()}${fillPct != null ? `（${fillPct}%）` : ""}`
+          : `容量约 ${(capacity || 0).toLocaleString()}`;
       world.news.unshift({
         day: world.day,
-        text: `🎟️ 门票收入 ${formatMoney(income)}（${stInfo.name} · 容量约 ${stInfo.capacity.toLocaleString()} · 本季累计 ${formatMoney(me.finance.seasonTicketIncome)}）`,
+        text: `🎟️ 门票收入 ${formatMoney(income)}（${stInfo.name} · ${crowdTxt} · 本季累计 ${formatMoney(me.finance.seasonTicketIncome)}）`,
       });
-      // 挂到 state 供赛后报告
       state.ticketIncome = income;
       state.ticketStadium = stInfo.name;
-      state.ticketCapacity = stInfo.capacity;
+      state.ticketCapacity = capacity;
+      state.ticketAttendance = attendance;
+      state.ticketFillPct = fillPct;
     }
     if (isLeague) {
       mediaAfterUserMatch(world, fixture, me, opp, myG, opG);
