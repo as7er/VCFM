@@ -30,8 +30,8 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=167";
-import { nationFlagHtml } from "./flags.js?v=167";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=168";
+import { nationFlagHtml } from "./flags.js?v=168";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -283,7 +283,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=167";
+} from "./avatar.js?v=168";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -1038,24 +1038,54 @@ function enterMain() {
 }
 
 // ---------- Tabs ----------
+const MAIN_NAV_GROUPS = {
+  overview: ["dashboard", "inbox", "media", "career"],
+  team: ["squad", "tactics", "training", "youth", "staff", "facilities"],
+  matches: ["fixtures", "table"],
+  transfer: ["transfer"],
+  world: ["competitions", "clubs"],
+};
+const mainNavLastTab = { overview: "dashboard", team: "squad", matches: "fixtures", transfer: "transfer", world: "competitions" };
+
+function navGroupForTab(tab) {
+  return Object.entries(MAIN_NAV_GROUPS).find(([, tabs]) => tabs.includes(tab))?.[0] || "overview";
+}
+
+function syncMainNavigation(tab) {
+  const group = navGroupForTab(tab);
+  mainNavLastTab[group] = tab;
+  $$(".primary-tab").forEach((button) => {
+    const active = button.dataset.navGroup === group;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  $$(".tab").forEach((button) => {
+    button.hidden = !MAIN_NAV_GROUPS[group].includes(button.dataset.tab);
+    button.classList.toggle("active", button.dataset.tab === tab);
+  });
+}
+
+function activateMainTab(tab, { refresh = true } = {}) {
+  if (!document.querySelector(`[data-tab="${tab}"]`)) return;
+  syncMainNavigation(tab);
+  $$(".tab-panel").forEach((panel) => panel.classList.remove("active"));
+  if (tab === "table") $(`#tab-${selectedLeagueCentreView}`)?.classList.add("active");
+  else $(`#tab-${tab}`)?.classList.add("active");
+  if (refresh) refreshAll();
+}
+
 let mainBound = false;
 function bindMainOnce() {
   if (mainBound) return;
   mainBound = true;
 
   $$(".tab").forEach((btn) => {
-    btn.onclick = () => {
-      if (btn.dataset.tab === "table") {
-        setLeagueCentreView(selectedLeagueCentreView);
-        return;
-      }
-      $$(".tab").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      $$(".tab-panel").forEach((p) => p.classList.remove("active"));
-      $(`#tab-${btn.dataset.tab}`).classList.add("active");
-      refreshAll();
-    };
+    btn.onclick = () => activateMainTab(btn.dataset.tab);
   });
+  $$(".primary-tab").forEach((btn) => {
+    btn.onclick = () => activateMainTab(mainNavLastTab[btn.dataset.navGroup] || MAIN_NAV_GROUPS[btn.dataset.navGroup]?.[0]);
+  });
+  syncMainNavigation(document.querySelector(".tab.active")?.dataset.tab || "dashboard");
   $$('[data-league-centre-view]').forEach((btn) => {
     btn.addEventListener("click", () => setLeagueCentreView(btn.dataset.leagueCentreView));
   });
@@ -1074,6 +1104,13 @@ function bindMainOnce() {
   if (dashInboxBtn) {
     dashInboxBtn.onclick = () => goToInboxTab();
   }
+  document.querySelectorAll("[data-squad-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      squadTableView = button.dataset.squadView === "full" ? "full" : "compact";
+      try { localStorage.setItem("vcfm-squad-view", squadTableView); } catch (_) { /* ignore */ }
+      renderSquad();
+    });
+  });
 
   $("#btn-save").onclick = () => {
     if (saveGame(world)) toast(t("toast.saved", { n: getActiveSlot() }));
@@ -2099,8 +2136,7 @@ function updateInboxTabBadge() {
 }
 
 function goToInboxTab() {
-  const btn = document.querySelector('.tab[data-tab="inbox"]');
-  if (btn) btn.click();
+  activateMainTab("inbox");
 }
 
 function renderInbox() {
@@ -3090,20 +3126,7 @@ function renderDashboard() {
     trainDash.textContent = (en ? `${focusEn[training.focus] || training.focus} · ${intensityEn[training.intensity] || training.intensity}` : training.line) + t("dash.trainHint");
   }
   // 设施摘要
-  let facDash = document.querySelector("#facilities-dash");
-  if (!facDash) {
-    const trainEl = document.querySelector("#training-dash");
-    if (trainEl && trainEl.parentElement) {
-      const h = document.createElement("h3");
-      h.textContent = t("dash.facilities");
-      facDash = document.createElement("div");
-      facDash.id = "facilities-dash";
-      facDash.className = "muted";
-      facDash.style.marginBottom = "0.5rem";
-      trainEl.parentElement.insertBefore(h, trainEl);
-      trainEl.parentElement.insertBefore(facDash, trainEl);
-    }
-  }
+  const facDash = document.querySelector("#facilities-dash");
   if (facDash) {
     ensureFacilities(club);
     const facilities = club.facilities || {};
@@ -3261,6 +3284,11 @@ function ovrClass(n) {
   return "stat-low";
 }
 
+let squadTableView = (() => {
+  try { return localStorage.getItem("vcfm-squad-view") === "full" ? "full" : "compact"; }
+  catch (_) { return "compact"; }
+})();
+
 function renderSquad() {
   const club = getUserClub(world);
   const en = getLang() === "en";
@@ -3274,9 +3302,17 @@ function renderSquad() {
     }
   }
   const xi = new Set(club.tactics.lineup);
+  const table = $("#squad-table");
   const tbody = $("#squad-table tbody");
   const sorted = [...club.players].sort((a, b) => b.ovr - a.ovr);
 
+  table?.classList.toggle("squad-compact", squadTableView === "compact");
+  table?.classList.toggle("squad-full", squadTableView === "full");
+  document.querySelectorAll("[data-squad-view]").forEach((button) => {
+    const active = button.dataset.squadView === squadTableView;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
   $("#squad-count").textContent = t("squad.count", { n: sorted.length });
 
   tbody.innerHTML = sorted
@@ -3338,22 +3374,22 @@ function renderSquad() {
       return `<tr class="${xi.has(p.id) ? "me" : ""} ${!isAvailable(p) ? "row-unavailable" : ""} ${needsContractAttention(p) && !p.loan ? "row-contract" : ""}">
         <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${num}</span></td>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 30)} <span>${playerLinkHtml(p.id, p.name)} ${statusBadges}</span></td>
-        <td>${nationLabel(p)}</td>
+        <td class="squad-detail">${nationLabel(p)}</td>
         <td><span class="badge ${p.pos}">${en ? p.pos : POS_LABEL[p.pos]}</span></td>
-        <td>${p.age}</td>
+        <td class="squad-detail">${p.age}</td>
         <td class="${ovrClass(ovr)}"><strong>${ovr}</strong></td>
-        <td class="num-stat" title="${escapeHtml(t("squad.appsTitle") || "本赛季出场")}">${apps}</td>
-        <td class="num-stat ${gCls}" title="${escapeHtml(gTitle)}">${colG}</td>
-        <td class="num-stat ${aCls}" title="${escapeHtml(aTitle)}">${colA}</td>
-        <td class="num-stat rating-cell ${ratingClass(avgR)}" title="${escapeHtml(t("squad.avgRTitle") || "本赛季场均评分")}">${formatRating(avgR)}</td>
-        <td class="num-stat rating-cell ${ratingClass(lastR)}" title="${escapeHtml(t("squad.lastRTitle") || "最近一场评分")}">${formatRating(lastR)}</td>
+        <td class="num-stat squad-detail" title="${escapeHtml(t("squad.appsTitle") || "本赛季出场")}">${apps}</td>
+        <td class="num-stat squad-detail ${gCls}" title="${escapeHtml(gTitle)}">${colG}</td>
+        <td class="num-stat squad-detail ${aCls}" title="${escapeHtml(aTitle)}">${colA}</td>
+        <td class="num-stat rating-cell squad-detail ${ratingClass(avgR)}" title="${escapeHtml(t("squad.avgRTitle") || "本赛季场均评分")}">${formatRating(avgR)}</td>
+        <td class="num-stat rating-cell squad-detail ${ratingClass(lastR)}" title="${escapeHtml(t("squad.lastRTitle") || "最近一场评分")}">${formatRating(lastR)}</td>
         <td class="num-stat rating-cell ${formClass(form)}" title="${escapeHtml(formTitle)}">${formatForm(form)}</td>
         <td>${Math.round(p.fitness ?? 0)}%</td>
-        <td>${Math.round(p.morale ?? 0)}</td>
-        <td class="rel-cell rel-${relationTone(p.relation)}">${escapeHtml(relationLabel((ensurePlayerRelation(p), p.relation), getLang() === "en" ? "en" : "zh"))}</td>
+        <td class="squad-detail">${Math.round(p.morale ?? 0)}</td>
+        <td class="rel-cell squad-detail rel-${relationTone(p.relation)}">${escapeHtml(relationLabel((ensurePlayerRelation(p), p.relation), getLang() === "en" ? "en" : "zh"))}</td>
         <td class="contract-cell">${contractCell}</td>
-        <td>${formatMoney(p.value)}</td>
-        <td>${formatMoney(p.wage)}</td>
+        <td class="squad-detail">${formatMoney(p.value)}</td>
+        <td class="squad-detail">${formatMoney(p.wage)}</td>
         <td><button class="btn small" data-pid="${p.id}">${en ? "Info" : "详情"}</button></td>
       </tr>`;
     })
@@ -5387,8 +5423,7 @@ function renderTable() {
 function setLeagueCentreView(view) {
   const next = view === "stats" ? "stats" : "table";
   selectedLeagueCentreView = next;
-  $$(".tab").forEach((button) => button.classList.remove("active"));
-  $('.tab[data-tab="table"]')?.classList.add("active");
+  syncMainNavigation("table");
   $$(".tab-panel").forEach((panel) => panel.classList.remove("active"));
   $(`#tab-${next}`)?.classList.add("active");
   $$('[data-league-centre-view]').forEach((button) => {

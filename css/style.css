@@ -6170,3 +6170,246 @@ html[data-theme="light"] ::-webkit-scrollbar-thumb {
 html[data-theme="light"] ::-webkit-scrollbar-track {
   background: #eef2f8;
 }
+
+
+/* ===== v168 UI hierarchy and responsive information design ===== */
+.nav-stack {
+  flex: 1 1 34rem;
+  min-width: 20rem;
+  display: grid;
+  gap: 0.38rem;
+}
+.primary-nav,
+.tabs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.28rem;
+}
+.primary-tab {
+  border: 0;
+  border-radius: 8px;
+  padding: 0.42rem 0.8rem;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 750;
+  font-size: 0.86rem;
+}
+.primary-tab:hover { color: var(--text); background: var(--row-hover); }
+.primary-tab.active {
+  color: #fff;
+  background: var(--primary);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 28%, transparent);
+}
+.tabs {
+  flex-wrap: nowrap;
+  min-height: 2rem;
+}
+.tab { padding: 0.3rem 0.72rem; font-size: 0.82rem; }
+.topbar-more { position: relative; }
+.topbar-more > summary {
+  list-style: none;
+  display: inline-grid;
+  place-items: center;
+  min-width: 2.5rem;
+  user-select: none;
+}
+.topbar-more > summary::-webkit-details-marker { display: none; }
+.topbar-more-menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 40;
+  min-width: 12rem;
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+.topbar-more-menu .topbar-prefs { margin: 0; justify-content: space-between; }
+.topbar-more-menu > .btn { width: 100%; }
+
+.content { max-width: 1480px; }
+#tab-dashboard { max-width: 1240px; margin-inline: auto; }
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 1rem;
+}
+.dashboard-match-card { grid-column: span 8; }
+.dashboard-pulse-card { grid-column: span 4; }
+.dashboard-operations-card { grid-column: span 8; }
+.dashboard-inbox-card { grid-column: span 4; }
+.dashboard-career-card { grid-column: span 4; }
+.dashboard-news-card { grid-column: span 8; }
+.dashboard-section-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.dashboard-section-head h2 { margin-bottom: 0.75rem; }
+.dashboard-eyebrow {
+  display: block;
+  margin-bottom: 0.18rem;
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.dashboard-match-card .next-match {
+  min-height: 9rem;
+  display: grid;
+  align-content: center;
+  padding: 1.1rem;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 12%, var(--bg2)), var(--bg2));
+}
+.dash-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.dashboard-mini-block { min-width: 0; }
+.dashboard-mini-block + .dashboard-mini-block { margin-top: 0.8rem; }
+.dashboard-mini-block h3 { margin: 0 0 0.4rem; }
+.dashboard-ops-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-top: 0.85rem;
+}
+.dashboard-ops-grid .dashboard-mini-block + .dashboard-mini-block { margin-top: 0; }
+.dashboard-finance-block {
+  margin-top: 0.85rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+.dashboard-career-card .dash-badges { margin-top: 0.5rem; }
+.dashboard-news-card .news-list { max-height: 18rem; }
+
+.squad-heading-tools { display: flex; align-items: center; gap: 0.65rem; }
+.view-switch {
+  display: inline-flex;
+  padding: 0.18rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg2);
+}
+.view-switch button {
+  border: 0;
+  border-radius: 6px;
+  padding: 0.34rem 0.65rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.view-switch button.active { background: var(--primary); color: #fff; }
+#squad-table.squad-compact .squad-detail { display: none; }
+#squad-table.squad-compact { min-width: 46rem; }
+#squad-table.squad-full { min-width: 78rem; }
+#squad-table th:first-child,
+#squad-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: 3.1rem;
+  background: var(--card);
+}
+#squad-table th:nth-child(2),
+#squad-table td:nth-child(2) {
+  position: sticky;
+  left: 3.1rem;
+  z-index: 2;
+  background: var(--card);
+  box-shadow: 1px 0 0 var(--border);
+}
+#squad-table thead th:first-child,
+#squad-table thead th:nth-child(2) { z-index: 4; }
+#squad-table tr.me td:first-child,
+#squad-table tr.me td:nth-child(2) { background: color-mix(in srgb, var(--primary) 12%, var(--card)); }
+
+.btn:focus-visible,
+.tab:focus-visible,
+.primary-tab:focus-visible,
+.view-switch button:focus-visible,
+button.club-link:focus-visible,
+button.player-link:focus-visible,
+button.staff-link:focus-visible,
+button.nation-link:focus-visible,
+select:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 48%, transparent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 980px) {
+  .dashboard-match-card,
+  .dashboard-operations-card,
+  .dashboard-news-card { grid-column: span 7; }
+  .dashboard-pulse-card,
+  .dashboard-inbox-card,
+  .dashboard-career-card { grid-column: span 5; }
+}
+
+@media (max-width: 860px) {
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  .brand { grid-column: 1; grid-row: 1; }
+  .actions { grid-column: 2; grid-row: 1; }
+  .meta { grid-column: 1 / -1; grid-row: 2; order: initial; width: auto; }
+  .nav-stack { grid-column: 1 / -1; grid-row: 3; min-width: 0; width: 100%; }
+  .primary-nav,
+  .tabs {
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .primary-nav::-webkit-scrollbar,
+  .tabs::-webkit-scrollbar { display: none; }
+  .primary-tab { flex: 1 0 auto; min-height: 2.4rem; }
+  .tabs { order: initial; width: auto; padding: 0.05rem 0 0.18rem; mask-image: none; }
+  .tab { min-height: 2.2rem; }
+  .topbar-more-menu { position: fixed; top: 4.25rem; right: 0.75rem; }
+  .dashboard-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-layout > .card { grid-column: span 1; }
+  .dashboard-match-card,
+  .dashboard-operations-card,
+  .dashboard-news-card { grid-column: 1 / -1 !important; }
+  .modal { padding: 0; align-items: stretch; }
+  .modal-card,
+  .modal-card.wide,
+  .modal-card.search-modal {
+    width: 100%;
+    max-width: none;
+    min-height: 100dvh;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 620px) {
+  .meta { gap: 0.45rem 0.75rem; }
+  .meta span { font-size: 0.78rem; }
+  .primary-tab { padding-inline: 0.72rem; font-size: 0.82rem; }
+  .dashboard-layout { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-layout > .card { grid-column: 1 !important; }
+  .dashboard-ops-grid { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-match-card .next-match { min-height: 7rem; }
+  .squad-heading { align-items: flex-start; gap: 0.6rem; }
+  .squad-heading-tools { align-items: flex-end; flex-direction: column; }
+  #squad-table { font-size: 0.82rem; }
+  #squad-table.squad-compact { min-width: 42rem; }
+  .modal-close { width: 2.75rem; height: 2.75rem; top: 0.25rem; right: 0.25rem; }
+}
+
+/* Keep auxiliary interface text readable; pitch labels remain separately calibrated. */
+.inbox-cat.mini,
+.inbox-pri,
+.brief-chip,
+.form-pill,
+.contract-cell,
+.stats-league-cell { font-size: max(0.75rem, 12px); }

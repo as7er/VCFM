@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=167" />
+  <link rel="stylesheet" href="css/style.css?v=168" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -122,7 +122,15 @@
           <span id="date-label"></span>
           <span id="money-label" class="money"></span>
         </div>
-        <nav class="tabs">
+        <div class="nav-stack">
+          <nav class="primary-nav" aria-label="主导航">
+            <button type="button" class="primary-tab active" data-nav-group="overview" data-i18n="nav.overview">总览</button>
+            <button type="button" class="primary-tab" data-nav-group="team" data-i18n="nav.team">球队</button>
+            <button type="button" class="primary-tab" data-nav-group="matches" data-i18n="nav.matches">比赛</button>
+            <button type="button" class="primary-tab" data-nav-group="transfer" data-i18n="nav.transfer">转会</button>
+            <button type="button" class="primary-tab" data-nav-group="world" data-i18n="nav.world">世界</button>
+          </nav>
+          <nav class="tabs" aria-label="二级导航">
           <button data-tab="dashboard" class="tab active" data-i18n="tab.dashboard">概览</button>
           <button data-tab="squad" class="tab" data-i18n="tab.squad">阵容</button>
           <button data-tab="youth" class="tab" data-i18n="tab.youth">青训</button>
@@ -138,33 +146,44 @@
           <button data-tab="transfer" class="tab" data-i18n="tab.transfer">转会</button>
           <button data-tab="career" class="tab" data-i18n="tab.career">生涯</button>
           <button data-tab="fixtures" class="tab" data-i18n="tab.fixtures">赛程</button>
-        </nav>
+          </nav>
+        </div>
         <div class="actions">
           <button id="btn-global-search" class="btn icon-btn" type="button" data-i18n-title="search.open" aria-label="搜索球员、俱乐部和国家队">
             <span aria-hidden="true">🔍</span>
           </button>
-          <div class="topbar-prefs">
-            <div class="prefs-seg" role="group" aria-label="theme">
-              <button type="button" data-theme-btn="dark" title="Night">🌙</button>
-              <button type="button" data-theme-btn="light" title="Day">☀️</button>
-            </div>
-            <div class="prefs-seg" role="group" aria-label="language">
-              <button type="button" data-lang-btn="zh">中</button>
-              <button type="button" data-lang-btn="en">EN</button>
-            </div>
-          </div>
           <button id="btn-save" class="btn small" data-i18n="btn.save">存档</button>
-          <button id="btn-export-save-main" class="btn small ghost" type="button" data-i18n="btn.export">导出</button>
-          <button id="btn-menu" class="btn small ghost" data-i18n="btn.menu">菜单</button>
+          <details class="topbar-more">
+            <summary class="btn small ghost" aria-label="更多操作" data-i18n-title="nav.more">•••</summary>
+            <div class="topbar-more-menu">
+              <div class="topbar-prefs">
+                <div class="prefs-seg" role="group" aria-label="theme">
+                  <button type="button" data-theme-btn="dark" title="Night">🌙</button>
+                  <button type="button" data-theme-btn="light" title="Day">☀️</button>
+                </div>
+                <div class="prefs-seg" role="group" aria-label="language">
+                  <button type="button" data-lang-btn="zh">中</button>
+                  <button type="button" data-lang-btn="en">EN</button>
+                </div>
+              </div>
+              <button id="btn-export-save-main" class="btn small ghost" type="button" data-i18n="btn.export">导出</button>
+              <button id="btn-menu" class="btn small ghost" data-i18n="btn.menu">菜单</button>
+            </div>
+          </details>
         </div>
       </header>
 
       <main class="content">
         <!-- 概览 -->
         <div id="tab-dashboard" class="tab-panel active">
-          <div class="grid-2">
-            <div class="card">
-              <h2 data-i18n="dash.nextMatch">下一场比赛</h2>
+          <div class="dashboard-layout">
+            <section class="card dashboard-match-card">
+              <div class="dashboard-section-head">
+                <div>
+                  <span class="dashboard-eyebrow" data-i18n="dash.command">比赛指挥</span>
+                  <h2 data-i18n="dash.nextMatch">下一场比赛</h2>
+                </div>
+              </div>
               <div id="next-match" class="next-match" data-i18n="dash.noFixture">暂无赛程</div>
               <div class="dash-actions">
                 <button id="btn-play-match" class="btn primary" disabled data-i18n="dash.play">进入比赛</button>
@@ -173,38 +192,71 @@
                 <button id="btn-advance-season-end" class="btn" type="button" data-i18n="dash.advanceSeasonEnd" data-i18n-title="dash.advanceSeasonEndTitle">推进到赛季末</button>
                 <button id="btn-next-season" class="btn primary" style="display:none" data-i18n="dash.nextSeason">进入下一赛季</button>
               </div>
-            </div>
-            <div class="card">
-              <h2 data-i18n="dash.rank">联赛排名</h2>
+            </section>
+
+            <section class="card dashboard-pulse-card">
+              <div class="dashboard-section-head">
+                <div>
+                  <span class="dashboard-eyebrow" data-i18n="dash.snapshot">赛季快照</span>
+                  <h2 data-i18n="dash.rank">联赛排名</h2>
+                </div>
+              </div>
               <div id="my-rank" class="rank-box">—</div>
-              <h3 data-i18n="dash.board">董事会目标</h3>
+              <div class="dashboard-mini-block">
+                <h3 data-i18n="dash.form">近期战绩</h3>
+                <div id="form-strip" class="form-strip"></div>
+              </div>
+              <div class="dashboard-mini-block">
+                <h3 data-i18n="dash.atmosphere">更衣室氛围</h3>
+                <div id="dash-atmosphere" class="dash-atm">—</div>
+              </div>
+            </section>
+
+            <section class="card dashboard-operations-card">
+              <div class="dashboard-section-head">
+                <div>
+                  <span class="dashboard-eyebrow" data-i18n="dash.operations">俱乐部运营</span>
+                  <h2 data-i18n="dash.board">董事会目标</h2>
+                </div>
+              </div>
               <div id="board-box" class="board-box">—</div>
-              <h3 data-i18n="dash.window">转会窗</h3>
-              <div id="transfer-window-dash" class="transfer-window-box">—</div>
-              <h3 data-i18n="dash.training">训练日程</h3>
-              <div id="training-dash" class="muted" style="margin-bottom:0.5rem">—</div>
-              <h3 data-i18n="dash.form">近期战绩</h3>
-              <div id="form-strip" class="form-strip"></div>
-              <h3 data-i18n="dash.career">经理生涯</h3>
-              <div id="manager-career-dash" class="career-dash">—</div>
-              <h3 data-i18n="dash.atmosphere">更衣室氛围</h3>
-              <div id="dash-atmosphere" class="dash-atm">—</div>
-              <h3 data-i18n="dash.finance">财政简报</h3>
-              <div id="dash-finance" class="dash-finance muted">—</div>
-              <h3 data-i18n="dash.badges">成就徽章</h3>
-              <div id="dash-badges" class="dash-badges">—</div>
-            </div>
-            <div class="card">
+              <div class="dashboard-ops-grid">
+                <div class="dashboard-mini-block">
+                  <h3 data-i18n="dash.window">转会窗</h3>
+                  <div id="transfer-window-dash" class="transfer-window-box">—</div>
+                </div>
+                <div class="dashboard-mini-block">
+                  <h3 data-i18n="dash.training">训练日程</h3>
+                  <div id="training-dash" class="muted">—</div>
+                  <h3 data-i18n="dash.facilities">俱乐部设施</h3>
+                  <div id="facilities-dash" class="muted">—</div>
+                </div>
+              </div>
+              <div class="dashboard-mini-block dashboard-finance-block">
+                <h3 data-i18n="dash.finance">财政简报</h3>
+                <div id="dash-finance" class="dash-finance muted">—</div>
+              </div>
+            </section>
+
+            <section class="card dashboard-inbox-card">
               <div class="row-between">
                 <h2 data-i18n="dash.inbox">信箱</h2>
                 <button type="button" class="btn small" id="btn-dash-inbox" data-i18n="inbox.open">打开信箱</button>
               </div>
               <div id="dash-inbox" class="dash-inbox muted">—</div>
-            </div>
-            <div class="card span-2">
+            </section>
+
+            <section class="card dashboard-career-card">
+              <h2 data-i18n="dash.career">经理生涯</h2>
+              <div id="manager-career-dash" class="career-dash">—</div>
+              <h3 data-i18n="dash.badges">成就徽章</h3>
+              <div id="dash-badges" class="dash-badges">—</div>
+            </section>
+
+            <section class="card dashboard-news-card">
               <h2 data-i18n="dash.news">新闻</h2>
               <ul id="news-list" class="news-list"></ul>
-            </div>
+            </section>
           </div>
         </div>
 
@@ -229,9 +281,15 @@
         <!-- 阵容 -->
         <div id="tab-squad" class="tab-panel">
           <div class="card">
-            <div class="row-between">
+            <div class="row-between squad-heading">
               <h2 data-i18n="squad.title">球队阵容</h2>
-              <span class="muted" id="squad-count"></span>
+              <div class="squad-heading-tools">
+                <span class="muted" id="squad-count"></span>
+                <div class="view-switch" role="group" aria-label="阵容表视图">
+                  <button type="button" class="active" data-squad-view="compact" data-i18n="squad.compact">精简</button>
+                  <button type="button" data-squad-view="full" data-i18n="squad.full">完整</button>
+                </div>
+              </div>
             </div>
             <p class="hint" style="margin:0.35rem 0 0.65rem" data-i18n="squad.seasonHint">
               本赛季联赛数据：出场 / 进球（门将为零封）/ 助攻（门将为失球）/ 场均 / 最近；状态为近 5 场滚动评分（含杯赛与洲际）
@@ -242,22 +300,22 @@
                   <tr>
                     <th data-i18n="th.num">#</th>
                     <th data-i18n="th.name">姓名</th>
-                    <th data-i18n="th.nation">国籍</th>
+                    <th class="squad-detail" data-i18n="th.nation">国籍</th>
                     <th data-i18n="th.pos">位置</th>
-                    <th data-i18n="th.age">年龄</th>
+                    <th class="squad-detail" data-i18n="th.age">年龄</th>
                     <th data-i18n="th.ovr">能力</th>
-                    <th data-i18n="th.apps" title="本赛季出场">出场</th>
-                    <th data-i18n="th.goalsCs" data-i18n-title="th.goalsCsTitle">进球/零封</th>
-                    <th data-i18n="th.assistsGa" data-i18n-title="th.assistsGaTitle">助攻/失球</th>
-                    <th data-i18n="th.avgR" title="本赛季场均评分">场均</th>
-                    <th data-i18n="th.lastR" title="最近一场评分">最近</th>
+                    <th class="squad-detail" data-i18n="th.apps" title="本赛季出场">出场</th>
+                    <th class="squad-detail" data-i18n="th.goalsCs" data-i18n-title="th.goalsCsTitle">进球/零封</th>
+                    <th class="squad-detail" data-i18n="th.assistsGa" data-i18n-title="th.assistsGaTitle">助攻/失球</th>
+                    <th class="squad-detail" data-i18n="th.avgR" title="本赛季场均评分">场均</th>
+                    <th class="squad-detail" data-i18n="th.lastR" title="最近一场评分">最近</th>
                     <th data-i18n="th.form" title="近 5 场滚动状态">状态</th>
                     <th data-i18n="th.fit">体能</th>
-                    <th data-i18n="th.morale">士气</th>
-                    <th data-i18n="th.relation">关系</th>
+                    <th class="squad-detail" data-i18n="th.morale">士气</th>
+                    <th class="squad-detail" data-i18n="th.relation">关系</th>
                     <th data-i18n="th.contract" title="合同年限">合同</th>
-                    <th data-i18n="th.scout">球探估值</th>
-                    <th data-i18n="th.wage">周薪</th>
+                    <th class="squad-detail" data-i18n="th.scout">球探估值</th>
+                    <th class="squad-detail" data-i18n="th.wage">周薪</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -1187,12 +1245,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=167"></script>
+  <script type="module" src="js/main.js?v=168"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v167";
+        var CURRENT_CACHE = "vcfm-v168";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1203,7 +1261,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=167").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=168").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1212,8 +1270,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v167")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v167", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v168")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v168", "1");
               location.reload();
             }
           } catch (e) {
