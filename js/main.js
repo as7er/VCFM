@@ -29,8 +29,9 @@ import {
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=166";
-import { nationFlagHtml } from "./flags.js?v=166";
+import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=167";
+import { nationFlagHtml } from "./flags.js?v=167";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -282,7 +283,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=166";
+} from "./avatar.js?v=167";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -996,6 +997,7 @@ function migrateWorld(w) {
       ensureIntl(p);
       ensureHonors(p);
       ensureDiscipline(p);
+      ensurePlayerInjury(p);
     }
     for (const p of c.youth.players || []) {
       if (p.potential == null) p.potential = Math.min(20, (p.ovr || 10) + 1);
@@ -1003,10 +1005,17 @@ function migrateWorld(w) {
       ensurePlayerHistory(p);
       ensureIntl(p);
       ensureHonors(p);
+      ensurePlayerInjury(p);
     }
   }
-  for (const p of w.freeAgents || []) ensureRealisticPlayerTalent(p);
-  for (const p of w.retiredPlayers || []) ensureRealisticPlayerTalent(p);
+  for (const p of w.freeAgents || []) {
+    ensureRealisticPlayerTalent(p);
+    ensurePlayerInjury(p);
+  }
+  for (const p of w.retiredPlayers || []) {
+    ensureRealisticPlayerTalent(p);
+    ensurePlayerInjury(p);
+  }
   if ((w.abilityDistributionVersion || 0) < ABILITY_DISTRIBUTION_VERSION) {
     calibrateWorldAbilityDistribution(w.clubs || []);
     for (const club of w.clubs || []) autoLineup(club);
@@ -2223,13 +2232,20 @@ function renderInbox() {
 }
 
 function injuryDays(player) {
+  ensurePlayerInjury(player);
   return Math.max(0, Math.ceil(Number(player?.injured) || 0));
 }
 
 function injuryStatusText(player, en = getLang() === "en") {
   const days = injuryDays(player);
-  if (!days) return "";
-  return en ? `Inj ${days}d` : `伤 ${days}天`;
+  if (days) return en ? `Inj ${days}d` : `伤 ${days}天`;
+  const monitored = Math.max(0, Math.ceil(Number(player?.returnToPlayDays) || 0));
+  if (!monitored) return "";
+  return en ? `RTP ${monitored}d` : `观察 ${monitored}天`;
+}
+
+function injuryDetailText(player, en = getLang() === "en") {
+  return injuryLabel(player, en ? "en" : "zh");
 }
 
 function renderTraining() {
@@ -2323,7 +2339,7 @@ function renderTraining() {
         .map((p) => {
           const fit = Math.round(p.fitness || 0);
           const lowCls = fit < 65 || p.injured > 0 ? " low" : "";
-          const tag = injuryDays(p) ? ` ${injuryStatusText(p, en)}` : "";
+          const tag = injuryStatusText(p, en) ? ` ${injuryStatusText(p, en)}` : "";
           return `<div class="training-fit-row${lowCls}">
             <span>${playerLinkHtml(p.id, playerDisplaySurname(p.name, p.nationality) + tag)}</span>
             <div class="bar"><i style="width:${fit}%"></i></div>
@@ -3123,9 +3139,9 @@ function renderDashboard() {
       const tone = boardTone(b);
       boardEl.className = "board-box" + (tone ? " " + tone : "");
       const played = row.played || 0;
-      const warn = !b.settled && (b.sackWarnings || 0) > 0 ? (en ? ` Warnings ${b.sackWarnings}/3` : ` 警告${b.sackWarnings}/3`) : "";
+      const warn = !b.settled && (b.sackWarnings || 0) > 0 ? (en ? ` Warnings ${b.sackWarnings}/4` : ` 警告${b.sackWarnings}/4`) : "";
       const boardLine = en
-        ? `Target: top ${b.targetPos} · ${b.sacked ? "Sacked" : b.settled ? (b.status === "success" || b.status === "achieved" ? "Completed" : "Missed") : b.status}`
+        ? `Target: top ${b.targetPos} · ${b.sacked ? "Sacked" : b.settled ? (b.status === "success" || b.status === "achieved" ? "Completed" : "Missed") : b.status}${b.planLabelEn ? ` · Plan: ${b.planLabelEn}` : ""}`
         : boardStatusLine(b);
       boardEl.textContent =
         boardLine +
@@ -3291,11 +3307,14 @@ function renderSquad() {
         : `${en ? "Form" : "状态"} ${formatForm(form)} · ${formToneLabel(form, en ? "en" : "zh")} (${en ? "last" : "近"}${(s.recentRatings || []).length}${en ? " apps" : "场"})`;
       const num = p.number != null ? p.number : "—";
       const injuredDays = injuryDays(p);
+      const recoveryStatus = injuryStatusText(p, en);
       const statusBadges = [
         xi.has(p.id) ? `<span class="badge">${en ? "XI" : "首发"}</span>` : "",
         p.loan ? `<span class="badge loan" title="${escapeHtml(t("contract.loanIn") || "租借")}">${escapeHtml(t("contract.loanIn") || "租借")}</span>` : "",
         injuredDays
-          ? `<span class="badge ATT" title="${escapeHtml(en ? `Expected return in ${injuredDays} days` : `预计 ${injuredDays} 天后恢复`)}">${escapeHtml(injuryStatusText(p, en))}</span>`
+          ? `<span class="badge ATT" title="${escapeHtml(injuryDetailText(p, en))}">${escapeHtml(recoveryStatus)}</span>`
+          : recoveryStatus
+            ? `<span class="badge MID" title="${escapeHtml(injuryDetailText(p, en))}">${escapeHtml(recoveryStatus)}</span>`
           : "",
         (p.suspendedMatches || 0) > 0
           ? `<span class="badge ATT" title="${en ? "Suspended" : "停赛"}">${en ? "Sus" : "停"}${p.suspendedMatches}</span>`
@@ -3486,7 +3505,7 @@ function showPlayerModal(playerId, context = {}) {
       </div>
     </div>
     <p>${en ? "Value" : "身价"} ${fromOther ? formatScoutValue(world, player) : formatMoney(player.value)} · ${en ? "Wage" : "周薪"} ${formatMoney(player.wage)} · ${en ? "Fitness" : "体能"} ${Math.round(player.fitness ?? 0)}% · ${en ? "Morale" : "士气"} ${Math.round(player.morale ?? 0)}
-      ${injuryDays(player) ? ` · <span class="badge ATT">${escapeHtml(injuryStatusText(player, en))}</span>` : ""}
+      ${injuryStatusText(player, en) ? ` · <span class="badge ${injuryDays(player) ? "ATT" : "MID"}" title="${escapeHtml(injuryDetailText(player, en))}">${escapeHtml(injuryDetailText(player, en))}</span>` : ""}
       ${
         (player.suspendedMatches || 0) > 0
           ? ` · <span class="badge ATT">${en ? `Suspended ${player.suspendedMatches}` : `停赛 ${player.suspendedMatches} 场`}</span>`
@@ -4672,6 +4691,8 @@ function renderTactics() {
             const status =
               (p.injured || 0) > 0
                 ? `<em class="tac-chip-bad">${escapeHtml(injuryStatusText(p, getLang() === "en"))}</em>`
+                : (p.returnToPlayDays || 0) > 0
+                  ? `<em class="tac-chip-warn">${escapeHtml(injuryStatusText(p, getLang() === "en"))}</em>`
                 : (p.suspendedMatches || 0) > 0
                   ? `<em class="tac-chip-bad">${getLang() === "en" ? "SUS" : "停"}</em>`
                   : fit < 62

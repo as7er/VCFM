@@ -4,6 +4,12 @@ import { playerOverall, estimateValue, estimateWage } from "./models.js";
 import { ensureStaff, staffRating, coachGrowthBonus, doctorHealBonus, doctorInjuryMod } from "./staff.js";
 import { trainingGrowthBonus, trainingHealBonus, trainingInjuryMod } from "./facilities.js";
 import { allCompetitionFixtures } from "./cup.js";
+import {
+  diagnoseInjury,
+  ensurePlayerInjury,
+  injuryRiskMultiplier,
+  processInjuryRecoveryDay,
+} from "./injuries.js";
 
 export const TRAINING_FOCUSES = {
   recovery: {
@@ -470,17 +476,26 @@ export function processTrainingDay(world) {
 
     let grewNames = [];
     let injuredNames = [];
+    let recoveredNames = [];
 
     for (const p of club.players || []) {
+      ensurePlayerInjury(p);
       if (p.injured > 0) {
         // 伤员：只做恢复向处理，不强制高强度疲劳
         const restHeal = heal * 1.1 + Math.floor(rng() * 3);
         // 体能始终存整数，避免 85.84239999999998% 这种浮点展示
         p.fitness = Math.round(clamp((p.fitness || 50) + restHeal * 0.6, 25, 100));
-        const extra = coach >= 14 && chance(0.2) ? 1 : 0;
-        p.injured = Math.max(0, p.injured - 1 - extra);
+        const recovery = processInjuryRecoveryDay(p, {
+          doctorBonus: doctorHealBonus(club),
+          facilityBonus: trainingHealBonus(club),
+          random: rng,
+        });
+        if (isUser && recovery.recovered) recoveredNames.push(p.name);
         continue;
       }
+
+      // 伤愈后仍有短暂复出观察期；每日递减，但期间训练/比赛复发风险更高。
+      processInjuryRecoveryDay(p, { random: rng });
 
       const delta = heal + Math.floor(rng() * 4) - fatigue;
       p.fitness = Math.round(clamp((p.fitness || 80) + delta, 30, 100));
@@ -490,11 +505,16 @@ export function processTrainingDay(world) {
       }
 
       // 高强度 + 低体能 → 训练伤
-      const risk = injuryP * (p.fitness < 55 ? 1.6 : 1);
+      const risk = injuryP * (p.fitness < 55 ? 1.6 : 1) * injuryRiskMultiplier(p);
       if (chance(risk)) {
-        p.injured = 1 + Math.floor(rng() * 3);
+        const injury = diagnoseInjury(p, {
+          cause: "training",
+          day: world.day,
+          season: world.season,
+          random: rng,
+        });
         p.fitness = Math.round(Math.min(p.fitness, 55));
-        if (isUser) injuredNames.push(p.name);
+        if (isUser) injuredNames.push(`${p.name}（${injury.label}·${injury.totalDays}天）`);
       }
     }
 
@@ -525,6 +545,14 @@ export function processTrainingDay(world) {
         text: `⚠️ 训练受伤：${injuredNames.slice(0, 3).join("、")}${
           injuredNames.length > 3 ? " 等" : ""
         }（建议降低强度或改恢复）`,
+      });
+    }
+    if (isUser && recoveredNames.length) {
+      logs.push({
+        day: world.day,
+        text: `✅ 伤愈复训：${recoveredNames.slice(0, 3).join("、")}${
+          recoveredNames.length > 3 ? " 等" : ""
+        }进入复出观察期，短期内应控制出场负荷`,
       });
     }
   }

@@ -290,29 +290,70 @@ export function retireChance(age) {
   return 0;
 }
 
-/** 年龄 +1，并处理 32+ 下滑；返回是否发生下滑 */
+const AGEING_ATTRS = {
+  physical: ["pace", "stamina", "physical", "strength", "reflexes"],
+  technical: ["shooting", "passing", "dribbling", "finishing", "tackling", "handling", "kicking"],
+  mental: ["vision", "marking", "positioning"],
+};
+
+const PHYSICAL_DECLINE_AGE = { GK: 34, DEF: 32, MID: 31, ATT: 30 };
+
+function changeRandomAgeingAttr(p, keys, delta) {
+  const pool = keys.filter((key) => {
+    const value = Number(p.attrs?.[key]) || 0;
+    return delta < 0 ? value > 1 : value < 20;
+  });
+  if (!pool.length) return false;
+  const key = pool[Math.floor(Math.random() * pool.length)];
+  p.attrs[key] = Math.max(1, Math.min(20, p.attrs[key] + delta));
+  return true;
+}
+
+/**
+ * 年龄 +1，并按位置拆分身体、技术与心智能力曲线。
+ * 边锋/前锋更早失去爆发力，门将与中卫更晚；经验属性可在成熟期继续增长。
+ */
 export function agePlayerOneYear(p) {
   p.age = (p.age || 17) + 1;
   let declined = false;
-  if (p.age >= 32 && p.attrs) {
-    const hits = p.age >= 36 ? 3 : p.age >= 34 ? 2 : 1;
-    for (let i = 0; i < hits; i++) {
-      const keys = Object.keys(p.attrs).filter((k) => (p.attrs[k] || 0) > 1);
-      // 优先体能类
-      const prefer = keys.filter((k) =>
-        ["pace", "stamina", "physical", "strength", "reflexes", "dribbling"].includes(k)
-      );
-      const pool = prefer.length ? prefer : keys;
-      if (!pool.length) break;
-      const k = pool[Math.floor(Math.random() * pool.length)];
-      p.attrs[k] = Math.max(1, p.attrs[k] - 1);
-      declined = true;
+  const summary = { physical: 0, technical: 0, mental: 0, improvedMental: 0 };
+  if (p.attrs) {
+    const startAge = PHYSICAL_DECLINE_AGE[p.pos] || 31;
+    if (p.age >= startAge) {
+      const years = p.age - startAge;
+      const attempts = Math.min(3, 1 + Math.floor(years / 2));
+      const chancePerHit = p.pos === "GK" ? 0.58 : 0.7;
+      for (let i = 0; i < attempts; i++) {
+        if (Math.random() < chancePerHit && changeRandomAgeingAttr(p, AGEING_ATTRS.physical, -1)) {
+          summary.physical++;
+          declined = true;
+        }
+      }
+      if (p.age >= startAge + 3 && Math.random() < 0.32) {
+        if (changeRandomAgeingAttr(p, AGEING_ATTRS.technical, -1)) {
+          summary.technical++;
+          declined = true;
+        }
+      }
     }
+
+    const mentalPeakEnd = p.pos === "GK" || p.pos === "DEF" ? 34 : 32;
+    if (p.age >= 27 && p.age <= mentalPeakEnd && Math.random() < 0.24) {
+      if (changeRandomAgeingAttr(p, AGEING_ATTRS.mental, 1)) summary.improvedMental++;
+    } else if (p.age >= mentalPeakEnd + 4 && Math.random() < 0.22) {
+      if (changeRandomAgeingAttr(p, AGEING_ATTRS.mental, -1)) {
+        summary.mental++;
+        declined = true;
+      }
+    }
+
+    p.ageingLast = summary;
     p.ovr = playerOverall(p);
     if (p.potential != null) {
-      p.potential = Math.max(p.ovr, Math.min(p.potential, p.ovr + (p.age >= 34 ? 0 : 1)));
+      p.potential = Math.max(p.ovr, Math.min(p.potential, p.ovr + (p.age >= mentalPeakEnd ? 0 : 1)));
     }
-  } else if (p.age <= 24 && p.potential != null && p.ovr < p.potential && Math.random() < 0.35) {
+  }
+  if (!declined && p.age <= 24 && p.potential != null && p.ovr < p.potential && Math.random() < 0.35) {
     // 年轻球员赛季末小幅成长
     const keys = Object.keys(p.attrs || {}).filter((k) => (p.attrs[k] || 0) < 20);
     if (keys.length) {
@@ -803,6 +844,8 @@ export function archiveAndResetSeasonStats(p, season, clubId, clubName) {
   p.competitionStats = {};
   p.fitness = Math.min(100, Math.max(80, p.fitness || 90));
   p.injured = 0;
+  p.injury = null;
+  p.returnToPlayDays = 0;
 }
 
 /** @deprecated 使用 archiveAndResetSeasonStats；无赛季信息时仅清零 */
@@ -818,6 +861,8 @@ export function resetSeasonStats(p) {
   p.competitionStats = {};
   p.fitness = Math.min(100, Math.max(80, p.fitness || 90));
   p.injured = 0;
+  p.injury = null;
+  p.returnToPlayDays = 0;
 }
 
 export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
@@ -1510,17 +1555,33 @@ export function teamRoleMods(club) {
  * 自动阵容选人分：能力 × 体能 × 士气 × 近况状态。
  * form 为最近评分均值（约 5–8）；以 6.5 为中性，温和放大/缩小，不压过 OVR 主轴。
  */
-function xiSortScore(p) {
+function xiSortScore(p, options = {}) {
   const base =
     (p.ovr || 10) * ((p.fitness || 100) / 100) * (0.85 + (p.morale || 70) / 500);
   const form = playerForm(p);
-  if (form == null || Number.isNaN(Number(form))) return base;
+  let score = base;
   // form 5.0 → 0.93 · 6.5 → 1.00 · 7.5 → 1.045 · 8.5 → 1.09（钳制 0.88–1.12）
-  const formMul = Math.max(0.88, Math.min(1.12, 1 + (Number(form) - 6.5) * 0.045));
-  return base * formMul;
+  if (form != null && !Number.isNaN(Number(form))) {
+    const formMul = Math.max(0.88, Math.min(1.12, 1 + (Number(form) - 6.5) * 0.045));
+    score *= formMul;
+  }
+
+  // AI 密集赛程轮换：重要比赛减轻轮换惩罚，但不会无视真实体能。
+  if (options.day != null && p.lastStartedDay != null) {
+    const restDays = Math.max(0, Number(options.day) - Number(p.lastStartedDay));
+    const rawPenalty = restDays <= 2 ? 0.18 : restDays === 3 ? 0.1 : restDays === 4 ? 0.04 : 0;
+    const importance = Math.max(0, Math.min(1, Number(options.importance) || 0.5));
+    score *= 1 - rawPenalty * (1 - importance * 0.55);
+  }
+  const recentStarts = Array.isArray(p.recentStartDays) && options.day != null
+    ? p.recentStartDays.filter((day) => Number(options.day) - Number(day) <= 8).length
+    : 0;
+  if (recentStarts >= 3) score *= 1 - Math.min(0.12, (recentStarts - 2) * 0.05);
+  if ((p.returnToPlayDays || 0) > 0) score *= Math.max(0.82, 1 - p.returnToPlayDays * 0.025);
+  return score;
 }
 
-export function autoLineup(club) {
+export function autoLineup(club, options = {}) {
   ensureTactics(club);
   const formation = FORMATIONS[club.tactics.formation] || FORMATIONS["4-3-3"];
   const used = new Set();
@@ -1528,12 +1589,12 @@ export function autoLineup(club) {
   for (const slot of formation.slots) {
     const candidates = club.players
       .filter((p) => p.pos === slot.pos && !used.has(p.id) && playerSelectable(p))
-      .sort((a, b) => xiSortScore(b) - xiSortScore(a));
+      .sort((a, b) => xiSortScore(b, options) - xiSortScore(a, options));
     let pickP = candidates[0];
     if (!pickP) {
       pickP = club.players
         .filter((p) => !used.has(p.id) && playerSelectable(p))
-        .sort((a, b) => (b.ovr || 0) - (a.ovr || 0))[0];
+        .sort((a, b) => xiSortScore(b, options) - xiSortScore(a, options))[0];
     }
     if (pickP) {
       used.add(pickP.id);
@@ -1571,10 +1632,10 @@ export function assignPlayersToFormationSlots(xi, slots) {
  * 保留用户已选首发：仅替换伤停/不存在/人数不足的位置
  * AI 队或 lineup 空时退回 autoLineup
  */
-export function ensureMatchLineup(club, { forceAuto = false } = {}) {
+export function ensureMatchLineup(club, { forceAuto = false, day = null, importance = 0.5 } = {}) {
   ensureTactics(club);
   if (forceAuto || !club.tactics.lineup?.length) {
-    return autoLineup(club);
+    return autoLineup(club, { day, importance });
   }
   const formation = FORMATIONS[club.tactics.formation] || FORMATIONS["4-3-3"];
   const need = formation.slots.length;
@@ -1593,12 +1654,12 @@ export function ensureMatchLineup(club, { forceAuto = false } = {}) {
     const slot = formation.slots[i];
     const candidates = club.players
       .filter((x) => x.pos === slot.pos && !used.has(x.id) && playerSelectable(x))
-      .sort((a, b) => xiSortScore(b) - xiSortScore(a));
+      .sort((a, b) => xiSortScore(b, { day, importance }) - xiSortScore(a, { day, importance }));
     let pickP = candidates[0];
     if (!pickP) {
       pickP = club.players
         .filter((x) => !used.has(x.id) && playerSelectable(x))
-        .sort((a, b) => (b.ovr || 0) - (a.ovr || 0))[0];
+        .sort((a, b) => xiSortScore(b, { day, importance }) - xiSortScore(a, { day, importance }))[0];
     }
     if (pickP) {
       used.add(pickP.id);

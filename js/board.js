@@ -32,6 +32,137 @@ function ordinalEn(n) {
   return `${value}${suffix}`;
 }
 
+export const CLUB_PLAN_DEFS = {
+  compete: {
+    label: "即战争胜",
+    labelEn: "Compete now",
+    desc: "优先成熟即战力与关键比赛阵容稳定",
+    descEn: "Prioritise proven quality and stability in key matches",
+    youthWeight: 0.1,
+    valueWeight: 0.15,
+    ovrWeight: 1.25,
+  },
+  youth: {
+    label: "培养青年",
+    labelEn: "Develop youth",
+    desc: "保护高潜年轻人，并为其创造轮换机会",
+    descEn: "Protect high-potential youngsters and create rotation opportunities",
+    youthWeight: 1.25,
+    valueWeight: 0.25,
+    ovrWeight: 0.9,
+  },
+  rebuild: {
+    label: "更新换代",
+    labelEn: "Rebuild the squad",
+    desc: "降低阵容年龄，逐步替换高龄球员",
+    descEn: "Lower the squad age and phase out older players",
+    youthWeight: 0.85,
+    valueWeight: 0.35,
+    ovrWeight: 1,
+  },
+  sustainable: {
+    label: "财政稳健",
+    labelEn: "Financial stability",
+    desc: "控制转会费与工资，优先高性价比补强",
+    descEn: "Control fees and wages while seeking value",
+    youthWeight: 0.45,
+    valueWeight: 0.75,
+    ovrWeight: 0.9,
+  },
+  attacking: {
+    label: "主动进攻",
+    labelEn: "Proactive football",
+    desc: "围绕传控与前场能力建设阵容",
+    descEn: "Build around possession and attacking quality",
+    youthWeight: 0.3,
+    valueWeight: 0.3,
+    ovrWeight: 1,
+  },
+  resilient: {
+    label: "稳固防守",
+    labelEn: "Defensive resilience",
+    desc: "重视门将、防线、对抗与阵容深度",
+    descEn: "Prioritise goalkeeping, defence, physicality and depth",
+    youthWeight: 0.25,
+    valueWeight: 0.35,
+    ovrWeight: 1,
+  },
+  balanced: {
+    label: "均衡建设",
+    labelEn: "Balanced build",
+    desc: "按位置短板和年龄结构稳步补强",
+    descEn: "Address positional and age-profile needs steadily",
+    youthWeight: 0.35,
+    valueWeight: 0.35,
+    ovrWeight: 1,
+  },
+};
+
+function average(items, getValue) {
+  return items.length ? items.reduce((sum, item) => sum + getValue(item), 0) / items.length : 0;
+}
+
+/** 同一份阵容/财政数据生成赛季计划，供董事会、AI 转会和界面共用。 */
+export function generateClubSeasonPlan(club, allClubs, season) {
+  const players = club?.players || [];
+  const peers = (allClubs || []).filter((item) => item.division === club.division);
+  const powerRank = Math.max(1, [...peers]
+    .sort((a, b) => (b.power || 0) - (a.power || 0))
+    .findIndex((item) => item.id === club.id) + 1);
+  const avgAge = average(players, (player) => Number(player.age) || 25);
+  const youngShare = players.filter((player) => (player.age || 25) <= 23).length / Math.max(1, players.length);
+  const weeklyWage = players.reduce((sum, player) => sum + (Number(player.wage) || 0), 0);
+  const youthLevel = Number(club?.facilities?.youth || club?.youth?.level) || 1;
+  const posAvg = (positions) => average(
+    players.filter((player) => positions.includes(player.pos)),
+    (player) => Number(player.ovr) || 10
+  );
+  const attack = posAvg(["MID", "ATT"]);
+  const defense = posAvg(["GK", "DEF"]);
+
+  let key = "balanced";
+  if ((club.money || 0) < weeklyWage * 10) key = "sustainable";
+  else if (avgAge >= 28.4) key = "rebuild";
+  else if (youthLevel >= 4 || youngShare >= 0.36) key = "youth";
+  else if (powerRank <= 4) key = "compete";
+  else if (attack >= defense + 0.8) key = "attacking";
+  else if (defense >= attack + 0.8) key = "resilient";
+
+  const def = CLUB_PLAN_DEFS[key] || CLUB_PLAN_DEFS.balanced;
+  return {
+    season: season ?? null,
+    key,
+    label: def.label,
+    labelEn: def.labelEn,
+    desc: def.desc,
+    descEn: def.descEn,
+    metrics: {
+      avgAge: Math.round(avgAge * 10) / 10,
+      youngShare: Math.round(youngShare * 100),
+      powerRank,
+      youthLevel,
+    },
+  };
+}
+
+export function ensureClubSeasonPlan(club, allClubs, season) {
+  if (!club) return null;
+  if (!club.seasonPlan || club.seasonPlan.season !== season) {
+    club.seasonPlan = generateClubSeasonPlan(club, allClubs, season);
+  }
+  return club.seasonPlan;
+}
+
+export function ensureWorldSeasonPlans(world) {
+  if (!world?.clubs) return [];
+  return world.clubs.map((club) => ensureClubSeasonPlan(club, world.clubs, world.season));
+}
+
+export function clubPlanDef(planOrClub) {
+  const key = planOrClub?.key || planOrClub?.seasonPlan?.key || "balanced";
+  return CLUB_PLAN_DEFS[key] || CLUB_PLAN_DEFS.balanced;
+}
+
 /** 按队力在本级排名生成目标 */
 export function generateBoardObjective(userClub, allClubs, season) {
   const div = userClub.division || 3;
@@ -102,6 +233,7 @@ export function generateBoardObjective(userClub, allClubs, season) {
   const pot = Math.max(2_000_000, userClub.money || 5_000_000);
   const bonus = Math.round((pot * 0.06 + 400_000) / 10_000) * 10_000;
   const fine = Math.round((bonus * 0.55) / 10_000) * 10_000;
+  const seasonPlan = ensureClubSeasonPlan(userClub, allClubs, season);
 
   return {
     season: season || null,
@@ -114,9 +246,14 @@ export function generateBoardObjective(userClub, allClubs, season) {
     status: "active",
     lastCheckDay: 0,
     settled: false,
-    /** 解雇警告 0–3，满 3 中途解雇 */
+    /** 解雇警告 0–4，满 4 中途解雇 */
     sackWarnings: 0,
     sacked: false,
+    planKey: seasonPlan?.key || "balanced",
+    planLabel: seasonPlan?.label || CLUB_PLAN_DEFS.balanced.label,
+    planLabelEn: seasonPlan?.labelEn || CLUB_PLAN_DEFS.balanced.labelEn,
+    planDesc: seasonPlan?.desc || CLUB_PLAN_DEFS.balanced.desc,
+    planDescEn: seasonPlan?.descEn || CLUB_PLAN_DEFS.balanced.descEn,
   };
 }
 
@@ -125,19 +262,28 @@ export function ensureBoardObjective(world) {
   if (!world) return null;
   const user = world.clubs?.find((c) => c.id === world.userClubId);
   if (!user) return null;
+  ensureWorldSeasonPlans(world);
 
   if (!world.board || world.board.season !== world.season) {
     world.board = generateBoardObjective(user, world.clubs, world.season);
     world.news = world.news || [];
     world.news.unshift({
       day: world.day || 1,
-      text: `董事会目标：${world.board.label}。达成奖金 ${formatMoney(world.board.bonus)}，未完成罚款 ${formatMoney(world.board.fine)}。`,
+      text: `董事会目标：${world.board.label}。赛季计划「${world.board.planLabel}」：${world.board.planDesc}。达成奖金 ${formatMoney(world.board.bonus)}，未完成罚款 ${formatMoney(world.board.fine)}。`,
     });
     try {
       pushBoardObjectiveMail(world, world.board);
     } catch (_) {
       /* ignore */
     }
+  }
+  const plan = ensureClubSeasonPlan(user, world.clubs, world.season);
+  if (!world.board.planKey) {
+    world.board.planKey = plan?.key || "balanced";
+    world.board.planLabel = plan?.label || CLUB_PLAN_DEFS.balanced.label;
+    world.board.planLabelEn = plan?.labelEn || CLUB_PLAN_DEFS.balanced.labelEn;
+    world.board.planDesc = plan?.desc || CLUB_PLAN_DEFS.balanced.desc;
+    world.board.planDescEn = plan?.descEn || CLUB_PLAN_DEFS.balanced.descEn;
   }
   return world.board;
 }
@@ -431,8 +577,9 @@ export function boardStatusLine(board) {
     return `${board.label} · ${st}（赛季末第 ${board.finalPos ?? "—"}）`;
   }
   const w = board.sackWarnings || 0;
-  const warn = w > 0 ? ` · 警告 ${w}/3` : "";
-  return `${board.label} · ${boardStatusLabel(board.status)}${warn} · 奖 ${formatMoney(board.bonus)} / 罚 ${formatMoney(board.fine)}`;
+  const warn = w > 0 ? ` · 警告 ${w}/4` : "";
+  const plan = board.planLabel ? ` · 计划「${board.planLabel}」` : "";
+  return `${board.label} · ${boardStatusLabel(board.status)}${warn}${plan} · 奖 ${formatMoney(board.bonus)} / 罚 ${formatMoney(board.fine)}`;
 }
 
 /** UI 样式：ok | warn | danger | "" */

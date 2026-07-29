@@ -56,6 +56,10 @@ import { ensureManagerCareer, recordManagerMatch } from "./career.js";
 import { noteUserMatchResult } from "./worldpulse.js";
 import { relationMatchNudge, ensurePlayerRelation } from "./relations.js";
 import {
+  diagnoseInjury,
+  squadInjuryRiskMultiplier,
+} from "./injuries.js";
+import {
   shouldUseSim,
   ensureSimEngine,
   resyncSimAfterHalfTime,
@@ -101,6 +105,56 @@ export function pickWeather() {
 /** 按 key 取天气；未知则重新抽取 */
 export function weatherByKey(key) {
   return WEATHERS.find((w) => w.key === key) || pickWeather();
+}
+
+function averageAttrs(player, keys) {
+  const values = keys.map((key) => Number(player?.attrs?.[key])).filter(Number.isFinite);
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 10;
+}
+
+/** 球员属性对天气的适应度；不添加隐藏能力。 */
+export function weatherPlayerScore(player, weatherKey) {
+  if (weatherKey === "rain") {
+    return averageAttrs(player, player?.pos === "GK"
+      ? ["handling", "positioning", "kicking"]
+      : ["dribbling", "passing", "positioning"]);
+  }
+  if (weatherKey === "wind") return averageAttrs(player, ["passing", "vision", "kicking", "strength"]);
+  if (weatherKey === "cold") return averageAttrs(player, ["physical", "strength", "stamina"]);
+  if (weatherKey === "heat") return averageAttrs(player, ["stamina", "physical", "positioning"]);
+  return 11;
+}
+
+export function weatherTeamImpact(club, weather) {
+  const players = getLineupPlayers(club);
+  if (!players.length || !weather || weather.key === "clear") {
+    return { score: 11, atk: 1, def: 1, fatigue: 1, injury: 1, best: null, risk: null };
+  }
+  const ranked = players
+    .map((player) => ({ player, score: weatherPlayerScore(player, weather.key) }))
+    .sort((a, b) => b.score - a.score);
+  const score = ranked.reduce((sum, item) => sum + item.score, 0) / ranked.length;
+  const delta = clamp((score - 11) / 9, -1, 1);
+  return {
+    score: Math.round(score * 10) / 10,
+    atk: 1 + delta * 0.035,
+    def: 1 + delta * 0.025,
+    fatigue: 1 - delta * (weather.key === "heat" ? 0.12 : 0.06),
+    injury: 1 - delta * (weather.key === "cold" || weather.key === "heat" ? 0.1 : 0.06),
+    best: ranked[0]?.player || null,
+    risk: ranked[ranked.length - 1]?.player || null,
+  };
+}
+
+function fixtureImportance(world, fixture) {
+  const type = fixture?.competitionType || (fixture?.competition === "cup" ? "domestic-cup" : "league");
+  const round = String(fixture?.roundLabel || "");
+  if (type === "continental-knockout" || round.includes("决赛") || round.includes("半决赛")) return 1;
+  if (type === "continental-league-stage") return 0.88;
+  if (type === "domestic-cup") return 0.78;
+  const tableRow = world?.table?.[fixture?.home];
+  const progress = tableRow?.played ? tableRow.played / 34 : 0;
+  return progress >= 0.8 ? 0.86 : 0.62;
 }
 
 /**
@@ -378,6 +432,15 @@ function recomputeSides(state) {
   awayAtk *= weather.atk;
   homeDef *= weather.def;
   awayDef *= weather.def;
+  const hWeather = weatherTeamImpact(home, weather);
+  const aWeather = weatherTeamImpact(away, weather);
+  homeAtk *= hWeather.atk;
+  homeDef *= hWeather.def;
+  awayAtk *= aWeather.atk;
+  awayDef *= aWeather.def;
+  state._fitW.home *= hWeather.fatigue;
+  state._fitW.away *= aWeather.fatigue;
+  state._weatherImpact = { home: hWeather, away: aWeather };
   const pace = weather.pace;
 
   // 德比：更开放、更高犯规
@@ -460,11 +523,12 @@ export function createMatchSession(world, fixture) {
   ensureStaff(away);
   ensureTactics(home);
   ensureTactics(away);
+  const importance = fixtureImportance(world, fixture);
   if (home.id !== world.userClubId) aiTuneTactics(home, away, world);
   if (away.id !== world.userClubId) aiTuneTactics(away, home, world);
   // 用户保留手动/上次首发；AI 强制重排
-  ensureMatchLineup(home, { forceAuto: home.id !== world.userClubId });
-  ensureMatchLineup(away, { forceAuto: away.id !== world.userClubId });
+  ensureMatchLineup(home, { forceAuto: home.id !== world.userClubId, day: world.day, importance });
+  ensureMatchLineup(away, { forceAuto: away.id !== world.userClubId, day: world.day, importance });
   // 主客都保证有核心（用户已指定则保留；AI / 未指定则自动选进攻最强的）
   // 避免「只有用户队会回撤内切/绝对进攻权」的单方面表现
   ensureCorePlayer(home);
@@ -518,6 +582,10 @@ export function createMatchSession(world, fixture) {
     teamTalkMods: { home: null, away: null },
     /** 已选讲话记录 { pre?, ht? } */
     teamTalks: {},
+    startingLineups: {
+      home: [...(home.tactics.lineup || [])],
+      away: [...(away.tactics.lineup || [])],
+    },
   };
 
   recomputeSides(state);
@@ -869,11 +937,15 @@ function wireSimInjuries(state) {
   eng.injuryMul = {
     home:
       wMul *
+      (state._weatherImpact?.home?.injury || 1) *
+      squadInjuryRiskMultiplier(getLineupPlayers(state.home)) *
       doctorInjuryMod(state.home) *
       trainingInjuryMod(state.home) *
       prepInjuryMod(state, state.home),
     away:
       wMul *
+      (state._weatherImpact?.away?.injury || 1) *
+      squadInjuryRiskMultiplier(getLineupPlayers(state.away)) *
       doctorInjuryMod(state.away) *
       trainingInjuryMod(state.away) *
       prepInjuryMod(state, state.away),
@@ -948,16 +1020,20 @@ function pushSimFlavor(state, item) {
     // 本层先结算伤情，换人记账延到 sub_on（与画面 id 对齐）。
     const p = club.players?.find((x) => x.id === item.agentId);
     if (!p) return null;
-    const days =
-      item.cause === "contact" ? 2 + Math.floor(rng() * 5) : 1 + Math.floor(rng() * 3);
-    p.injured = days;
+    const injury = diagnoseInjury(p, {
+      cause: item.cause === "contact" ? "contact" : "fatigue",
+      day: state.world.day,
+      season: state.world.season,
+      random: rng,
+    });
+    const days = injury.totalDays;
     p.fitness = Math.round(Math.min(p.fitness ?? 100, 45));
     state.injuredOut.add(p.id);
     const ev = pushEv(
       state,
       item.minute,
       "injury",
-      `🏥 ${item.minute}' ${club.short} ${p.name} 受伤下场（约 ${days} 天）`,
+      `🏥 ${item.minute}' ${club.short} ${p.name} ${injury.label}（约 ${days} 天）`,
       { teamId: club.id, playerId: p.id, fromSim: true }
     );
     recomputeSides(state);
@@ -1465,9 +1541,11 @@ function tryInjury(state, minute) {
   const injuryMod =
     doctorInjuryMod(club) * trainingInjuryMod(club) * prepInjuryMod(state, club);
   // injuryMod 越低（好队医/设施）越不易伤
-  const base = 0.005 * (state.weather.injury || 1) * injuryMod;
-  if (!chance(base)) return;
   const sk = sideKey(state, club);
+  const weatherRisk = state._weatherImpact?.[sk]?.injury || 1;
+  const squadRisk = squadInjuryRiskMultiplier(activeXi(state, club));
+  const base = 0.005 * (state.weather.injury || 1) * weatherRisk * squadRisk * injuryMod;
+  if (!chance(base)) return;
   const xi = activeXi(state, club);
   if (!xi.length) return;
   const p = xi[Math.floor(rng() * xi.length)];
@@ -1475,11 +1553,16 @@ function tryInjury(state, minute) {
   // 唯一门将略保护
   if (p.pos === "GK" && xi.filter((x) => x.pos === "GK").length <= 1 && chance(0.7)) return;
 
-  const days = 1 + Math.floor(rng() * 4);
-  p.injured = days;
+  const injury = diagnoseInjury(p, {
+    cause: p.fitness < 62 ? "fatigue" : "contact",
+    day: state.world.day,
+    season: state.world.season,
+    random: rng,
+  });
+  const days = injury.totalDays;
   p.fitness = Math.round(Math.min(p.fitness, 45));
   state.injuredOut.add(p.id);
-  pushEv(state, minute, "injury", `🏥 ${minute}' ${club.short} ${p.name} 受伤下场（约 ${days} 天）`, {
+  pushEv(state, minute, "injury", `🏥 ${minute}' ${club.short} ${p.name} ${injury.label}（约 ${days} 天）`, {
     teamId: club.id,
     playerId: p.id,
   });
@@ -2126,6 +2209,14 @@ function buildMatchNarrative(state) {
     lines.push(`焦点战节奏紧，双方都不敢轻易压上。`);
   }
 
+  if (state.weather?.key !== "clear" && state._weatherImpact) {
+    const homeWeather = state._weatherImpact.home;
+    const awayWeather = state._weatherImpact.away;
+    const better = homeWeather.score >= awayWeather.score ? h : a;
+    const impact = homeWeather.score >= awayWeather.score ? homeWeather : awayWeather;
+    lines.push(`天气适应：${better.short || better.name} 的首发适应分 ${impact.score}/20，${impact.best?.name || "—"} 最为适应。`);
+  }
+
   // 5) MOTM（若已生成评分）
   const motm = state.matchRatings?.motm;
   if (motm?.name) {
@@ -2137,7 +2228,7 @@ function buildMatchNarrative(state) {
     lines.push(`本场最佳：${motm.name}${extra}，评分 ${motm.rating}。`);
   }
 
-  return lines.slice(0, 5);
+  return lines.slice(0, 6);
 }
 
 function buildReport(state) {
@@ -2151,6 +2242,18 @@ function buildReport(state) {
     homeGoals: state.hg,
     awayGoals: state.ag,
     weather: { key: state.weather.key, name: state.weather.name, icon: state.weather.icon },
+    weatherImpact: state.weather.key === "clear" ? null : {
+      home: {
+        score: state._weatherImpact?.home?.score ?? 11,
+        best: state._weatherImpact?.home?.best?.name || null,
+        risk: state._weatherImpact?.home?.risk?.name || null,
+      },
+      away: {
+        score: state._weatherImpact?.away?.score ?? 11,
+        best: state._weatherImpact?.away?.best?.name || null,
+        risk: state._weatherImpact?.away?.risk?.name || null,
+      },
+    },
     derby: state.derby,
     bigMatch: state.bigMatch,
     home: {
@@ -2239,8 +2342,6 @@ function applyResult(world, f) {
 }
 
 function drainFitness(club, isHome, state) {
-  const injuryMod =
-    doctorInjuryMod(club) * trainingInjuryMod(club) * prepInjuryMod(state, club);
   const sk = club.id === state.home.id ? "home" : "away";
   const sent = state.sentOff[sk];
   const fitW = state._fitW?.[sk] || fitnessMultOf(club.tactics);
@@ -2248,10 +2349,6 @@ function drainFitness(club, isHome, state) {
     if (sent.has(p.id)) continue;
     const drain = 4 + Math.floor(rng() * 6) + Math.round((fitW - 1) * 4);
     p.fitness = Math.round(Math.max(35, p.fitness - drain));
-    if (chance(0.015 * injuryMod) && !state.injuredOut.has(p.id)) {
-      p.injured = 1 + Math.floor(rng() * 3);
-      p.fitness = Math.round(Math.min(p.fitness, 50));
-    }
   }
   const xi = new Set(club.tactics.lineup);
   for (const p of club.players) {
@@ -2402,6 +2499,24 @@ function applyMatchRatings(state) {
 export function finalizeMatch(state) {
   if (state.finished) return state.report;
   const { world, fixture, home, away, isCup, isLeague, isKnockout, hg, ag, events } = state;
+
+  // 记录真实首发负荷，供后续密集赛程轮换；替补只记出场，不计首发。
+  for (const [side, club] of [["home", home], ["away", away]]) {
+    const started = new Set(state.startingLineups?.[side] || []);
+    for (const player of club.players || []) {
+      if (started.has(player.id)) {
+        player.lastStartedDay = world.day;
+        player.recentStartDays = Array.isArray(player.recentStartDays)
+          ? player.recentStartDays.filter((day) => world.day - Number(day) <= 14)
+          : [];
+        player.recentStartDays.push(world.day);
+        if (player.recentStartDays.length > 6) player.recentStartDays = player.recentStartDays.slice(-6);
+      }
+      if (started.has(player.id) || (club.tactics.lineup || []).includes(player.id)) {
+        player.lastPlayedDay = world.day;
+      }
+    }
+  }
 
   // 上座与票价只能由开赛前已知的信息决定。这里先锁定上下文，稍后再做账，
   // 避免 applyResult 把本场赛果和更新后的积分榜倒灌进门票收入。

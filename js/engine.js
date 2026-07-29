@@ -108,6 +108,9 @@ import {
 import { pushMedia } from "./media.js";
 import {
   ensureBoardObjective,
+  ensureClubSeasonPlan,
+  ensureWorldSeasonPlans,
+  clubPlanDef,
   evaluateBoardProgress,
   checkBoardMidSeason,
   settleBoardObjective,
@@ -1010,6 +1013,7 @@ export function startNextSeason(world) {
     }
     autoLineup(c);
   }
+  ensureWorldSeasonPlans(world);
 
   world.fixtures = generateAllDivisionFixtures(world.clubs);
   const qualifiers = world._nextContinentalQualifiers || null;
@@ -1444,18 +1448,22 @@ export function processAiTransfers(world) {
     if (budgetMoves <= 0) break;
     ensureStaff(club);
     if (club.players.length < 14) continue;
+    const plan = ensureClubSeasonPlan(club, world.clubs, world.season);
+    const planDef = clubPlanDef(plan);
 
     const avgAge =
       club.players.reduce((s, p) => s + (p.age || 25), 0) / Math.max(1, club.players.length);
-    const needCash = club.money < 350000 || club.players.length >= 26;
-    const tooOld = avgAge >= 29 && club.players.length > 16;
+    const needCash = club.money < (plan?.key === "sustainable" ? 1_200_000 : 350_000) || club.players.length >= 26;
+    const tooOld = avgAge >= (plan?.key === "rebuild" ? 27.3 : 29) && club.players.length > 16;
 
     // 卖：优先卖出过剩位置的最弱球员（而非全队最弱）
-    if (needCash || tooOld || chance(0.15)) {
+    if (needCash || tooOld || chance(plan?.key === "sustainable" || plan?.key === "rebuild" ? 0.24 : 0.15)) {
       // 使用阵容平衡系统选择卖出球员
       const victim = selectPlayerToSellSmart(club.players, (p, players) => {
         const posCount = players.filter((x) => x.pos === p.pos).length;
         if (p.pos === "GK" && posCount <= 1) return false;
+        if (plan?.key === "youth" && (p.age || 25) <= 22 && (p.potential || p.ovr || 0) >= (p.ovr || 0) + 2) return false;
+        if (plan?.key === "compete" && (p.ovr || 0) >= Math.max(...players.map((x) => x.ovr || 0)) - 1) return false;
         return true;
       });
       if (victim && club.players.length > 15) {
@@ -1534,9 +1542,18 @@ export function processAiTransfers(world) {
         const price = (p.value || estimateValue(p)) * (0.9 + rng() * 0.15);
         if (price > club.money) continue;
         const pot = p.potential || p.ovr || 10;
-        const ageBonus = (p.age || 25) <= 23 ? 1.5 : (p.age || 25) >= 31 ? -1 : 0;
+        const age = p.age || 25;
+        const youthBonus = age <= 23 ? planDef.youthWeight * 2.2 : age >= 31 ? -planDef.youthWeight : 0;
+        const identityPosBonus =
+          plan?.key === "attacking" && (p.pos === "MID" || p.pos === "ATT") ? 1.1 :
+          plan?.key === "resilient" && (p.pos === "GK" || p.pos === "DEF") ? 1.1 : 0;
         const score =
-          (p.ovr || 0) + pot * 0.35 + ageBonus + (sameDiv ? 0.5 : 0) - price / 1_200_000;
+          (p.ovr || 0) * planDef.ovrWeight +
+          pot * (0.22 + planDef.youthWeight * 0.18) +
+          youthBonus +
+          identityPosBonus +
+          (sameDiv ? 0.5 : 0) -
+          (price / 1_200_000) * (0.7 + planDef.valueWeight);
         candidates.push({ player: p, club: other, score, price });
       }
     }
