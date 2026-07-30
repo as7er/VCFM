@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v168";
+const CACHE = "vcfm-v169";
 const ASSETS = [
   "./",
   "./index.html",
@@ -44,6 +44,7 @@ const ASSETS = [
   "./js/board.js",
   "./js/training.js",
   "./js/facilities.js",
+  "./js/club-finance.js",
   // v153–v154 新增模块（漏登记会导致离线时模块加载失败）
   "./js/squad-balance.js",
   "./js/training-boost.js",

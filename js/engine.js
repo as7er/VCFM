@@ -51,7 +51,6 @@ import {
   scoutSellMod,
   scoutYouthPotBonus,
   doctorInjuryMod,
-  staffWageBill,
   generateStaffMarket,
   refreshStaffMarket,
   hireStaff,
@@ -147,7 +146,6 @@ import {
   startFacilityUpgrade,
   upgradeYouthAcademy,
   processFacilityDay,
-  facilityWeeklyUpkeep,
   matchdayIncome,
   applySeasonLeagueFinance,
   trainingGrowthBonus,
@@ -164,6 +162,13 @@ import {
   TRAINING_FACILITY_LEVELS,
   FACILITY_LABELS,
 } from "./facilities.js";
+import {
+  clubTransferBudget,
+  ensureClubFinance,
+  ensureWorldFinances,
+  resetClubSeasonFinance,
+  settleWorldWeeklyFinances,
+} from "./club-finance.js";
 import {
   simulateMatch,
   simulateMatchSync,
@@ -403,14 +408,14 @@ function growYouthPlayer(player, growthRate) {
   return grew;
 }
 
-/** 青训日更：成长 / 招生 / 维护费 */
+/** 青训日更：成长 / 招生；维护费由全俱乐部统一周结算处理。 */
 function processYouthDay(world) {
   for (const club of world.clubs) {
     const ya = ensureYouthAcademy(club);
     const cfg = YOUTH_LEVELS[ya.level] || YOUTH_LEVELS[1];
     ya.daysSinceIntake = (ya.daysSinceIntake || 0) + 1;
 
-    // 每周成长 + 维护（教练加成）
+    // 每周成长（教练加成）
     if (world.day % 7 === 0) {
       const yMult = youthTrainingMult(club);
       const growth =
@@ -424,7 +429,6 @@ function processYouthDay(world) {
           p.wage = estimateWage(p);
         }
       }
-      club.money -= cfg.upkeep;
     }
 
     // 约每 60 天招生（球探提升潜力），更符合现实青训周期
@@ -644,25 +648,16 @@ export function advanceDay(world) {
   const boardEvent = checkBoardEvent(world);
   if (boardEvent) events.push(boardEvent);
 
-  // 每周发工资（每 7 天）——一线含租借分摊
+  // 所有俱乐部使用同一套工资、设施维护与商业收入周结算。
   if (world.day % 7 === 0) {
+    const settlements = settleWorldWeeklyFinances(world);
     const user = clubById(world, world.userClubId);
-    ensureStaff(user);
-    ensureFacilities(user);
-    const wageBill = userSquadWageBill(world);
-    const youthWage = (user.youth?.players || []).reduce((s, p) => s + (p.wage || 0), 0);
-    const staffWage = staffWageBill(user);
-    const facUpkeep = facilityWeeklyUpkeep(user);
-    const total = wageBill + youthWage + staffWage + facUpkeep;
-    user.money -= total;
-    if (!user.finance || typeof user.finance !== "object") user.finance = {};
-    user.finance.seasonWageOut =
-      (Number(user.finance.seasonWageOut) || 0) + wageBill + youthWage + staffWage;
-    user.finance.seasonFacilityOut =
-      (Number(user.finance.seasonFacilityOut) || 0) + facUpkeep;
+    const userSettle = settlements.find((item) => item.clubId === world.userClubId);
+    const total = userSettle?.operatingOut || 0;
+    const commercial = userSettle?.commercialIncome || 0;
     world.news.unshift({
       day: world.day,
-      text: `发放周薪 ${formatMoney(total)}（一线 ${formatMoney(wageBill)} + 青训 ${formatMoney(youthWage)} + 职员 ${formatMoney(staffWage)} + 设施 ${formatMoney(facUpkeep)}），资金 ${formatMoney(user.money)}`,
+      text: `俱乐部周结算：商业收入 ${formatMoney(commercial)} - 运营支出 ${formatMoney(total)}（一线 ${formatMoney(userSettle?.squadWage || 0)} + 青训 ${formatMoney(userSettle?.youthWage || 0)} + 职员 ${formatMoney(userSettle?.staffWage || 0)} + 设施 ${formatMoney(userSettle?.facilityUpkeep || 0)}），资金 ${formatMoney(user.money)}`,
     });
   }
 
@@ -885,7 +880,7 @@ export function finishSeason(world) {
       agePlayerOneYear(p);
       // 青训一般不退役；满 20 岁仍在青训则强制释放或提拔潜力高的
       if (p.age >= 20) {
-        if (p.potential >= 14 && club.players.length < 28) {
+        if (p.potential >= 14 && club.players.length < 23) {
           p.fromYouth = true;
           p.wage = estimateWage(p);
           ensurePlayerHistory(p);
@@ -906,13 +901,23 @@ export function finishSeason(world) {
     }
     ya.players = yKept;
 
-    // 阵容过少则补人
+    // 退役、合同到期后先保证每个位置组仍能组成现实的一线队骨架。
+    const minimumByPosition = { GK: 2, DEF: 5, MID: 5, ATT: 3 };
+    for (const [position, minimum] of Object.entries(minimumByPosition)) {
+      while (club.players.filter((player) => player.pos === position).length < minimum) {
+        club.players.push(
+          createPlayer(position, club.power - 5 + Math.floor(rng() * 8), club.id, {
+            homeNation: club.countryCode,
+          })
+        );
+      }
+    }
+
+    // 阵容过少则继续补充轮换球员。
     while (club.players.length < 16) {
       const posPick = ["GK", "DEF", "MID", "ATT"][Math.floor(rng() * 4)];
-      // 保证至少 1 门将
-      const needGk = !club.players.some((p) => p.pos === "GK");
       club.players.push(
-        createPlayer(needGk ? "GK" : posPick, club.power - 5 + Math.floor(rng() * 8), club.id, {
+        createPlayer(posPick, club.power - 5 + Math.floor(rng() * 8), club.id, {
           homeNation: club.countryCode,
         })
       );
@@ -977,6 +982,7 @@ export function startNextSeason(world) {
   releaseUnrenewed(world);
 
   const expandedClubs = ensureWorldClubTemplates(world);
+  ensureWorldFinances(world);
 
   world.season += 1;
   world.day = 1;
@@ -997,15 +1003,7 @@ export function startNextSeason(world) {
   for (const c of world.clubs) {
     world.table[c.id] = { played: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
     if (!c.division) c.division = 3;
-    if (c.finance && typeof c.finance === "object") {
-      c.finance.seasonTicketIncome = 0;
-      c.finance.seasonHomeGates = 0;
-      c.finance.seasonWageOut = 0;
-      c.finance.seasonFacilityOut = 0;
-      c.finance.seasonTransferNet = 0;
-      c.finance.seasonBroadcastIncome = 0;
-      c.finance.seasonPrizeIncome = 0;
-    }
+    resetClubSeasonFinance(c);
     for (const p of c.players) {
       ensureContract(p);
       ensureDiscipline(p);
@@ -1115,6 +1113,8 @@ export {
   STADIUM_LEVELS,
   TRAINING_FACILITY_LEVELS,
   FACILITY_LABELS,
+  ensureClubFinance,
+  ensureWorldFinances,
   // 租借
   ensureLoans,
   loanOutPlayer,
@@ -1412,12 +1412,16 @@ function transferBetween(world, buyer, seller, player) {
   const idx = seller.players.findIndex((p) => p.id === player.id);
   if (idx < 0) return { ok: false, msg: "球员不存在" };
   if (seller.players.length <= 14) return { ok: false, msg: "卖方阵容过少" };
-  if (buyer.players.length >= 28) return { ok: false, msg: "买方阵容已满" };
+  if (buyer.players.length >= 25) return { ok: false, msg: "买方阵容已满" };
   const price = Math.round((player.value || estimateValue(player)) * (0.9 + rng() * 0.2));
-  if (buyer.money < price) return { ok: false, msg: "资金不足" };
+  if (clubTransferBudget(world, buyer) < price) return { ok: false, msg: "扣除运营储备后资金不足" };
 
   buyer.money -= price;
   seller.money += price;
+  const buyerFinance = ensureClubFinance(buyer);
+  const sellerFinance = ensureClubFinance(seller);
+  buyerFinance.seasonTransferNet -= price;
+  sellerFinance.seasonTransferNet += price;
   seller.players.splice(idx, 1);
   player.clubId = buyer.id;
   player.morale = Math.min(100, (player.morale || 70) + 5);
@@ -1471,8 +1475,9 @@ export function processAiTransfers(world) {
           .filter(
             (c) =>
               c.id !== club.id &&
-              c.players.length < 27 &&
-              c.money > (victim.value || 0) * 0.8
+              c.id !== world.userClubId &&
+              c.players.length < 25 &&
+              clubTransferBudget(world, c) > (victim.value || 0) * 0.8
           )
           .sort((a, b) => {
             // 缺该位置的优先
@@ -1513,8 +1518,9 @@ export function processAiTransfers(world) {
     }
 
     // 买：使用阵容平衡系统确定需要补强的位置
-    const needPos = selectPositionToBuy(club.players, club.money);
-    if (!needPos || club.money < 150000 || club.players.length >= 27) continue;
+    const transferBudget = clubTransferBudget(world, club);
+    const needPos = selectPositionToBuy(club.players, transferBudget);
+    if (!needPos || transferBudget < 150000 || club.players.length >= 25) continue;
 
     // 同时检查：如果该位置已经够用，也跳过（双重保险）
     const counts = {
@@ -1540,7 +1546,7 @@ export function processAiTransfers(world) {
         // 别买高龄废柴
         if ((p.age || 0) >= 33 && (p.ovr || 0) < 12) continue;
         const price = (p.value || estimateValue(p)) * (0.9 + rng() * 0.15);
-        if (price > club.money) continue;
+        if (price > transferBudget) continue;
         const pot = p.potential || p.ovr || 10;
         const age = p.age || 25;
         const youthBonus = age <= 23 ? planDef.youthWeight * 2.2 : age >= 31 ? -planDef.youthWeight : 0;

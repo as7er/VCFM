@@ -1282,6 +1282,17 @@ export function createClub(template, lang = "zh") {
           projects: [],
         }
       : null,
+    finance: {
+      version: 1,
+      seasonTicketIncome: 0,
+      seasonCommercialIncome: 0,
+      seasonWageOut: 0,
+      seasonFacilityOut: 0,
+      seasonTransferNet: 0,
+      seasonBroadcastIncome: 0,
+      seasonPrizeIncome: 0,
+      seasonHomeGates: 0,
+    },
   };
   applyClubBranding(club, clubBrandingById[club.id] || template.branding, lang);
   ensureKit(club);

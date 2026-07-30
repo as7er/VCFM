@@ -30,8 +30,8 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=168";
-import { nationFlagHtml } from "./flags.js?v=168";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=169";
+import { nationFlagHtml } from "./flags.js?v=169";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -145,6 +145,7 @@ import {
   upgradeYouthAcademy,
   startFacilityUpgrade,
   ensureFacilities,
+  ensureWorldFinances,
   stadiumInfo,
   trainingFacilityInfo,
   youthFacilityInfo,
@@ -283,7 +284,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=168";
+} from "./avatar.js?v=169";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -875,6 +876,7 @@ function initStart() {
       world = createWorld(clubId, manager, getLang());
       ensureMedia(world);
       for (const c of world.clubs) ensureStaff(c);
+      ensureWorldFinances(world);
       refreshStaffMarket(world);
       const u = world.clubs.find((c) => c.id === clubId);
       mediaSeasonKickoff(world, u, t("div." + (u.division || 3)) || DIVISIONS[u.division || 3]?.name || "League");
@@ -965,6 +967,7 @@ function migrateWorld(w) {
   ensureBoardObjective(w);
   ensureTransferWindow(w);
   ensureManagerCareer(w);
+  ensureWorldFinances(w);
   if (!Array.isArray(w.poachBids)) w.poachBids = [];
   if (w.board && w.board.sackWarnings == null) w.board.sackWarnings = 0;
   for (const c of w.clubs || []) {
@@ -3225,6 +3228,9 @@ function renderDashboard() {
     const seasonGate = en
       ? `Season tickets <strong>${formatMoney(fin.seasonTickets || 0)}</strong>${fin.seasonHomeGates ? ` · ${fin.seasonHomeGates} home` : ""}`
       : `本季门票 <strong>${formatMoney(fin.seasonTickets || 0)}</strong>${fin.seasonHomeGates ? ` · ${fin.seasonHomeGates} 场主场` : ""}`;
+    const commercialLine = en
+      ? `Commercial income <strong>${formatMoney(fin.seasonCommercial || 0)}</strong> · weekly ${formatMoney(fin.commercialIncome || 0)}`
+      : `商业收入 <strong>${formatMoney(fin.seasonCommercial || 0)}</strong> · 每周 ${formatMoney(fin.commercialIncome || 0)}`;
     const ticketFactors = ticketFactorsText(fin.lastTicketFactors, en);
     const tvPrizeTotal = (fin.seasonBroadcast || 0) + (fin.seasonPrize || 0);
     const tvPrizeLine =
@@ -3253,12 +3259,13 @@ function renderDashboard() {
       <div class="muted">🎟️ ${ticketLine}</div>
       ${ticketFactors ? `<div class="muted">↳ ${escapeHtml(ticketFactors)}</div>` : ""}
       <div class="muted">🎟️ ${seasonGate}</div>
+      <div class="muted">🤝 ${commercialLine}</div>
       <div class="muted">📺 ${tvPrizeLine}</div>
       <div class="muted">🔁 ${xferTxt}</div>
       <div class="muted">📉 ${spent}</div>
-      <div class="muted">${en ? "Weekly out" : "周支出"} ${formatMoney(fin.weekly)}
+      <div class="muted">${en ? "Weekly operation" : "每周运营"} ${formatMoney(fin.weekly)}
         （${en ? "wages" : "薪资"} ${formatMoney(fin.squadWage + fin.youthWage + fin.staffWage)}
-        + ${en ? "facilities" : "设施"} ${formatMoney(fin.upkeep)}）</div>
+        + ${en ? "facilities" : "设施"} ${formatMoney(fin.upkeep)}） · ${en ? "cash burn" : "现金消耗"} ${formatMoney(fin.weeklyCashBurn || 0)}</div>
       <div class="${fin.critical ? "stat-low" : fin.warning ? "stat-mid" : "muted"}">
         ${en ? "Runway" : "可撑"} ~${fin.weeksCover} ${en ? "weeks" : "周"}
         ${fin.critical ? (en ? " · CRITICAL" : " · 告急") : fin.warning ? (en ? " · tight" : " · 偏紧") : ""}

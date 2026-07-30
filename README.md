@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v166** · 赛前票房因果与伤停信息 |
+| 当前版本 | **v169** · 世界财政公平与长期生态 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -63,7 +63,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 ### 经营与体验
 
-- **财政**：门票、转会净额、工资、设施支出、转播分成和排名奖金使用同一份俱乐部财务数据；赛后显示上座人数与上座率。
+- **财政**：用户与 AI 俱乐部共同结算门票、商业收入、转会、工资、设施、转播和排名奖金；AI 转会必须保留真实运营储备。
 - **设施**：球场、训练、青训、医疗等设施可以升级，并影响收入、成长、恢复和伤病。
 - **信息系统**：信箱、世界新闻、媒体、球探任务、关注列表、球员对话、全局搜索和可连续浏览的球员资料。
 - **存档**：3 个槽位、自动保存、手动保存、JSON 导出与导入；旧存档会在加载时补齐新增字段。
@@ -129,7 +129,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v166** · pre-match gate causality and injury status |
+| Current version | **v169** · world financial parity and long-term ecology |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -176,7 +176,7 @@ Repository: https://github.com/as7er/vcfm
 
 ### Operations and usability
 
-- **Finances**: tickets, transfer net spend, wages, facility costs, broadcast distributions, and prize money share one financial ledger. Match reports include attendance and occupancy.
+- **Finances**: user and AI clubs share the same ticket, commercial, transfer, wage, facility, broadcast, and prize ledger; AI transfer spending preserves a real operating reserve.
 - **Facilities**: stadium, training, youth, and medical upgrades affect revenue, development, recovery, and injuries.
 - **Information systems**: inbox, world news, media, scouting missions, shortlist, player talks, global search, and continuous player-profile browsing.
 - **Saves**: 3 slots, autosave, manual save, and JSON export/import. Older saves are migrated with defaults for new fields.

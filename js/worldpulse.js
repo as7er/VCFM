@@ -6,9 +6,9 @@ import { formatMoney, estimateValue } from "./models.js";
 import { pushInbox, ensureInbox } from "./inbox.js";
 import { pushMedia } from "./media.js";
 import { ensureManagerCareer } from "./career.js";
-import { staffWageBill, ensureStaff } from "./staff.js";
-import { facilityWeeklyUpkeep, ensureFacilities, stadiumInfo } from "./facilities.js";
-import { userSquadWageBill } from "./loans.js";
+import { ensureStaff } from "./staff.js";
+import { ensureFacilities, stadiumInfo } from "./facilities.js";
+import { clubWeeklyOperatingSnapshot, ensureClubFinance } from "./club-finance.js";
 import { isTransferWindowOpen } from "./transfers.js";
 import { DIVISIONS } from "./data.js";
 
@@ -191,15 +191,14 @@ export function financeSnapshot(world) {
   if (!club) return null;
   ensureStaff(club);
   ensureFacilities(club);
-  const squadWage = userSquadWageBill(world);
-  const youthWage = (club.youth?.players || []).reduce((s, p) => s + (p.wage || 0), 0);
-  const staffWage = staffWageBill(club);
-  const upkeep = facilityWeeklyUpkeep(club);
-  const weekly = squadWage + youthWage + staffWage + upkeep;
+  const operating = clubWeeklyOperatingSnapshot(world, club);
+  const { squadWage, youthWage, staffWage, facilityUpkeep: upkeep } = operating;
+  const weekly = operating.operatingOut;
   const money = club.money || 0;
-  const weeksCover = weekly > 0 ? Math.floor(money / weekly) : 99;
+  const weeklyCashBurn = Math.max(0, weekly - operating.commercialIncome);
+  const weeksCover = weeklyCashBurn > 0 ? Math.floor(money / weeklyCashBurn) : 99;
   // 赛季账本：赛后/发薪/转会写入 club.finance（无隐藏账）
-  const fin = club.finance && typeof club.finance === "object" ? club.finance : {};
+  const fin = ensureClubFinance(club);
   const seasonTickets = Number(fin.seasonTicketIncome) || 0;
   const lastTicket = fin.lastTicketIncome != null ? Number(fin.lastTicketIncome) : null;
   const lastTicketDay = fin.lastTicketDay != null ? Number(fin.lastTicketDay) : null;
@@ -215,6 +214,7 @@ export function financeSnapshot(world) {
   const seasonHomeGates = Number(fin.seasonHomeGates) || 0;
   const seasonBroadcast = Number(fin.seasonBroadcastIncome) || 0;
   const seasonPrize = Number(fin.seasonPrizeIncome) || 0;
+  const seasonCommercial = Number(fin.seasonCommercialIncome) || 0;
   const lastBroadcast = fin.lastBroadcastPayout != null ? Number(fin.lastBroadcastPayout) : null;
   const lastPrize = fin.lastPrizePayout != null ? Number(fin.lastPrizePayout) : null;
   const lastPrizePos = fin.lastPrizePos != null ? Number(fin.lastPrizePos) : null;
@@ -226,6 +226,7 @@ export function financeSnapshot(world) {
   // 粗算：本季净额 ≈ 门票 + 转播/奖金 + 转会净 − 已记账工资/设施
   const seasonNetApprox =
     seasonTickets +
+    seasonCommercial +
     seasonBroadcast +
     seasonPrize +
     seasonTransferNet -
@@ -237,6 +238,8 @@ export function financeSnapshot(world) {
     youthWage,
     staffWage,
     upkeep,
+    commercialIncome: operating.commercialIncome,
+    weeklyCashBurn,
     weekly,
     weeksCover,
     windowOpen: isTransferWindowOpen(world),
@@ -258,6 +261,7 @@ export function financeSnapshot(world) {
     seasonHomeGates,
     seasonBroadcast,
     seasonPrize,
+    seasonCommercial,
     lastBroadcast,
     lastPrize,
     lastPrizePos,

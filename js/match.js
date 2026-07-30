@@ -35,6 +35,7 @@ import {
   ensureStaff,
 } from "./staff.js";
 import { trainingInjuryMod, matchdayIncome, stadiumInfo } from "./facilities.js";
+import { recordMatchdayFinance } from "./club-finance.js";
 import {
   applyMatchPrepBonus,
   resetMatchPrepCounter,
@@ -2525,21 +2526,19 @@ export function finalizeMatch(state) {
   for (let i = recentHomeForm.length - 1; i >= 0 && recentHomeForm[i] === "W"; i--) {
     homeWinStreak++;
   }
-  const homeGateContext = fixture.home === world.userClubId
-    ? {
-        isCup,
-        isDerby: state.derby,
-        isRelegationBattle: checkRelegationBattle(world, home),
-        isTitleRace: checkTitleRace(world, home),
-        cupStage: fixture.roundLabel === "决赛" ? "final" :
-                  fixture.roundLabel === "半决赛" ? "semi" :
-                  fixture.roundLabel === "1/4决赛" ? "quarter" : null,
-        winStreak: homeWinStreak,
-        opponentStrength: away.strength || 50,
-        formBonus: getFormBonus(world, home.id),
-        seasonPhaseBonus: getSeasonPhaseBonus(world),
-      }
-    : null;
+  const homeGateContext = {
+    isCup,
+    isDerby: state.derby,
+    isRelegationBattle: checkRelegationBattle(world, home),
+    isTitleRace: checkTitleRace(world, home),
+    cupStage: fixture.roundLabel === "决赛" ? "final" :
+              fixture.roundLabel === "半决赛" ? "semi" :
+              fixture.roundLabel === "1/4决赛" ? "quarter" : null,
+    winStreak: homeWinStreak,
+    opponentStrength: away.strength || 50,
+    formBonus: getFormBonus(world, home.id),
+    seasonPhaseBonus: getSeasonPhaseBonus(world),
+  };
 
   // 国内联赛和洲际赛事分别记账；国内杯暂不设球员榜。
   if (!isCup) {
@@ -2616,6 +2615,18 @@ export function finalizeMatch(state) {
     });
   } else if (isKnockout) {
     fixture.winner = hg > ag ? home.id : away.id;
+  }
+
+  // 主场收入属于实际主队，AI 与用户使用相同球场、上座和比赛情境数据。
+  const gate = matchdayIncome(home, { ...homeGateContext, detail: true });
+  const gateIncome = recordMatchdayFinance(home, gate, world.day);
+  if (fixture.home === world.userClubId) {
+    state.ticketIncome = gateIncome;
+    state.ticketStadium = stadiumInfo(home).name;
+    state.ticketCapacity = gate.capacity;
+    state.ticketAttendance = gate.attendance;
+    state.ticketFillPct = gate.fill;
+    state.ticketFactors = Array.isArray(gate.factors) ? gate.factors : [];
   }
 
   drainFitness(home, true, state);
@@ -2695,25 +2706,10 @@ export function finalizeMatch(state) {
       text: `${tag}：对阵 ${opp.name} ${myG}-${opG} ${result}${ctx.length ? `（${ctx.join("·")}）` : ""}`,
     });
     if (isHome) {
-      const gate = matchdayIncome(me, {
-        ...homeGateContext,
-        detail: true,
-      });
-      const income = typeof gate === "object" ? gate.income : gate;
-      const attendance = typeof gate === "object" ? gate.attendance : null;
-      const capacity = typeof gate === "object" ? gate.capacity : stadiumInfo(me).capacity;
-      const fillPct = typeof gate === "object" ? gate.fill : null;
-
-      me.money += income;
-      if (!me.finance || typeof me.finance !== "object") me.finance = {};
-      me.finance.lastTicketIncome = income;
-      me.finance.lastTicketDay = world.day;
-      me.finance.lastAttendance = attendance;
-      me.finance.lastCapacity = capacity;
-      me.finance.lastFillPct = fillPct;
-      me.finance.lastTicketFactors = Array.isArray(gate?.factors) ? gate.factors : [];
-      me.finance.seasonTicketIncome = (Number(me.finance.seasonTicketIncome) || 0) + income;
-      me.finance.seasonHomeGates = (Number(me.finance.seasonHomeGates) || 0) + 1;
+      const income = state.ticketIncome || 0;
+      const attendance = state.ticketAttendance;
+      const capacity = state.ticketCapacity || stadiumInfo(me).capacity;
+      const fillPct = state.ticketFillPct;
       const stInfo = stadiumInfo(me);
       const crowdTxt =
         attendance != null && capacity
@@ -2721,14 +2717,8 @@ export function finalizeMatch(state) {
           : `容量约 ${(capacity || 0).toLocaleString()}`;
       world.news.unshift({
         day: world.day,
-        text: `🎟️ 门票收入 ${formatMoney(income)}（${stInfo.name} · ${crowdTxt} · 本季累计 ${formatMoney(me.finance.seasonTicketIncome)}）`,
+        text: `🎟️ 门票收入 ${formatMoney(income)}（${stInfo.name} · ${crowdTxt} · 本季累计 ${formatMoney(me.finance?.seasonTicketIncome || 0)}）`,
       });
-      state.ticketIncome = income;
-      state.ticketStadium = stInfo.name;
-      state.ticketCapacity = capacity;
-      state.ticketAttendance = attendance;
-      state.ticketFillPct = fillPct;
-      state.ticketFactors = Array.isArray(gate?.factors) ? gate.factors : [];
     }
     if (isLeague) {
       mediaAfterUserMatch(world, fixture, me, opp, myG, opG);
