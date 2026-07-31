@@ -30,8 +30,8 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=172";
-import { nationFlagHtml } from "./flags.js?v=172";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=173";
+import { nationFlagHtml } from "./flags.js?v=173";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -286,7 +286,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=172";
+} from "./avatar.js?v=173";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -3430,6 +3430,7 @@ function renderFinance() {
     const wageShare = budget.wageShare >= 999 ? "999%+" : `${budget.wageShare}%`;
     projection.innerHTML = `
       <div><span>${en ? "Cash reserve" : "现金储备"}</span><strong>${formatMoney(budget.reserveCash)}</strong></div>
+      <div><span>${en ? "Committed cash" : "已承诺现金"}</span><strong class="${budget.commitments.total > 0 ? "stat-low" : "stat-high"}">${formatMoney(budget.commitments.total)}</strong></div>
       <div><span>${en ? "Safe transfer ceiling" : "安全转会上限"}</span><strong>${formatMoney(budget.safeTransferCeiling)}</strong></div>
       <div><span>${en ? "Planned transfer budget" : "计划转会预算"}</span><strong class="stat-high">${formatMoney(budget.plannedTransferBudget)}</strong></div>
       <div><span>${en ? "Projected season-end cash" : "预计季末余额"}</span><strong class="${budget.projectedEndAfterBudget >= 0 ? "stat-high" : "stat-low"}">${formatMoney(budget.projectedEndAfterBudget)}</strong></div>

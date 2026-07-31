@@ -5,6 +5,8 @@ import { ensureFacilities, facilityWeeklyUpkeep, stadiumInfo, youthFacilityInfo 
 import { ensureLoans } from "./loans.js";
 import { ensureStaff, staffWageBill } from "./staff.js";
 import { ensureFinanceLedger, financeLedgerSummary, recordFinanceEntry, resetFinanceLedgerSeason } from "./finance-ledger.js";
+import { ensureTransferNegotiations, isActiveTransferNegotiation } from "./transfer-negotiations.js";
+import { ensureContract } from "./contracts.js";
 
 export const CLUB_FINANCE_VERSION = 2;
 
@@ -165,11 +167,35 @@ export function updateClubFinanceBudget(club, patch = {}) {
   return plan;
 }
 
+/** Cash already promised but not yet settled: pending bids and expiring contracts. */
+export function clubFinanceCommitments(world, club) {
+  if (!world || !club) return { transfer: 0, contracts: 0, total: 0, items: [] };
+  const items = [];
+  for (const negotiation of ensureTransferNegotiations(world)) {
+    if (!isActiveTransferNegotiation(negotiation) || negotiation.buyerClubId !== club.id) continue;
+    const fee = number(negotiation.fee);
+    const bonus = Math.round(number(negotiation.wage) * Math.max(1, Math.min(5, number(negotiation.years) || 3)) * 0.5);
+    items.push({ kind: "transfer", amount: fee + bonus, label: "pending transfer", id: negotiation.id });
+  }
+  for (const player of club.players || []) {
+    ensureContract(player);
+    if (player.loan || (player.contractYears || 0) > 1 || !player._needsRenew) continue;
+    // Renewal offers are intentionally stochastic in the contract screen; budget
+    // planning uses a stable three-year signing-bonus estimate instead of rolling.
+    const expectedFee = Math.round(number(player.wage) * 3 * 0.5);
+    items.push({ kind: "contract", amount: expectedFee, label: "expiring contract", id: player.id });
+  }
+  const transfer = items.filter((item) => item.kind === "transfer").reduce((sum, item) => sum + item.amount, 0);
+  const contracts = items.filter((item) => item.kind === "contract").reduce((sum, item) => sum + item.amount, 0);
+  return { transfer, contracts, total: transfer + contracts, items };
+}
+
 /** Conservative planning projection using only scheduled home gates and visible recurring costs. */
 export function clubSeasonBudgetSnapshot(world, club) {
   if (!world || !club) return null;
   const finance = ensureClubFinance(club, world.season);
   const plan = ensureClubFinanceBudget(club);
+  const commitments = clubFinanceCommitments(world, club);
   const operating = clubWeeklyOperatingSnapshot(world, club);
   const futureClubFixtures = (world.fixtures || []).filter(
     (fixture) =>
@@ -196,7 +222,7 @@ export function clubSeasonBudgetSnapshot(world, club) {
     number(club.money) + projectedOperatingNet + projectedTickets + projectedLeaguePayout
   );
   const reserveCash = Math.round(operating.operatingOut * plan.reserveWeeks);
-  const safeTransferCeiling = Math.max(0, Math.floor(number(club.money) - reserveCash));
+  const safeTransferCeiling = Math.max(0, Math.floor(number(club.money) - reserveCash - commitments.total));
   const plannedTransferBudget = Math.floor(safeTransferCeiling * (plan.transferShare / 100));
   const projectedEndAfterBudget = projectedEndCash - plannedTransferBudget;
   const projectedWeeklyRevenue =
@@ -223,6 +249,7 @@ export function clubSeasonBudgetSnapshot(world, club) {
     projectedLeaguePayout,
     projectedEndCash,
     reserveCash,
+    commitments,
     safeTransferCeiling,
     plannedTransferBudget,
     projectedEndAfterBudget,
