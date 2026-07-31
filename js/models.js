@@ -1283,7 +1283,11 @@ export function createClub(template, lang = "zh") {
         }
       : null,
     finance: {
-      version: 1,
+      version: 2,
+      ledgerVersion: 1,
+      ledgerSeason: null,
+      ledgerSeq: 0,
+      financeLedger: [],
       seasonTicketIncome: 0,
       seasonCommercialIncome: 0,
       seasonWageOut: 0,

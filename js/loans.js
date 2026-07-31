@@ -12,6 +12,7 @@ import {
 } from "./models.js";
 import { assertTransferOpen, ensureTransferWindow, getTransferPhase } from "./transfers.js";
 import { ensureContract } from "./contracts.js";
+import { recordFinanceEntry } from "./finance-ledger.js";
 
 function clubById(world, id) {
   return world?.clubs?.find((c) => c.id === id) || null;
@@ -197,8 +198,8 @@ export function loanOutPlayer(world, playerId, opts = {}) {
   const untilDay = loanUntilDay(world, term);
 
   // 对方付租借费给用户
-  toClub.money = Math.max(0, (toClub.money || 0) - fee);
-  user.money += fee;
+  recordFinanceEntry(toClub, -fee, { category: "loan", source: "loan-fee", season: world.season, day: world.day });
+  recordFinanceEntry(user, fee, { category: "loan", source: "loan-fee", season: world.season, day: world.day });
 
   const res = moveOnLoan(world, player, user, toClub, {
     untilDay,
@@ -250,8 +251,8 @@ export function loanInPlayer(world, playerId, fromClubId, opts = {}) {
   }
 
   const untilDay = loanUntilDay(world, term);
-  user.money -= fee;
-  from.money += fee;
+  recordFinanceEntry(user, -fee, { category: "loan", source: "loan-fee", season: world.season, day: world.day });
+  recordFinanceEntry(from, fee, { category: "loan", source: "loan-fee", season: world.season, day: world.day });
 
   const res = moveOnLoan(world, player, from, user, {
     untilDay,
@@ -350,7 +351,7 @@ export function recallLoan(world, playerId) {
     if (user.money < fee) {
       return { ok: false, msg: `窗外召回需支付 ${formatMoney(fee)}` };
     }
-    user.money -= fee;
+    recordFinanceEntry(user, -fee, { category: "loan", source: "loan-recall", season: world.season, day: world.day });
   }
 
   const res = returnLoan(world, playerId, { reason: "recall" });

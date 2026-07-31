@@ -30,9 +30,10 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=170";
-import { nationFlagHtml } from "./flags.js?v=170";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=171";
+import { nationFlagHtml } from "./flags.js?v=171";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
+import { recordFinanceEntry } from "./finance-ledger.js";
 import {
   ensureCompetitions,
   sortedContinentalTable,
@@ -284,7 +285,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=170";
+} from "./avatar.js?v=171";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -1331,7 +1332,7 @@ function bindMainOnce() {
     const club = getUserClub(world);
     const fee = 50_000;
     if (club.money >= fee) {
-      club.money -= fee;
+      recordFinanceEntry(club, -fee, { category: "staff", source: "staff-market-refresh", season: world.season, day: world.day });
       toast(t("toast.staffRefresh"));
     } else {
       toast(t("toast.staffRefreshFree"));
@@ -3255,7 +3256,7 @@ function renderDashboard() {
     const net = fin.seasonNetApprox || 0;
     finEl.innerHTML = `
       <div>${en ? "Balance" : "余额"} <strong>${formatMoney(fin.money)}</strong>
-        <span class="muted"> · ${en ? "Season net ~" : "本季净额约 "}<strong class="${net >= 0 ? "stat-high" : "stat-low"}">${formatMoney(net)}</strong></span></div>
+        <span class="muted"> · ${en ? "Season net " : "本季净额 "}<strong class="${net >= 0 ? "stat-high" : "stat-low"}">${formatMoney(net)}</strong></span></div>
       <div class="muted">🎟️ ${ticketLine}</div>
       ${ticketFactors ? `<div class="muted">↳ ${escapeHtml(ticketFactors)}</div>` : ""}
       <div class="muted">🎟️ ${seasonGate}</div>

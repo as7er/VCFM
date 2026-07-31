@@ -2639,7 +2639,7 @@ export function finalizeMatch(state) {
 
   // 主场收入属于实际主队，AI 与用户使用相同球场、上座和比赛情境数据。
   const gate = matchdayIncome(home, { ...homeGateContext, detail: true, random: rng });
-  const gateIncome = recordMatchdayFinance(home, gate, world.day);
+  const gateIncome = recordMatchdayFinance(home, gate, world.day, world.season);
   if (fixture.home === world.userClubId) {
     state.ticketIncome = gateIncome;
     state.ticketStadium = stadiumInfo(home).name;

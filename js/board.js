@@ -3,6 +3,7 @@
 import { DIVISIONS } from "./data.js";
 import { formatMoney } from "./models.js";
 import { pushBoardInbox, pushBoardObjectiveMail } from "./inbox.js";
+import { recordFinanceEntry } from "./finance-ledger.js";
 
 const STATUS_LABEL = {
   active: "进行中",
@@ -526,7 +527,7 @@ export function settleBoardObjective(world, finalPos, sortedTableFn) {
 
   const divName = DIVISIONS[board.division || user.division || 3]?.name || "";
   if (ok) {
-    user.money += board.bonus;
+    recordFinanceEntry(user, board.bonus, { category: "board", source: "board-bonus", season: world.season, day: world.day });
     board.sackWarnings = 0;
     world.news.unshift({
       day: world.day,
@@ -538,7 +539,7 @@ export function settleBoardObjective(world, finalPos, sortedTableFn) {
     return { ok: true, status: "success", money: board.bonus };
   }
 
-  user.money = Math.max(0, user.money - board.fine);
+  recordFinanceEntry(user, -board.fine, { category: "board", source: "board-fine", season: world.season, day: world.day });
   world.news.unshift({
     day: world.day,
     text: `董事会目标未完成：${divName}第 ${pos} 名（目标前 ${board.targetPos}）。罚款 ${formatMoney(board.fine)}。`,

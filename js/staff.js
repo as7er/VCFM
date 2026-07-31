@@ -3,6 +3,7 @@
 import { FIRST_NAMES, LAST_NAMES, DIVISIONS } from "./data.js";
 import { formatMoney } from "./models.js";
 import { isTransferWindowOpen } from "./transfers.js";
+import { recordFinanceEntry } from "./finance-ledger.js";
 
 const ROLES = {
   coach: {
@@ -376,7 +377,7 @@ export function fireStaff(worldOrClub, roleMaybe, roleArg) {
   ensureStaffContract(s, club);
   const cost = Math.max(s.wage * 4, Math.round(staffCompensationFee(s) * 0.35));
   if (club.money < cost) return { ok: false, msg: `解约补偿不足（需 ${formatMoney(cost)}）` };
-  club.money -= cost;
+  recordFinanceEntry(club, -cost, { category: "staff", source: "staff-termination", season: world?.season ?? null, day: world?.day ?? null });
   const released = { ...s, clubId: null, contractYears: 0 };
   club.staff[role] = makeCaretaker(club, role);
   if (world) pushFreeAgent(world, released);
@@ -404,7 +405,7 @@ export function hireStaff(world, club, candidate, fee = null) {
     return { ok: false, msg: "资金不足以支付签约费与初期薪水" };
   }
   const old = club.staff[role];
-  club.money -= signFee;
+  recordFinanceEntry(club, -signFee, { category: "staff", source: "staff-signing", season: world?.season ?? null, day: world?.day ?? null });
   if (old) {
     const released = { ...old, clubId: null, contractYears: 0 };
     pushFreeAgent(world, released);
@@ -742,10 +743,11 @@ export function completeStaffMove(world, approach) {
     return { ok: false, msg: "买方资金不足，交易取消" };
   }
 
-  buyer.money -= compensation + (approach.freeAgent ? staffSigningFee(staff) : 0);
+  const staffFee = approach.freeAgent ? staffSigningFee(staff) : 0;
+  recordFinanceEntry(buyer, -(compensation + staffFee), { category: "staff", source: "staff-poach", season: world.season, day: world.day });
   // 自由身签约费已在上面；在职只付 compensation
   if (!approach.freeAgent && compensation > 0 && fromClub) {
-    fromClub.money = (fromClub.money || 0) + compensation;
+    recordFinanceEntry(fromClub, compensation, { category: "staff", source: "staff-poach", season: world.season, day: world.day });
   }
 
   // 买方原岗位 → 自由身

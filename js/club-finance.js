@@ -4,14 +4,15 @@ import { DIVISIONS } from "./data.js";
 import { ensureFacilities, facilityWeeklyUpkeep, youthFacilityInfo } from "./facilities.js";
 import { ensureLoans } from "./loans.js";
 import { ensureStaff, staffWageBill } from "./staff.js";
+import { ensureFinanceLedger, financeLedgerSummary, recordFinanceEntry, resetFinanceLedgerSeason } from "./finance-ledger.js";
 
-export const CLUB_FINANCE_VERSION = 1;
+export const CLUB_FINANCE_VERSION = 2;
 
 function number(value) {
   return Number.isFinite(Number(value)) ? Number(value) : 0;
 }
 
-export function ensureClubFinance(club) {
+export function ensureClubFinance(club, season = null) {
   if (!club) return null;
   if (!club.finance || typeof club.finance !== "object") club.finance = {};
   const finance = club.finance;
@@ -27,11 +28,12 @@ export function ensureClubFinance(club) {
   ];
   for (const field of seasonFields) finance[field] = number(finance[field]);
   finance.version = CLUB_FINANCE_VERSION;
+  ensureFinanceLedger(club, finance, season);
   return finance;
 }
 
 export function ensureWorldFinances(world) {
-  for (const club of world?.clubs || []) ensureClubFinance(club);
+  for (const club of world?.clubs || []) ensureClubFinance(club, world?.season ?? null);
   return world;
 }
 
@@ -102,10 +104,16 @@ export function settleWorldWeeklyFinances(world) {
   for (const club of world?.clubs || []) {
     const finance = ensureClubFinance(club);
     const snapshot = clubWeeklyOperatingSnapshot(world, club);
-    club.money = number(club.money) + snapshot.net;
-    finance.seasonCommercialIncome += snapshot.commercialIncome;
-    finance.seasonWageOut += snapshot.wageOut;
-    finance.seasonFacilityOut += snapshot.facilityUpkeep;
+    ensureFinanceLedger(club, finance, world.season);
+    recordFinanceEntry(club, snapshot.commercialIncome, {
+      category: "commercial", source: "weekly-settlement", season: world.season, day: world.day,
+    });
+    recordFinanceEntry(club, -snapshot.wageOut, {
+      category: "wage", source: "weekly-settlement", season: world.season, day: world.day,
+    });
+    recordFinanceEntry(club, -snapshot.facilityUpkeep, {
+      category: "facility", source: "weekly-settlement", season: world.season, day: world.day,
+    });
     finance.lastWeeklySettlement = { day: world.day || 0, ...snapshot };
     settlements.push({ clubId: club.id, money: club.money, ...snapshot });
   }
@@ -120,22 +128,21 @@ export function clubTransferBudget(world, club, reserveWeeks = 8) {
   return Math.max(0, Math.floor(number(club.money) - reserve));
 }
 
-export function recordMatchdayFinance(club, gate, day) {
-  const finance = ensureClubFinance(club);
+export function recordMatchdayFinance(club, gate, day, season = null) {
+  const finance = ensureClubFinance(club, season);
   const income = Math.max(0, Math.round(number(gate?.income ?? gate)));
-  club.money = number(club.money) + income;
+  recordFinanceEntry(club, income, { category: "ticket", source: "matchday", season, day });
   finance.lastTicketIncome = income;
   finance.lastTicketDay = day;
   finance.lastAttendance = gate?.attendance ?? null;
   finance.lastCapacity = gate?.capacity ?? null;
   finance.lastFillPct = gate?.fill ?? null;
   finance.lastTicketFactors = Array.isArray(gate?.factors) ? gate.factors : [];
-  finance.seasonTicketIncome += income;
   finance.seasonHomeGates += 1;
   return income;
 }
 
-export function resetClubSeasonFinance(club) {
+export function resetClubSeasonFinance(club, season = null) {
   const finance = ensureClubFinance(club);
   for (const field of [
     "seasonTicketIncome",
@@ -149,5 +156,8 @@ export function resetClubSeasonFinance(club) {
   ]) {
     finance[field] = 0;
   }
+  resetFinanceLedgerSeason(club, season);
   return finance;
 }
+
+export { financeLedgerSummary, recordFinanceEntry };

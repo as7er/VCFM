@@ -5,6 +5,7 @@
 
 import { formatMoney, YOUTH_LEVELS, YOUTH_UPGRADE_COST, ensureYouthAcademy, fillYouthSquad } from "./models.js";
 import { DIVISIONS } from "./data.js";
+import { recordFinanceEntry } from "./finance-ledger.js";
 
 export const FACILITY_MAX = 5;
 
@@ -170,7 +171,7 @@ export function startFacilityUpgrade(world, clubId, kind) {
   }
 
   const days = (BUILD_DAYS[kind] && BUILD_DAYS[kind][next]) || 14;
-  club.money -= cost;
+  recordFinanceEntry(club, -cost, { category: "facility", source: "facility-upgrade", season: world.season, day: world.day });
 
   const verb =
     kind === "stadium"
@@ -489,12 +490,9 @@ export function applySeasonLeagueFinance(world, getSortedTableFn) {
       if (!club) return;
       const pay = leagueEndSeasonPayout(pos, n, tier);
       if (pay.total <= 0) return;
-      club.money = (Number(club.money) || 0) + pay.total;
+      recordFinanceEntry(club, pay.broadcast, { category: "broadcast", source: "season-broadcast", season: world.season, day: world.day });
+      recordFinanceEntry(club, pay.prize, { category: "prize", source: "season-prize", season: world.season, day: world.day });
       if (!club.finance || typeof club.finance !== "object") club.finance = {};
-      club.finance.seasonBroadcastIncome =
-        (Number(club.finance.seasonBroadcastIncome) || 0) + pay.broadcast;
-      club.finance.seasonPrizeIncome =
-        (Number(club.finance.seasonPrizeIncome) || 0) + pay.prize;
       club.finance.lastBroadcastPayout = pay.broadcast;
       club.finance.lastPrizePayout = pay.prize;
       club.finance.lastPrizePos = pos;

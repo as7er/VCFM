@@ -16,6 +16,7 @@ import { ensureContract } from "./contracts.js";
 import { mediaTransfer } from "./media.js";
 import { isTransferWindowOpen, transferWindowLabel } from "./transfers.js";
 import { POS_LABEL } from "./data.js";
+import { recordFinanceEntry } from "./finance-ledger.js";
 
 export const ACTIVE_TRANSFER_NEGOTIATION_STATUSES = new Set([
   "club_review",
@@ -300,12 +301,9 @@ function completeNegotiation(world, negotiation) {
 
   const fee = money(negotiation.fee);
   const bonus = signingBonus(negotiation.wage, negotiation.years);
-  buyer.money -= fee + bonus;
-  seller.money = (Number(seller.money) || 0) + fee;
-  if (!buyer.finance || typeof buyer.finance !== "object") buyer.finance = {};
-  if (!seller.finance || typeof seller.finance !== "object") seller.finance = {};
-  buyer.finance.seasonTransferNet = (Number(buyer.finance.seasonTransferNet) || 0) - fee - bonus;
-  seller.finance.seasonTransferNet = (Number(seller.finance.seasonTransferNet) || 0) + fee;
+  recordFinanceEntry(buyer, -fee, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
+  recordFinanceEntry(buyer, -bonus, { category: "transfer", source: "signing-bonus", season: world.season, day: world.day });
+  recordFinanceEntry(seller, fee, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
 
   seller.players.splice(sellerIndex, 1);
   player.clubId = buyer.id;

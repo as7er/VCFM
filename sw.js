@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v170";
+const CACHE = "vcfm-v171";
 const ASSETS = [
   "./",
   "./index.html",
@@ -10,6 +10,7 @@ const ASSETS = [
   "./js/engine.js",
   "./js/match.js",
   "./js/random.js",
+  "./js/finance-ledger.js",
   "./js/injuries.js",
   "./js/matchview.js",
   // matchview 静态子模块（漏登记会导致离线直播层加载失败）

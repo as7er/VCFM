@@ -168,6 +168,7 @@ import {
   ensureWorldFinances,
   resetClubSeasonFinance,
   settleWorldWeeklyFinances,
+  recordFinanceEntry,
 } from "./club-finance.js";
 import {
   simulateMatch,
@@ -1003,7 +1004,7 @@ export function startNextSeason(world) {
   for (const c of world.clubs) {
     world.table[c.id] = { played: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
     if (!c.division) c.division = 3;
-    resetClubSeasonFinance(c);
+    resetClubSeasonFinance(c, world.season);
     for (const p of c.players) {
       ensureContract(p);
       ensureDiscipline(p);
@@ -1416,12 +1417,8 @@ function transferBetween(world, buyer, seller, player) {
   const price = Math.round((player.value || estimateValue(player)) * (0.9 + rng() * 0.2));
   if (clubTransferBudget(world, buyer) < price) return { ok: false, msg: "扣除运营储备后资金不足" };
 
-  buyer.money -= price;
-  seller.money += price;
-  const buyerFinance = ensureClubFinance(buyer);
-  const sellerFinance = ensureClubFinance(seller);
-  buyerFinance.seasonTransferNet -= price;
-  sellerFinance.seasonTransferNet += price;
+  recordFinanceEntry(buyer, -price, { category: "transfer", source: "ai-transfer", season: world.season, day: world.day });
+  recordFinanceEntry(seller, price, { category: "transfer", source: "ai-transfer", season: world.season, day: world.day });
   seller.players.splice(idx, 1);
   player.clubId = buyer.id;
   player.morale = Math.min(100, (player.morale || 70) + 5);
@@ -1636,11 +1633,9 @@ export function buyPlayer(world, playerId, fromClubId, options = {}) {
     };
   }
 
-  user.money -= price + signingBonus;
-  from.money += price;
-  if (!user.finance || typeof user.finance !== "object") user.finance = {};
-  user.finance.seasonTransferNet =
-    (Number(user.finance.seasonTransferNet) || 0) - (price + signingBonus);
+  recordFinanceEntry(user, -price, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
+  recordFinanceEntry(user, -signingBonus, { category: "transfer", source: "signing-bonus", season: world.season, day: world.day });
+  recordFinanceEntry(from, price, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
   from.players.splice(idx, 1);
   player.clubId = user.id;
   player.morale = Math.min(100, player.morale + 8);
@@ -1721,13 +1716,11 @@ export function sellPlayer(world, playerId) {
     // 仍允许低价
   }
   user.players.splice(idx, 1);
-  user.money += price;
-  if (!user.finance || typeof user.finance !== "object") user.finance = {};
-  user.finance.seasonTransferNet = (Number(user.finance.seasonTransferNet) || 0) + price;
+  recordFinanceEntry(user, price, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
+  recordFinanceEntry(buyer, -price, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
   player.clubId = buyer.id;
   player.number = null;
   buyer.players.push(player);
-  buyer.money = Math.max(0, buyer.money - price);
   assignSquadNumbers(buyer);
   autoLineup(user);
   autoLineup(buyer);

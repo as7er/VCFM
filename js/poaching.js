@@ -8,6 +8,7 @@ import { ensureContract } from "./contracts.js";
 import { isTransferWindowOpen } from "./transfers.js";
 import { ensureStaff, scoutBuyMod } from "./staff.js";
 import { pushMedia } from "./media.js";
+import { recordFinanceEntry } from "./finance-ledger.js";
 
 export function ensurePoachBids(world) {
   if (!Array.isArray(world.poachBids)) world.poachBids = [];
@@ -111,12 +112,12 @@ export function acceptPoachBid(world, bidId) {
   }
   const player = user.players[idx];
   user.players.splice(idx, 1);
-  user.money += bid.fee;
+  recordFinanceEntry(user, bid.fee, { category: "transfer", source: "poach-sale", season: world.season, day: world.day });
   player.clubId = buyer.id;
   player.number = null;
   player.morale = Math.min(100, (player.morale || 70) + 5);
   buyer.players.push(player);
-  buyer.money = Math.max(0, buyer.money - bid.fee);
+  recordFinanceEntry(buyer, -bid.fee, { category: "transfer", source: "poach-sale", season: world.season, day: world.day });
   assignSquadNumbers(buyer);
   autoLineup(user);
   autoLineup(buyer);

@@ -10,6 +10,7 @@ const checks = [
   "scripts/cache-audit.mjs",
   "scripts/reality-audit.mjs",
   "scripts/finance-audit.mjs",
+  "scripts/finance-ledger-audit.mjs",
   "scripts/competition-audit.mjs",
   "scripts/transfer-negotiations-audit.mjs",
   "scripts/match-seed-audit.mjs",

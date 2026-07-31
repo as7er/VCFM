@@ -4,7 +4,13 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v170**（比赛固定种子 · 可复现赛果 · 世界财政公平）
+> 缓存：**vcfm-v171**（比赛固定种子 · 可复现赛果 · 财务总账）
+
+## v171 统一财务总账（2026-07-31）
+
+- 新增 `club.finance.financeLedger[]` 签名流水；周结算、门票、转会、租借、职员、球探、董事会、设施和合同操作统一记录有符号现金变动
+- 旧 `club.finance` 赛季累计字段继续同步，旧存档首次读取时自动迁移为只读历史流水，不改变余额
+- 新增 `scripts/finance-ledger-audit.mjs`；缓存 `vcfm-v171`
 
 ## v170 比赛可复现种子（2026-07-31）
 

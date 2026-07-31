@@ -2,6 +2,7 @@
 
 import { estimateWage, estimateValue, formatMoney, assignSquadNumbers, autoLineup } from "./models.js";
 import { assertTransferOpen } from "./transfers.js";
+import { recordFinanceEntry } from "./finance-ledger.js";
 
 export function ensureContract(p) {
   if (!p) return p;
@@ -61,7 +62,7 @@ export function renewPlayer(club, player, offer = null) {
   if (club.money < o.fee) {
     return { ok: false, msg: `资金不足，签约奖需 ${formatMoney(o.fee)}` };
   }
-  club.money -= o.fee;
+  recordFinanceEntry(club, -o.fee, { category: "contract", source: "contract-renewal", season: null, day: null });
   player.contractYears = o.years;
   player.wage = o.newWage;
   player._needsRenew = false;
@@ -112,7 +113,7 @@ export function terminatePlayer(world, club, player) {
   const idx = club.players.findIndex((p) => p.id === player.id);
   if (idx < 0) return { ok: false, msg: "球员不在阵中" };
 
-  club.money -= cost;
+  recordFinanceEntry(club, -cost, { category: "contract", source: "contract-termination", season: world.season, day: world.day });
   const [p] = club.players.splice(idx, 1);
   p.clubId = null;
   p._needsRenew = false;
@@ -179,7 +180,7 @@ export function processContractsEndOfSeason(world) {
         if (p.ovr >= 11 || club.players.length <= 16) {
           const o = renewOffer(p);
           if (club.money >= o.fee) {
-            club.money -= o.fee;
+            recordFinanceEntry(club, -o.fee, { category: "contract", source: "contract-renewal", season: world.season, day: world.day });
             p.contractYears = o.years;
             p.wage = o.newWage;
             kept.push(p);
@@ -266,7 +267,7 @@ export function signFreeAgent(world, playerId) {
   if (club.money < offer.fee) {
     return { ok: false, msg: `签约奖不足 ${formatMoney(offer.fee)}` };
   }
-  club.money -= offer.fee;
+  recordFinanceEntry(club, -offer.fee, { category: "contract", source: "free-agent-signing", season: world.season, day: world.day });
   world.freeAgents.splice(idx, 1);
   p.clubId = club.id;
   p.contractYears = offer.years;

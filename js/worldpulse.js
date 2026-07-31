@@ -8,9 +8,10 @@ import { pushMedia } from "./media.js";
 import { ensureManagerCareer } from "./career.js";
 import { ensureStaff } from "./staff.js";
 import { ensureFacilities, stadiumInfo } from "./facilities.js";
-import { clubWeeklyOperatingSnapshot, ensureClubFinance } from "./club-finance.js";
+import { clubWeeklyOperatingSnapshot, ensureClubFinance, financeLedgerSummary } from "./club-finance.js";
 import { isTransferWindowOpen } from "./transfers.js";
 import { DIVISIONS } from "./data.js";
+import { recordFinanceEntry } from "./finance-ledger.js";
 
 // ---------- 球探任务 ----------
 
@@ -32,7 +33,7 @@ export function startScoutMission(world, region = "div3") {
   if (!club) return { ok: false, msg: "无球队" };
   const cost = region === "div2" ? 25_000 : region === "intl" ? 40_000 : 15_000;
   if ((club.money || 0) < cost) return { ok: false, msg: `资金不足 ${formatMoney(cost)}` };
-  club.money -= cost;
+  recordFinanceEntry(club, -cost, { category: "scouting", source: "scout-mission", season: world.season, day: world.day });
   const days = region === "intl" ? 10 : region === "div2" ? 7 : 5;
   const mission = {
     id: `sm_${world.day}_${Date.now().toString(36)}`,
@@ -198,7 +199,7 @@ export function financeSnapshot(world) {
   const weeklyCashBurn = Math.max(0, weekly - operating.commercialIncome);
   const weeksCover = weeklyCashBurn > 0 ? Math.floor(money / weeklyCashBurn) : 99;
   // 赛季账本：赛后/发薪/转会写入 club.finance（无隐藏账）
-  const fin = ensureClubFinance(club);
+  const fin = ensureClubFinance(club, world.season);
   const seasonTickets = Number(fin.seasonTicketIncome) || 0;
   const lastTicket = fin.lastTicketIncome != null ? Number(fin.lastTicketIncome) : null;
   const lastTicketDay = fin.lastTicketDay != null ? Number(fin.lastTicketDay) : null;
@@ -223,15 +224,8 @@ export function financeSnapshot(world) {
     fin.lastLeaguePayoutSeason != null ? Number(fin.lastLeaguePayoutSeason) : null;
   const st = stadiumInfo(club);
   const estTicket = st?.matchday != null ? Math.round(st.matchday * 0.88) : null;
-  // 粗算：本季净额 ≈ 门票 + 转播/奖金 + 转会净 − 已记账工资/设施
-  const seasonNetApprox =
-    seasonTickets +
-    seasonCommercial +
-    seasonBroadcast +
-    seasonPrize +
-    seasonTransferNet -
-    seasonWageOut -
-    seasonFacilityOut;
+  const ledgerSummary = financeLedgerSummary(club, world.season);
+  const seasonNetApprox = ledgerSummary.net;
   return {
     money,
     squadWage,
@@ -268,6 +262,8 @@ export function financeSnapshot(world) {
     lastPrizeDivName,
     lastLeaguePayoutSeason,
     seasonNetApprox,
+    seasonLedgerByCategory: ledgerSummary.byCategory,
+    recentFinanceEntries: ledgerSummary.entries.slice(-8).reverse(),
   };
 }
 
