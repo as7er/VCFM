@@ -43,7 +43,9 @@ const world = {
       status: "completed",
     },
   ],
-  fixtures: [],
+  fixtures: [
+    { id: "future", day: 68, home: club.id, away: "seller", played: false },
+  ],
 };
 
 const commitments = clubFinanceCommitments(world, club);
@@ -51,9 +53,25 @@ assert.equal(commitments.transfer, 715_000);
 assert.ok(commitments.contracts > 0);
 assert.equal(commitments.total, commitments.transfer + commitments.contracts);
 assert.equal(commitments.items.length, 2);
+assert.ok(commitments.weeklyWageIncrease >= 10_000);
 
 const budget = clubSeasonBudgetSnapshot(world, club);
 assert.equal(budget.commitments.total, commitments.total);
+assert.equal(budget.remainingWeeks, 4);
+assert.equal(budget.projectedCommittedWages, commitments.weeklyWageIncrease * budget.remainingWeeks);
+assert.equal(budget.projectedCommitmentCost, commitments.total + budget.projectedCommittedWages);
+assert.equal(
+  budget.projectedEndAfterCommitments,
+  budget.projectedEndCash - budget.projectedCommitmentCost
+);
+assert.equal(
+  budget.reserveCash,
+  (budget.operating.operatingOut + commitments.weeklyWageIncrease) * budget.plan.reserveWeeks
+);
+assert.equal(
+  budget.projectedEndAfterBudget,
+  budget.projectedEndAfterCommitments - budget.plannedTransferBudget
+);
 assert.ok(budget.safeTransferCeiling <= club.money - budget.reserveCash - commitments.total);
 
-console.log("Finance commitments audit passed: pending deals, expiring contracts, and safe budget ceiling");
+console.log("Finance commitments audit passed: cash, payroll, reserve, and season-end projection");

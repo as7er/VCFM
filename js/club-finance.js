@@ -1,6 +1,7 @@
 /** Shared club finances: every club earns and pays from the same visible data. */
 
 import { DIVISIONS } from "./data.js";
+import { estimateWage } from "./models.js";
 import { ensureFacilities, facilityWeeklyUpkeep, stadiumInfo, youthFacilityInfo } from "./facilities.js";
 import { ensureLoans } from "./loans.js";
 import { ensureStaff, staffWageBill } from "./staff.js";
@@ -167,27 +168,53 @@ export function updateClubFinanceBudget(club, patch = {}) {
   return plan;
 }
 
-/** Cash already promised but not yet settled: pending bids and expiring contracts. */
+function stableRenewalEstimate(player) {
+  const years = player.age >= 34 ? 1 : player.age >= 32 ? 2 : 3;
+  const currentWage = number(player.wage);
+  const baseMultiplier = 1.13 + (player.ovr >= 15 ? 0.08 : 0);
+  const yearBump = 1 + Math.max(0, years - 2) * 0.03;
+  const newWage = Math.max(currentWage, Math.round(estimateWage(player) * baseMultiplier * yearBump));
+  const fee = Math.round(newWage * 4 * years * 0.15);
+  return { years, newWage, fee, weeklyWageIncrease: Math.max(0, newWage - currentWage) };
+}
+
+/** Cash and payroll already promised but not yet settled. */
 export function clubFinanceCommitments(world, club) {
-  if (!world || !club) return { transfer: 0, contracts: 0, total: 0, items: [] };
+  if (!world || !club) {
+    return { transfer: 0, contracts: 0, total: 0, weeklyWageIncrease: 0, items: [] };
+  }
   const items = [];
   for (const negotiation of ensureTransferNegotiations(world)) {
     if (!isActiveTransferNegotiation(negotiation) || negotiation.buyerClubId !== club.id) continue;
     const fee = number(negotiation.fee);
-    const bonus = Math.round(number(negotiation.wage) * Math.max(1, Math.min(5, number(negotiation.years) || 3)) * 0.5);
-    items.push({ kind: "transfer", amount: fee + bonus, label: "pending transfer", id: negotiation.id });
+    const wage = number(negotiation.wage);
+    const bonus = Math.round(wage * Math.max(1, Math.min(5, number(negotiation.years) || 3)) * 0.5);
+    items.push({
+      kind: "transfer",
+      amount: fee + bonus,
+      weeklyWageIncrease: wage,
+      label: "pending transfer",
+      id: negotiation.id,
+    });
   }
   for (const player of club.players || []) {
     ensureContract(player);
     if (player.loan || (player.contractYears || 0) > 1 || !player._needsRenew) continue;
-    // Renewal offers are intentionally stochastic in the contract screen; budget
-    // planning uses a stable three-year signing-bonus estimate instead of rolling.
-    const expectedFee = Math.round(number(player.wage) * 3 * 0.5);
-    items.push({ kind: "contract", amount: expectedFee, label: "expiring contract", id: player.id });
+    // The contract screen remains stochastic; planning uses a stable midpoint
+    // estimate so merely opening the finance page never changes the forecast.
+    const estimate = stableRenewalEstimate(player);
+    items.push({
+      kind: "contract",
+      amount: estimate.fee,
+      weeklyWageIncrease: estimate.weeklyWageIncrease,
+      label: "expiring contract",
+      id: player.id,
+    });
   }
   const transfer = items.filter((item) => item.kind === "transfer").reduce((sum, item) => sum + item.amount, 0);
   const contracts = items.filter((item) => item.kind === "contract").reduce((sum, item) => sum + item.amount, 0);
-  return { transfer, contracts, total: transfer + contracts, items };
+  const weeklyWageIncrease = items.reduce((sum, item) => sum + number(item.weeklyWageIncrease), 0);
+  return { transfer, contracts, total: transfer + contracts, weeklyWageIncrease, items };
 }
 
 /** Conservative planning projection using only scheduled home gates and visible recurring costs. */
@@ -221,16 +248,22 @@ export function clubSeasonBudgetSnapshot(world, club) {
   const projectedEndCash = Math.round(
     number(club.money) + projectedOperatingNet + projectedTickets + projectedLeaguePayout
   );
-  const reserveCash = Math.round(operating.operatingOut * plan.reserveWeeks);
+  const projectedCommittedWages = Math.round(commitments.weeklyWageIncrease * remainingWeeks);
+  const projectedCommitmentCost = commitments.total + projectedCommittedWages;
+  const projectedEndAfterCommitments = projectedEndCash - projectedCommitmentCost;
+  const reserveCash = Math.round(
+    (operating.operatingOut + commitments.weeklyWageIncrease) * plan.reserveWeeks
+  );
   const safeTransferCeiling = Math.max(0, Math.floor(number(club.money) - reserveCash - commitments.total));
   const plannedTransferBudget = Math.floor(safeTransferCeiling * (plan.transferShare / 100));
-  const projectedEndAfterBudget = projectedEndCash - plannedTransferBudget;
+  const projectedEndAfterBudget = projectedEndAfterCommitments - plannedTransferBudget;
   const projectedWeeklyRevenue =
     operating.commercialIncome +
     (remainingWeeks > 0 ? projectedTickets / remainingWeeks : 0) +
     (remainingWeeks > 0 ? projectedLeaguePayout / remainingWeeks : 0);
+  const projectedWeeklyWages = operating.wageOut + commitments.weeklyWageIncrease;
   const wageShare = projectedWeeklyRevenue > 0
-    ? Math.round((operating.wageOut / projectedWeeklyRevenue) * 100)
+    ? Math.round((projectedWeeklyWages / projectedWeeklyRevenue) * 100)
     : 999;
   const status =
     projectedEndAfterBudget < 0
@@ -248,6 +281,9 @@ export function clubSeasonBudgetSnapshot(world, club) {
     projectedOperatingNet,
     projectedLeaguePayout,
     projectedEndCash,
+    projectedCommittedWages,
+    projectedCommitmentCost,
+    projectedEndAfterCommitments,
     reserveCash,
     commitments,
     safeTransferCeiling,
