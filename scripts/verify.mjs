@@ -8,7 +8,12 @@ const checks = [
   "js/matchview-coords.test.js",
   "js/matchview-director.test.js",
   "scripts/cache-audit.mjs",
+  "scripts/save-durability-audit.mjs",
+  "scripts/replay-ui-audit.mjs",
+  "scripts/lazy-load-audit.mjs",
   "scripts/reality-audit.mjs",
+  "scripts/branding-audit.mjs",
+  "scripts/intl-audit.mjs",
   "scripts/finance-audit.mjs",
   "scripts/finance-ledger-audit.mjs",
   "scripts/finance-budget-audit.mjs",
@@ -21,10 +26,12 @@ const checks = [
   "scripts/squad-registration-audit.mjs",
   "scripts/match-seed-audit.mjs",
   "scripts/match-analysis-audit.mjs",
+  "scripts/match-balance-audit.mjs",
   "scripts/long-term-reality-audit.mjs",
   "scripts/ui-layout-audit.mjs",
   "scripts/ecosystem-audit.mjs",
 ];
+const fullChecks = [["scripts/match-realism-audit.mjs", "24"]];
 
 function javascriptFiles(directory) {
   const files = [];
@@ -47,5 +54,8 @@ for (const file of javascriptFiles(resolve(repo, "js"))) {
   run(["--check", file], `syntax ${file.slice(repo.length + 1)}`);
 }
 for (const check of checks) run([check], check);
+if (process.argv.includes("--full")) {
+  for (const args of fullChecks) run(args, args.join(" "));
+}
 
 console.log("\nVCFM verification passed");

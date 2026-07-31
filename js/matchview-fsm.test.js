@@ -152,12 +152,49 @@ test('状态监听器应该被触发', () => {
     enterCalled = true;
     assertEqual(data.from, 'IDLE');
     assertEqual(data.to, 'PRE_MATCH');
+    assertEqual(data.fromSub, null);
+    assertEqual(data.toSub, null);
   });
 
   fsm.transition('PRE_MATCH');
 
   assert(exitCalled, 'Exit listener should be called');
   assert(enterCalled, 'Enter listener should be called');
+});
+
+test('暂停后应该记录并恢复之前的 PLAYING 子状态', () => {
+  for (const subState of ['FREE_PLAY', 'SCRIPTED', 'SIM_DRIVEN']) {
+    const fsm = new MatchViewFSM();
+    fsm.transition('PRE_MATCH');
+    fsm.transition('PLAYING', subState);
+    fsm.transition('PAUSED');
+
+    assert(fsm.wasIn('PLAYING'), `Should remember PLAYING before ${subState} pause`);
+    assertEqual(fsm.previousSubState, subState);
+    assert(fsm.resume(), `Should resume ${subState}`);
+    assert(fsm.is('PLAYING', subState), `Should restore PLAYING.${subState}`);
+  }
+});
+
+test('PLAYING 监听器应该通过 toSub 暴露 SCRIPTED 子状态', () => {
+  const fsm = new MatchViewFSM();
+  let payload = null;
+  fsm.on('enter:PLAYING', (data) => {
+    payload = data;
+  });
+  fsm.transition('PRE_MATCH');
+  fsm.transition('PLAYING', 'SCRIPTED');
+
+  assertEqual(payload?.from, 'PRE_MATCH');
+  assertEqual(payload?.to, 'PLAYING');
+  assertEqual(payload?.toSub, 'SCRIPTED');
+});
+
+test('resume() 只在 PAUSED 状态生效', () => {
+  const fsm = new MatchViewFSM();
+  assert(!fsm.resume(), 'IDLE should not resume');
+  fsm.transition('PRE_MATCH');
+  assert(!fsm.resume(), 'PRE_MATCH should not resume');
 });
 
 test('describe() 应该返回可读的状态描述', () => {

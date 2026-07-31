@@ -172,7 +172,7 @@ export class MatchView {
     this.fsm.on('enter:PRE_MATCH', () => { this._legacyPhase = 'pre'; });
     this.fsm.on('enter:PLAYING', (data) => {
       this._legacyPhase = 'play';
-      this._legacyScriptLock = data?.subState === 'SCRIPTED';
+      this._legacyScriptLock = data?.toSub === 'SCRIPTED';
     });
     this.fsm.on('enter:GOAL_SEQUENCE', () => { this._legacyPhase = 'goal'; });
     this.fsm.on('enter:PAUSED', () => { this._legacyPhase = 'pause'; });
@@ -226,9 +226,8 @@ export class MatchView {
     this._legacyFrozen = !!val;
     if (val) {
       this.fsm.transition('PAUSED');
-    } else if (this._legacyPhase === 'play') {
-      const subState = this._legacyScriptLock ? 'SCRIPTED' : 'FREE_PLAY';
-      this.fsm.transition('PLAYING', subState);
+    } else if (this.fsm.is('PAUSED')) {
+      this.fsm.resume();
     }
   }
 

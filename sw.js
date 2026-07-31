@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v180";
+const CACHE = "vcfm-v181";
 const ASSETS = [
   "./",
   "./index.html",
@@ -24,6 +24,8 @@ const ASSETS = [
   "./js/avatar.js",
   "./js/i18n.js",
   "./js/save.js",
+  "./js/save-schema.js",
+  "./js/matchview-replay.js",
   "./js/data.js",
   "./js/discipline.js",
   "./js/career.js",
@@ -79,7 +81,14 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((cache) => cache.addAll(ASSETS).catch(() => {}))
+      .then((cache) =>
+        Promise.allSettled(ASSETS.map((asset) => cache.add(asset))).then((results) => {
+          const failed = results
+            .map((result, index) => (result.status === "rejected" ? ASSETS[index] : null))
+            .filter(Boolean);
+          if (failed.length) console.warn("VCFM precache failed for:", failed);
+        })
+      )
       .then(() => self.skipWaiting())
   );
 });

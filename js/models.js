@@ -17,6 +17,7 @@ import {
   defaultRoleForSlot,
 } from "./data.js";
 import { applyClubBranding } from "./branding.js";
+import { CURRENT_SAVE_SCHEMA_VERSION } from "./save-schema.js";
 
 let _id = 1;
 export function uid(prefix = "p") {
@@ -1833,6 +1834,7 @@ export function createWorld(userClubId, managerName, lang = "zh") {
   const divName = DIVISIONS[user.division]?.name || "乙级联赛";
 
   const world = {
+    schemaVersion: CURRENT_SAVE_SCHEMA_VERSION,
     version: 7,
     abilityDistributionVersion: ABILITY_DISTRIBUTION_VERSION,
     season: 2026,

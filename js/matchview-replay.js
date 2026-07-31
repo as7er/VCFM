@@ -310,45 +310,47 @@ export class ReplayUI {
    */
   render() {
     const highlights = this.manager.listHighlights();
+    const doc = this.container.ownerDocument || document;
     if (highlights.length === 0) {
-      this.container.innerHTML = '<div class="replay-empty">暂无精彩回放</div>';
+      const empty = doc.createElement('div');
+      empty.className = 'replay-empty';
+      empty.textContent = '暂无精彩回放';
+      this.container.replaceChildren(empty);
       return;
     }
 
-    const html = highlights.map(h => this._renderHighlightItem(h)).join('');
-    this.container.innerHTML = `<div class="replay-list">${html}</div>`;
-
-    // 绑定点击事件
-    this.container.querySelectorAll('.replay-item').forEach(el => {
-      el.addEventListener('click', () => {
-        const id = el.dataset.id;
-        if (this.onPlayCallback) {
-          this.onPlayCallback(id);
-        }
-      });
-    });
+    const list = doc.createElement('div');
+    list.className = 'replay-list';
+    for (const highlight of highlights) list.appendChild(this._renderHighlightItem(highlight, doc));
+    this.container.replaceChildren(list);
   }
 
   /**
    * 渲染单个高光项
    */
-  _renderHighlightItem(highlight) {
-    const { id, type, time, thumbnail, metadata } = highlight;
+  _renderHighlightItem(highlight, doc = this.container.ownerDocument || document) {
+    const { id, type, time, thumbnail = {} } = highlight;
     const typeLabel = this._getTypeLabel(type);
     const icon = this._getTypeIcon(type);
     const score = thumbnail.score ? `${thumbnail.score.home}-${thumbnail.score.away}` : '';
-
-    return `
-      <div class="replay-item" data-id="${id}" data-type="${type}">
-        <div class="replay-icon">${icon}</div>
-        <div class="replay-info">
-          <div class="replay-time">${time}'</div>
-          <div class="replay-type">${typeLabel}</div>
-          <div class="replay-text">${thumbnail.text || ''}</div>
-          ${score ? `<div class="replay-score">${score}</div>` : ''}
-        </div>
-      </div>
-    `;
+    const make = (className, text) => {
+      const element = doc.createElement('div');
+      element.className = className;
+      element.textContent = String(text ?? '');
+      return element;
+    };
+    const item = make('replay-item', '');
+    item.dataset.id = String(id ?? '');
+    item.dataset.type = String(type ?? '');
+    item.appendChild(make('replay-icon', icon));
+    const info = make('replay-info', '');
+    info.appendChild(make('replay-time', `${time}'`));
+    info.appendChild(make('replay-type', typeLabel));
+    info.appendChild(make('replay-text', thumbnail.text || ''));
+    if (score) info.appendChild(make('replay-score', score));
+    item.appendChild(info);
+    item.addEventListener('click', () => this.onPlayCallback?.(item.dataset.id));
+    return item;
   }
 
   _getTypeLabel(type) {

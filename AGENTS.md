@@ -4,7 +4,16 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v180**（空间事件 · 战术复盘 · 六视图比赛分析）
+> 缓存：**vcfm-v181**（存档可靠性 · 统一验证 · 比赛视图懒加载）
+
+## v181 存档可靠性与统一验证（2026-07-31）
+
+- 比赛视图 FSM 记录前态并恢复原 `FREE_PLAY` / `SCRIPTED` / `SIM_DRIVEN` 子状态，暂停画面分支与导演锁不再失效
+- 存档 Worker 失败后终止并同步落盘各槽最新快照，退出前冲刷待存队列；新增 `schemaVersion`、旧档迁移封装与导入结构校验
+- Service Worker 改为逐资源预缓存；回放列表动态文本使用 `textContent`；`matchview.js` 从首屏静态模块图移出并在比赛入口懒加载
+- `scripts/verify.mjs` 补齐国际赛事、品牌、比赛平衡、存档、回放与懒加载审计，`--full` 追加 24 场真实性校准；新增 GitHub Actions
+- 缓存 `vcfm-v181`
+- 已验证：`node scripts/verify.mjs --full`、`node js/sim/_p5_integration.mjs`、`git diff --check` 与本地 HTTP 入口/懒加载模块均通过
 
 ## v180 空间事件比赛分析（2026-07-31）
 
@@ -35,9 +44,8 @@
 
 ## 后续待启动路线
 
-1. 从空间比赛事件派生 xG、射门图、推进、压迫、热区和传球网络，并生成有数据依据的战术复盘
-2. 球员出场定位承诺、可解释成长记录、青训培养路径与职员委托层级
-3. AI 负债处置、GitHub Actions 统一验证、存档 schema 逐版本迁移与后台模拟 Worker
+1. 球员出场定位承诺、可解释成长记录、青训培养路径与职员委托层级
+2. AI 负债处置与后台模拟 Worker
 
 ## v176 全局未承诺现金（2026-07-31）
 

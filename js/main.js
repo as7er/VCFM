@@ -30,8 +30,7 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=180";
-import { nationFlagHtml } from "./flags.js?v=180";
+import { nationFlagHtml } from "./flags.js?v=181";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -290,6 +289,7 @@ import {
   migrateLegacySave,
   clearSave,
 } from "./save.js";
+import { migrateSaveSchema } from "./save-schema.js";
 import {
   ensureBoardObjective,
   boardStatusLine,
@@ -300,7 +300,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=180";
+} from "./avatar.js?v=181";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -383,6 +383,22 @@ let pendingSubs = []; // 中场待确认换人 {outId, inId, outName, inName}
 let selectedPreTalk = "encourage";
 /** @type {import('./matchview.js').MatchView | null} */
 let matchView = null;
+let matchViewApi = null;
+let matchViewModulePromise = null;
+
+function loadMatchViewModule() {
+  if (!matchViewModulePromise) {
+    matchViewModulePromise = import("./matchview.js?v=181").then((module) => {
+      matchViewApi = module;
+      return module;
+    });
+  }
+  return matchViewModulePromise;
+}
+
+function destroyLoadedMatchView() {
+  matchViewApi?.destroyMatchView?.();
+}
 
 /** 比赛播放控制：暂停 / 逐事件 + 进球回看缓存 */
 const matchPlayback = {
@@ -614,7 +630,7 @@ async function replayStoredGoal(index) {
   }
   matchPlayback.replaying = true;
   try {
-    ensureMatchPitch();
+    await ensureMatchPitch();
     const spd = Math.max(0.25, Number(matchSpeed) || 1);
     // 回看时略慢一点更好看；有场面快照则从同一帧接续
     await matchView.playGoalHighlight(item.ev, item.snap, item.fixture, {
@@ -968,7 +984,7 @@ function initStart() {
 }
 
 /** 旧存档 / 缺字段兼容 */
-function migrateWorld(w) {
+function repairWorldFields(w) {
   if (!w.retiredPlayers) w.retiredPlayers = [];
   ensureMedia(w);
   if (!Array.isArray(w.staffMarket)) refreshStaffMarket(w);
@@ -1052,6 +1068,10 @@ function migrateWorld(w) {
     // 仍可玩，但升降级可能跳过
     console.warn("存档联赛结构不完整，建议开新档体验完整五国联赛");
   }
+}
+
+function migrateWorld(w) {
+  return migrateSaveSchema(w, repairWorldFields);
 }
 
 function enterMain() {
@@ -1255,7 +1275,14 @@ function bindMainOnce() {
   $("#btn-advance-matchday").onclick = () => onAdvanceToMatchday();
   const seasonEndBtn = $("#btn-advance-season-end");
   if (seasonEndBtn) seasonEndBtn.onclick = () => onAdvanceToSeasonEnd();
-  $("#btn-play-match").onclick = () => openMatch();
+  $("#btn-play-match").onclick = async () => {
+    try {
+      await openMatch();
+    } catch (error) {
+      console.error(error);
+      toast(getLang() === "en" ? "Match view failed to load" : "比赛画面加载失败");
+    }
+  };
   $("#btn-next-season").onclick = () => {
     const res = startNextSeason(world);
     toast(res.msg);
@@ -1515,7 +1542,7 @@ function bindMainOnce() {
   $("#btn-match-continue").onclick = () => {
     const wasReview = !!matchPlayback.reviewMode;
     if (!wasReview) autosave("after-match");
-    destroyMatchView();
+    destroyLoadedMatchView();
     matchView = null;
     matchPlayback.reviewMode = false;
     // 恢复按钮文案（回顾时改成了「返回俱乐部」）
@@ -1534,11 +1561,16 @@ function bindMainOnce() {
   };
 
   // 赛程：点击「战报」打开旧场回看
-  $("#fixtures-table")?.addEventListener("click", (e) => {
+  $("#fixtures-table")?.addEventListener("click", async (e) => {
     const btn = e.target.closest(".fix-report-btn");
     if (!btn) return;
     e.preventDefault();
-    openPastMatchReport(btn.dataset.fixtureKey);
+    try {
+      await openPastMatchReport(btn.dataset.fixtureKey);
+    } catch (error) {
+      console.error(error);
+      toast(getLang() === "en" ? "Match report failed to load" : "比赛战报加载失败");
+    }
   });
 
   // 中场调整
@@ -6658,7 +6690,7 @@ function renderFixtures() {
 /**
  * 从赛程打开旧战报（只读回顾，不重新模拟）
  */
-function openPastMatchReport(key) {
+async function openPastMatchReport(key) {
   const fixture = findFixtureByKey(key);
   if (!fixture || !fixture.played) {
     toast(getLang() === "en" ? "No match report" : "暂无战报");
@@ -6709,7 +6741,7 @@ function openPastMatchReport(key) {
   hideHtPanel();
   hidePrematchBriefPanel();
   setLiveTacBarVisible(false);
-  ensureMatchPitch(true);
+  await ensureMatchPitch(true);
   if (matchView) {
     matchView.phase = "pause";
     matchView.setBanner(getLang() === "en" ? "FULL-TIME" : "完场回顾", "info");
@@ -7832,7 +7864,7 @@ function bindTeamTalkPicker(root) {
   });
 }
 
-function openMatch() {
+async function openMatch() {
   const next = getNextUserMatch(world);
   if (!next || next.day > world.day) {
     toast(t("match.noMatch"));
@@ -7897,7 +7929,7 @@ function openMatch() {
   hideMatchReport();
   syncMatchSpeedUI();
   // 2D 球场：赛前站位（可点球员）
-  ensureMatchPitch(true);
+  await ensureMatchPitch(true);
   $("#btn-sim-fast").disabled = false;
   $("#btn-sim-live").disabled = false;
   const inst = $("#btn-sim-instant");
@@ -8137,7 +8169,7 @@ async function runMatch(mode) {
 
   try {
     // 确保球场已挂载
-    ensureMatchPitch();
+    await ensureMatchPitch();
     setMatchLiveState("live");
 
     // 读取赛前讲话（面板隐藏前）
@@ -8193,7 +8225,7 @@ async function runMatch(mode) {
     const talkRes = applyTeamTalk(matchState, selectedPreTalk, "pre");
     if (talkRes.ok) toast(talkRes.msg);
     // 会话创建后阵容可能 autoLineup，刷新球场
-    ensureMatchPitch(true);
+    await ensureMatchPitch(true);
     document.querySelector(".match-layout")?.classList.remove("match-report-only");
     const live = mode === "live";
     matchState._liveMode = live;
@@ -8272,12 +8304,13 @@ async function runMatch(mode) {
   }
 }
 
-function ensureMatchPitch(remount = false) {
+async function ensureMatchPitch(remount = false) {
   const pitchRoot = $("#match-pitch-root");
   if (!pitchRoot || !pendingMatch) return;
   const home = world.clubs.find((c) => c.id === pendingMatch.home);
   const away = world.clubs.find((c) => c.id === pendingMatch.away);
   if (!home || !away) return;
+  const { getMatchView } = await loadMatchViewModule();
   const onPlayerClick = (playerId) => {
     // 完整资料弹窗（暂停时最合适，进行中也可点）
     showPlayerModal(playerId);
@@ -8365,7 +8398,7 @@ function openHalfTimePanel() {
       }
       renderHtRoleEditors();
       renderHtSubSelects();
-      ensureMatchPitch(true);
+      void ensureMatchPitch(true);
     });
   }
   renderHtSubSelects();
@@ -9872,6 +9905,7 @@ function toast(msg) {
 
 // ---------- Boot ----------
 initPrefs();
+window.addEventListener("vcfm-save-error", () => toast(t("toast.autosaveFail")));
 window.addEventListener("vc-prefs-change", () => {
   fillCountrySelect();
   fillClubSelect();

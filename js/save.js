@@ -3,6 +3,7 @@
 import { compressToUTF16, decompressFromUTF16 } from "./compress.js";
 import { clubBrandingById } from "./clubs.js";
 import { localizedClubName } from "./branding.js";
+import { validateSaveStructure } from "./save-schema.js";
 
 // 新键名（VCFM）；旧键兼容读取后迁移
 const LEGACY_KEY = "vcfm_save_v1";
@@ -33,11 +34,13 @@ function decodeWorld(raw) {
 }
 
 let saveWorker = null;
+let saveWorkerDisabled = false;
 let activeJob = null;
 let saveToken = 0;
 const queuedJobs = new Map();
 const latestTokenBySlot = new Map();
 const pendingJsonBySlot = new Map();
+const pendingJobsBySlot = new Map();
 
 function emitSaveError(error) {
   console.error(error);
@@ -57,40 +60,89 @@ function writeEncodedSave(job, encoded) {
   localStorage.setItem(ACTIVE_KEY, String(job.slot));
 }
 
+function disableSaveWorker() {
+  if (saveWorker) {
+    saveWorker.onmessage = null;
+    saveWorker.onerror = null;
+    try {
+      saveWorker.terminate();
+    } catch (_) {
+      /* already stopped */
+    }
+  }
+  saveWorker = null;
+  saveWorkerDisabled = true;
+  activeJob = null;
+  queuedJobs.clear();
+}
+
+/** Synchronously persists the latest pending snapshot for every slot. */
+export function flushPendingSaves({ reportError = true, disableWorker = false } = {}) {
+  if (disableWorker) disableSaveWorker();
+  let ok = true;
+  for (const [slot, job] of [...pendingJobsBySlot]) {
+    try {
+      writeEncodedSave(job, encodeJson(job.json));
+      if (pendingJobsBySlot.get(slot)?.token === job.token) {
+        pendingJobsBySlot.delete(slot);
+        pendingJsonBySlot.delete(slot);
+        queuedJobs.delete(slot);
+      }
+    } catch (error) {
+      ok = false;
+      if (reportError) emitSaveError(error);
+    }
+  }
+  return ok;
+}
+
+function recoverFromWorkerFailure(error) {
+  emitSaveError(error);
+  flushPendingSaves({ reportError: true, disableWorker: true });
+}
+
 function startNextWorkerJob() {
   if (activeJob || !saveWorker || !queuedJobs.size) return;
   const job = queuedJobs.values().next().value;
   queuedJobs.delete(job.slot);
   activeJob = job;
-  saveWorker.postMessage({ token: job.token, json: job.json });
+  try {
+    saveWorker.postMessage({ token: job.token, json: job.json });
+  } catch (error) {
+    recoverFromWorkerFailure(error);
+  }
 }
 
 function ensureSaveWorker() {
   if (saveWorker) return saveWorker;
+  if (saveWorkerDisabled) return null;
   if (typeof Worker === "undefined") return null;
   try {
     saveWorker = new Worker(new URL("./save-worker.js", import.meta.url), { type: "module" });
     saveWorker.onmessage = (event) => {
       const job = activeJob;
       activeJob = null;
-      if (job && event.data?.token === job.token) {
-        if (event.data.error) {
-          emitSaveError(event.data.error);
-        } else if (latestTokenBySlot.get(job.slot) === job.token) {
-          try {
-            writeEncodedSave(job, COMPRESSED_PREFIX + event.data.packed);
-            pendingJsonBySlot.delete(job.slot);
-          } catch (error) {
-            emitSaveError(error);
-          }
+      if (!job || event.data?.token !== job.token) {
+        recoverFromWorkerFailure("save worker returned an unexpected response");
+        return;
+      }
+      if (event.data.error) {
+        recoverFromWorkerFailure(event.data.error);
+        return;
+      } else if (latestTokenBySlot.get(job.slot) === job.token) {
+        try {
+          writeEncodedSave(job, COMPRESSED_PREFIX + event.data.packed);
+          pendingJsonBySlot.delete(job.slot);
+          pendingJobsBySlot.delete(job.slot);
+        } catch (error) {
+          recoverFromWorkerFailure(error);
+          return;
         }
       }
       startNextWorkerJob();
     };
     saveWorker.onerror = (event) => {
-      activeJob = null;
-      emitSaveError(event.message || "save worker failed");
-      startNextWorkerJob();
+      recoverFromWorkerFailure(event.message || "save worker failed");
     };
     return saveWorker;
   } catch (error) {
@@ -111,6 +163,7 @@ function queueSave(world, slot) {
   };
   latestTokenBySlot.set(slot, job.token);
   pendingJsonBySlot.set(slot, json);
+  pendingJobsBySlot.set(slot, job);
   queuedJobs.set(slot, job);
   startNextWorkerJob();
   return true;
@@ -314,6 +367,8 @@ export function saveGame(world, slot = null, { immediate = false } = {}) {
     writeMeta(meta);
     setActiveSlot(s);
     pendingJsonBySlot.delete(s);
+    pendingJobsBySlot.delete(s);
+    queuedJobs.delete(s);
     latestTokenBySlot.set(s, ++saveToken);
     return true;
   } catch (e) {
@@ -346,6 +401,7 @@ export function clearSave(slot = null) {
   try {
     localStorage.removeItem(slotKey(s));
     pendingJsonBySlot.delete(s);
+    pendingJobsBySlot.delete(s);
     queuedJobs.delete(s);
     latestTokenBySlot.set(s, ++saveToken);
     localStorage.removeItem(oldSlotKey(s));
@@ -411,8 +467,15 @@ export function exportSaveDownload(world) {
 /** 从 JSON 文本解析存档（导入用） */
 export function importSaveText(text) {
   const data = JSON.parse(text);
-  if (!data || !Array.isArray(data.clubs) || !data.userClubId) {
-    throw new Error("invalid save");
-  }
-  return data;
+  return validateSaveStructure(data);
+}
+
+try {
+  const flushBeforeExit = () => {
+    flushPendingSaves({ reportError: false });
+  };
+  window.addEventListener("pagehide", flushBeforeExit);
+  window.addEventListener("beforeunload", flushBeforeExit);
+} catch (_) {
+  /* non-browser test environment */
 }

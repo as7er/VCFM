@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const repo = resolve(import.meta.dirname, "..");
@@ -37,4 +37,11 @@ assert.equal(
   `the active cache at the top of AGENTS.md must be ${swCache[1]}`
 );
 
-console.log(JSON.stringify({ cache: swCache[1], queryReferences: queryVersions.length }, null, 2));
+assert.ok(!serviceWorker.includes("cache.addAll(ASSETS)"), "precache must preserve successful assets");
+const assetsBlock = serviceWorker.match(/const ASSETS = \[([\s\S]*?)\];/);
+assert.ok(assetsBlock, "sw.js must declare its precache assets");
+const assets = [...assetsBlock[1].matchAll(/"\.\/(.*?)"/g)].map((match) => match[1]);
+const missingAssets = assets.filter((asset) => asset && !existsSync(resolve(repo, asset)));
+assert.deepEqual(missingAssets, [], `precache assets must exist: ${missingAssets.join(", ")}`);
+
+console.log(JSON.stringify({ cache: swCache[1], queryReferences: queryVersions.length, assets: assets.length }, null, 2));

@@ -24,6 +24,8 @@ export class MatchViewFSM {
   constructor() {
     this.state = 'IDLE';
     this.subState = null;
+    this.previousState = null;
+    this.previousSubState = null;
     this.stateData = {}; // 当前状态附加数据
     this.listeners = new Map(); // state -> callback[]
   }
@@ -51,6 +53,8 @@ export class MatchViewFSM {
     }
 
     // 执行转换
+    this.previousState = oldState;
+    this.previousSubState = oldSubState;
     this.state = newState;
     this.subState = newSubState;
     this.stateData = data || {};
@@ -133,11 +137,17 @@ export class MatchViewFSM {
 
   /**
    * 检查之前是否在某个状态（用于暂停恢复等场景）
-   * 注意：当前简化实现，只检查当前状态
    */
   wasIn(state) {
-    // TODO: 如果需要真正的历史状态跟踪，需要在 transition() 中记录 previousState
-    return this.state === state;
+    return this.previousState === state;
+  }
+
+  /**
+   * 从暂停恢复到进入 PAUSED 前的状态。
+   */
+  resume() {
+    if (this.state !== 'PAUSED' || !this.previousState) return false;
+    return this.transition(this.previousState, this.previousSubState);
   }
 
   /**

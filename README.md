@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v180** · 空间事件比赛分析 |
+| 当前版本 | **v181** · 存档可靠性与统一验证 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -68,7 +68,9 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **设施**：球场、训练、青训、医疗等设施可以升级，并影响收入、成长、恢复和伤病。
 - **信息系统**：信箱、世界新闻、媒体、球探任务、关注列表、球员对话、全局搜索和可连续浏览的球员资料。
 - **存档**：3 个槽位、自动保存、手动保存、JSON 导出与导入；旧存档会在加载时补齐新增字段。
-- **离线支持**：Web App Manifest + Service Worker；版本缓存由入口和审计脚本统一检查。
+- **v181 存档可靠性**：Worker 压缩失败时同步保存各槽最新快照，页面退出前冲刷待存队列；版本化 Schema 与结构校验保护旧档迁移和导入。
+- **离线与性能**：Service Worker 按资源独立预缓存，单项失败不再清空整批离线资源；大型比赛视图只在进入比赛或战报时加载。
+- **统一验证**：核心审计由 `node scripts/verify.mjs` 统一执行，`--full` 追加 24 场真实性校准；GitHub Actions 覆盖 push、PR、手动与定时验证。
 
 ### 本地运行
 
@@ -93,10 +95,8 @@ python -m http.server 8765 --bind 127.0.0.1
 ### 验证与审计
 
 ```bash
-node scripts/match-realism-audit.mjs 24
-node scripts/transfer-negotiations-audit.mjs
-node scripts/cache-audit.mjs
-node _smoke_p1.mjs
+node scripts/verify.mjs
+node scripts/verify.mjs --full
 ```
 
 比赛真实性审计使用固定随机种子，检查进球、射门距离与转化率、抢断、犯规、点球、角球、伤病、卡死和强弱队差距。v165 的 24 场等强校准样本为 3.04 球/场、10.5% 射门转化率、37.5% 禁区外射门，30+ 距离零进球。
@@ -130,7 +130,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v180** · spatial-event match analysis |
+| Current version | **v181** · save reliability and unified verification |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -182,7 +182,9 @@ Repository: https://github.com/as7er/vcfm
 - **Facilities**: stadium, training, youth, and medical upgrades affect revenue, development, recovery, and injuries.
 - **Information systems**: inbox, world news, media, scouting missions, shortlist, player talks, global search, and continuous player-profile browsing.
 - **Saves**: 3 slots, autosave, manual save, and JSON export/import. Older saves are migrated with defaults for new fields.
-- **Offline support**: Web App Manifest and Service Worker, with cache versions checked by an audit script.
+- **v181 save reliability**: compression-worker failures synchronously persist each slot's newest snapshot, pending jobs flush before unload, and a versioned schema validates migrations and imports.
+- **Offline and performance**: Service Worker assets are precached independently so one failure cannot discard the batch; the large match view loads only when entering a match or archived report.
+- **Unified verification**: `node scripts/verify.mjs` runs the core audits, while `--full` adds the 24-match realism calibration. GitHub Actions covers pushes, pull requests, manual runs, and a schedule.
 
 ### Run locally
 
@@ -207,11 +209,8 @@ Raw spatial-engine preview: `http://127.0.0.1:8765/sim-viewer.html`
 ### Validation and audits
 
 ```bash
-node scripts/match-realism-audit.mjs 24
-node scripts/transfer-negotiations-audit.mjs
-node scripts/deal-negotiations-audit.mjs
-node scripts/cache-audit.mjs
-node _smoke_p1.mjs
+node scripts/verify.mjs
+node scripts/verify.mjs --full
 ```
 
 The seeded realism audit measures goals, shot distance and conversion, tackles, fouls, penalties, corners, injuries, stalls, and strong-vs-weak performance. The v165 24-match equal-strength baseline produced 3.04 goals per match, 10.5% shot conversion, 37.5% shots from outside the box, and no goals from 30+ distance.
