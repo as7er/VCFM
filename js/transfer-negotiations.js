@@ -20,7 +20,9 @@ import { recordFinanceEntry } from "./finance-ledger.js";
 import { clubTransferBudget } from "./club-finance.js";
 import { shouldBuyPosition } from "./squad-balance.js";
 import {
+  ACTIVE_DEAL_NEGOTIATION_STATUSES,
   ACTIVE_TRANSFER_NEGOTIATION_STATUSES,
+  activeDealCashCommitments,
   activeTransferCashCommitments,
   transferNegotiationCashCost,
 } from "./cash-reservations.js";
@@ -41,6 +43,14 @@ function clamp(n, min, max) {
 
 function money(n) {
   return Math.max(0, Math.round(Number(n) || 0));
+}
+
+function hasActiveDealNegotiation(world, playerId) {
+  return (world.dealNegotiations || []).some(
+    (negotiation) =>
+      negotiation.playerId === playerId &&
+      ACTIVE_DEAL_NEGOTIATION_STATUSES.has(negotiation.status)
+  );
 }
 
 function signingBonus(wage, years) {
@@ -151,6 +161,9 @@ function validateLiveDeal(
   const player = playerAtClub(seller, negotiation.playerId);
   if (!player) return { ok: false, reason: "球员已经离开卖方俱乐部" };
   if (player.loan) return { ok: false, reason: "球员当前处于租借关系，无法完成永久转会" };
+  if (hasActiveDealNegotiation(world, player.id)) {
+    return { ok: false, reason: "球员已有进行中的续约或租借谈判" };
+  }
   if ((buyer.players || []).length >= MAX_SQUAD) {
     return { ok: false, reason: `买方阵容已满（最多 ${MAX_SQUAD} 人）` };
   }
@@ -159,7 +172,8 @@ function validateLiveDeal(
   }
   const dealCost = transferNegotiationCashCost(negotiation);
   const reserved = checkReservedFunds
-    ? activeTransferCashCommitments(world, buyer.id, { excludeId: negotiation.id })
+    ? activeTransferCashCommitments(world, buyer.id, { excludeId: negotiation.id }) +
+      activeDealCashCommitments(world, buyer.id)
     : 0;
   if (checkFunds && (Number(buyer.money) || 0) - reserved < dealCost) {
     return {
@@ -195,6 +209,9 @@ export function submitTransferNegotiation(
   if (findActiveTransferNegotiation(world, playerId)) {
     return { ok: false, msg: "该球员已有一项进行中的买入谈判" };
   }
+  if (hasActiveDealNegotiation(world, playerId)) {
+    return { ok: false, msg: "该球员已有进行中的续约或租借谈判" };
+  }
   if ((buyer.players || []).length >= MAX_SQUAD) return { ok: false, msg: "阵容已满（最多 28 人）" };
   if ((seller.players || []).length <= MIN_SELLER_SQUAD) {
     return { ok: false, msg: "对方一线队人数不足，拒绝开启谈判" };
@@ -206,7 +223,8 @@ export function submitTransferNegotiation(
   if (offeredFee <= 0) return { ok: false, msg: "转会费报价必须大于 0" };
   if (offeredWage <= 0) return { ok: false, msg: "合同周薪必须大于 0" };
   const bonus = signingBonus(offeredWage, contractYears);
-  const reserved = activeTransferCashCommitments(world, buyer.id);
+  const reserved = activeTransferCashCommitments(world, buyer.id) +
+    activeDealCashCommitments(world, buyer.id);
   if ((Number(buyer.money) || 0) - reserved < offeredFee + bonus) {
     return {
       ok: false,
@@ -274,6 +292,9 @@ function validateSaleListing(world, negotiation) {
   const player = playerAtClub(seller, negotiation.playerId);
   if (!player) return { ok: false, reason: "球员已经离开你的俱乐部" };
   if (player.loan) return { ok: false, reason: "球员当前处于租借关系，无法永久转会" };
+  if (hasActiveDealNegotiation(world, player.id)) {
+    return { ok: false, reason: "球员已有进行中的续约或租借谈判" };
+  }
   if ((seller.players || []).length <= MIN_SELLER_SQUAD) {
     return { ok: false, reason: "一线队人数不足，无法继续出售" };
   }
@@ -297,7 +318,7 @@ function validateSaleDeal(
   const cost = transferNegotiationCashCost(negotiation);
   const otherCommitments = activeTransferCashCommitments(world, buyer.id, {
     excludeId: excludeTransferId,
-  });
+  }) + activeDealCashCommitments(world, buyer.id);
   const available = Math.max(0, clubTransferBudget(world, buyer) - otherCommitments);
   if (checkBudget && available < cost) {
     return {
@@ -328,6 +349,9 @@ export function submitSaleListing(
   }
   if (findActiveSaleNegotiation(world, playerId)) {
     return { ok: false, msg: "该球员已经挂牌或正在进行出售谈判" };
+  }
+  if (hasActiveDealNegotiation(world, playerId)) {
+    return { ok: false, msg: "该球员已有进行中的续约或租借谈判" };
   }
   const fee = money(askingFee);
   if (fee <= 0) return { ok: false, msg: "挂牌价必须大于 0" };
@@ -474,7 +498,8 @@ function findSaleBuyer(world, negotiation, seller, player, random) {
         fee: money(pendingBid.fee),
         ...terms,
       };
-      const other = activeTransferCashCommitments(world, buyer.id, { excludeId: negotiation.id });
+      const other = activeTransferCashCommitments(world, buyer.id, { excludeId: negotiation.id }) +
+        activeDealCashCommitments(world, buyer.id);
       if (clubTransferBudget(world, buyer) - other >= transferNegotiationCashCost(candidate)) {
         return { buyer, fee: pendingBid.fee, terms, sourceBidId: pendingBid.id };
       }
@@ -493,7 +518,8 @@ function findSaleBuyer(world, negotiation, seller, player, random) {
     const fee = Math.min(asking, marketOffer);
     if (fee < Math.min(asking * 0.66, value * 0.78)) continue;
     const candidate = { ...negotiation, buyerClubId: buyer.id, fee, ...terms };
-    const other = activeTransferCashCommitments(world, buyer.id, { excludeId: negotiation.id });
+    const other = activeTransferCashCommitments(world, buyer.id, { excludeId: negotiation.id }) +
+      activeDealCashCommitments(world, buyer.id);
     if (clubTransferBudget(world, buyer) - other < transferNegotiationCashCost(candidate)) continue;
     const targetOvr = Math.max(7, Math.round((Number(buyer.power) || 55) / 5));
     const abilityFit = -Math.abs((Number(player.ovr) || 10) - targetOvr) * 0.25;
@@ -660,6 +686,9 @@ export function acceptIncomingTransferOffer(
   const buyer = clubById(world, buyerClubId);
   const player = playerAtClub(seller, playerId);
   if (!seller || !buyer || !player) return { ok: false, msg: "报价对应的俱乐部或球员已失效" };
+  if (hasActiveDealNegotiation(world, playerId)) {
+    return { ok: false, msg: "该球员已有进行中的续约或租借谈判" };
+  }
   const existing = findActiveSaleNegotiation(world, playerId);
   const terms = saleContractTerms(buyer, seller, player, random);
   const negotiation = {

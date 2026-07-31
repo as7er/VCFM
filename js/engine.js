@@ -71,7 +71,6 @@ import { runInternationalBreak, ensureIntl } from "./intl.js";
 import { awardSeasonHonors, ensureHonors, grantHonor } from "./honors.js";
 import {
   ensureContract,
-  renewPlayer,
   renewOffer,
   terminatePlayer,
   terminateCost,
@@ -82,8 +81,6 @@ import {
 } from "./contracts.js";
 import {
   ensureLoans,
-  loanOutPlayer,
-  loanInPlayer,
   recallLoan,
   returnLoan,
   processLoansDay,
@@ -243,6 +240,7 @@ import {
   resolveInboxAction,
   markInboxRead,
   syncPoachBidsToInbox,
+  syncDealNegotiationsToInbox,
   syncTransferNegotiationsToInbox,
   pushInbox,
   inboxCatLabel,
@@ -257,6 +255,16 @@ import {
   submitSaleListing,
   submitTransferNegotiation,
 } from "./transfer-negotiations.js";
+import {
+  cancelActiveDealNegotiations,
+  ensureDealNegotiations,
+  findActiveDealNegotiation,
+  listDealNegotiations,
+  processDealNegotiationsDay,
+  respondDealNegotiation,
+  submitLoanNegotiation,
+  submitRenewalNegotiation,
+} from "./deal-negotiations.js";
 import {
   processRelationsDay,
   ensureSquadRelations,
@@ -327,6 +335,7 @@ export {
   resolveInboxAction,
   markInboxRead,
   syncPoachBidsToInbox,
+  syncDealNegotiationsToInbox,
   syncTransferNegotiationsToInbox,
   pushInbox,
   inboxCatLabel,
@@ -337,6 +346,13 @@ export {
   respondTransferNegotiation,
   submitSaleListing,
   submitTransferNegotiation,
+  ensureDealNegotiations,
+  findActiveDealNegotiation,
+  listDealNegotiations,
+  respondDealNegotiation,
+  submitLoanNegotiation,
+  submitRenewalNegotiation,
+  cancelActiveDealNegotiations,
   processRelationsDay,
   ensureSquadRelations,
   clubAtmosphere,
@@ -543,6 +559,7 @@ export function advanceDay(world) {
   if (world.sacked) {
     world.day += 1;
     processTransferNegotiationsDay(world);
+    processDealNegotiationsDay(world);
     ensureManagerJob(world);
     processManagerJobsDay(world);
     return {
@@ -561,6 +578,7 @@ export function advanceDay(world) {
   ensureTransferWindow(world);
   processTransferWindowDay(world);
   processTransferNegotiationsDay(world);
+  processDealNegotiationsDay(world);
   const twEvent = checkTransferWindowEvent(world);
   if (twEvent) events.push(twEvent);
 
@@ -984,6 +1002,7 @@ export function startNextSeason(world) {
   }
 
   // 全部租借归还，再处理未续约离队
+  cancelActiveDealNegotiations(world);
   returnAllLoans(world);
   releaseUnrenewed(world);
 
@@ -1041,14 +1060,33 @@ export function renewUserPlayer(world, playerId, opts = {}) {
   const p = club.players.find((x) => x.id === playerId);
   if (!p) return { ok: false, msg: "球员不在阵中" };
   if (p.loan) return { ok: false, msg: "租借球员无法续约" };
-  const offer =
-    opts.years != null ? renewOffer(p, { years: opts.years }) : renewOffer(p);
-  const res = renewPlayer(club, p, offer, world);
-  if (res.ok) {
-    p._needsRenew = false;
-    world.news.unshift({ day: world.day, text: `📝 ${res.msg}` });
-  }
-  return res;
+  const offer = opts.wage != null
+    ? { years: opts.years || 3, newWage: opts.wage }
+    : renewOffer(p, opts.years != null ? { years: opts.years } : {});
+  return submitRenewalNegotiation(world, playerId, {
+    years: offer.years,
+    wage: offer.newWage,
+  });
+}
+
+export function loanOutPlayer(world, playerId, opts = {}) {
+  const preview = previewLoanOut(world, playerId, opts.term || "half");
+  if (!preview) return { ok: false, msg: "无法外租该球员" };
+  return submitLoanNegotiation(world, "loan_out", playerId, null, {
+    term: opts.term,
+    fee: opts.fee ?? preview.fee,
+    wageShare: opts.wageShare ?? preview.wageShare,
+  });
+}
+
+export function loanInPlayer(world, playerId, fromClubId, opts = {}) {
+  const preview = previewLoanIn(world, playerId, fromClubId, opts.term || "half");
+  if (!preview) return { ok: false, msg: "无法租入该球员" };
+  return submitLoanNegotiation(world, "loan_in", playerId, fromClubId, {
+    term: opts.term,
+    fee: opts.fee ?? preview.fee,
+    wageShare: opts.wageShare ?? preview.wageShare,
+  });
 }
 
 export function terminateUserPlayer(world, playerId) {
@@ -1057,6 +1095,9 @@ export function terminateUserPlayer(world, playerId) {
   if (!club) return { ok: false, msg: "无球队" };
   const p = club.players.find((x) => x.id === playerId);
   if (!p) return { ok: false, msg: "球员不在阵中" };
+  if (findActiveDealNegotiation(world, playerId) || findActiveTransferNegotiation(world, playerId)) {
+    return { ok: false, msg: "该球员仍有进行中的合同、租借或转会谈判" };
+  }
   const res = terminatePlayer(world, club, p);
   if (res.ok) {
     world.news.unshift({ day: world.day, text: `📝 ${res.msg}` });
@@ -1123,8 +1164,6 @@ export {
   ensureWorldFinances,
   // 租借
   ensureLoans,
-  loanOutPlayer,
-  loanInPlayer,
   recallLoan,
   returnLoan,
   processLoansDay,

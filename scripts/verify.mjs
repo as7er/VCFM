@@ -17,6 +17,7 @@ const checks = [
   "scripts/competition-audit.mjs",
   "scripts/transfer-negotiations-audit.mjs",
   "scripts/sale-negotiations-audit.mjs",
+  "scripts/deal-negotiations-audit.mjs",
   "scripts/match-seed-audit.mjs",
   "scripts/long-term-reality-audit.mjs",
   "scripts/ui-layout-audit.mjs",

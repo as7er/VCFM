@@ -194,9 +194,16 @@ export function loanOutPlayer(world, playerId, opts = {}) {
   }
   if (toClub.players.length >= 28) return { ok: false, msg: "对方阵容已满" };
 
-  const fee = loanFeeFor(player);
-  const wageShare = defaultWageShare();
+  const fee = opts.fee != null ? Math.max(0, Math.round(Number(opts.fee) || 0)) : loanFeeFor(player);
+  const wageShare = opts.wageShare != null
+    ? Math.max(0.5, Math.min(1, Number(opts.wageShare) || 0.75))
+    : defaultWageShare();
   const untilDay = loanUntilDay(world, term);
+
+  const payerCash = clubCashAvailability(world, toClub, fee, {
+    excludeDealId: opts.negotiationId || null,
+  });
+  if (!payerCash.ok) return { ok: false, msg: "接收方已无法承担租借费" };
 
   // 对方付租借费给用户
   recordFinanceEntry(toClub, -fee, { category: "loan", source: "loan-fee", season: world.season, day: world.day });
@@ -245,9 +252,13 @@ export function loanInPlayer(world, playerId, fromClubId, opts = {}) {
   }
 
   const term = opts.term === "season" ? "season" : "half";
-  const fee = loanFeeFor(player);
-  const wageShare = 0.7 + Math.random() * 0.3;
-  const cash = clubCashAvailability(world, user, fee);
+  const fee = opts.fee != null ? Math.max(0, Math.round(Number(opts.fee) || 0)) : loanFeeFor(player);
+  const wageShare = opts.wageShare != null
+    ? Math.max(0.5, Math.min(1, Number(opts.wageShare) || 0.8))
+    : 0.7 + Math.random() * 0.3;
+  const cash = clubCashAvailability(world, user, fee, {
+    excludeDealId: opts.negotiationId || null,
+  });
   if (!cash.ok) {
     return {
       ok: false,

@@ -7,7 +7,9 @@ import { ensureLoans } from "./loans.js";
 import { ensureStaff, staffWageBill } from "./staff.js";
 import { ensureFinanceLedger, financeLedgerSummary, recordFinanceEntry, resetFinanceLedgerSeason } from "./finance-ledger.js";
 import {
+  ACTIVE_DEAL_NEGOTIATION_STATUSES,
   ACTIVE_TRANSFER_NEGOTIATION_STATUSES,
+  dealNegotiationCashCost,
   transferNegotiationCashCost,
 } from "./cash-reservations.js";
 import { ensureContract } from "./contracts.js";
@@ -184,7 +186,7 @@ function stableRenewalEstimate(player) {
 /** Cash and payroll already promised but not yet settled. */
 export function clubFinanceCommitments(world, club) {
   if (!world || !club) {
-    return { transfer: 0, contracts: 0, total: 0, weeklyWageIncrease: 0, items: [] };
+    return { transfer: 0, contracts: 0, loans: 0, total: 0, weeklyWageIncrease: 0, items: [] };
   }
   const items = [];
   for (const negotiation of Array.isArray(world.transferNegotiations) ? world.transferNegotiations : []) {
@@ -201,9 +203,38 @@ export function clubFinanceCommitments(world, club) {
       id: negotiation.id,
     });
   }
+  const activeRenewalPlayers = new Set();
+  for (const negotiation of Array.isArray(world.dealNegotiations) ? world.dealNegotiations : []) {
+    if (
+      !ACTIVE_DEAL_NEGOTIATION_STATUSES.has(negotiation?.status) ||
+      negotiation.payerClubId !== club.id
+    ) continue;
+    if (negotiation.kind === "renewal") activeRenewalPlayers.add(negotiation.playerId);
+    const player = (world.clubs || [])
+      .flatMap((candidate) => candidate.players || [])
+      .find((candidate) => candidate.id === negotiation.playerId);
+    const currentWage = number(player?.wage);
+    const weeklyWageIncrease = negotiation.kind === "renewal"
+      ? Math.max(0, number(negotiation.wage) - currentWage)
+      : negotiation.kind === "loan_in" || negotiation.kind === "loan_out"
+        ? Math.round(number(player?.wage) * number(negotiation.wageShare))
+        : 0;
+    items.push({
+      kind: negotiation.kind === "renewal" ? "contract" : "loan",
+      amount: dealNegotiationCashCost(negotiation),
+      weeklyWageIncrease,
+      label: negotiation.kind === "renewal" ? "pending renewal" : "pending loan",
+      id: negotiation.id,
+    });
+  }
   for (const player of club.players || []) {
     ensureContract(player);
-    if (player.loan || (player.contractYears || 0) > 1 || !player._needsRenew) continue;
+    if (
+      player.loan ||
+      activeRenewalPlayers.has(player.id) ||
+      (player.contractYears || 0) > 1 ||
+      !player._needsRenew
+    ) continue;
     // The contract screen remains stochastic; planning uses a stable midpoint
     // estimate so merely opening the finance page never changes the forecast.
     const estimate = stableRenewalEstimate(player);
@@ -217,8 +248,9 @@ export function clubFinanceCommitments(world, club) {
   }
   const transfer = items.filter((item) => item.kind === "transfer").reduce((sum, item) => sum + item.amount, 0);
   const contracts = items.filter((item) => item.kind === "contract").reduce((sum, item) => sum + item.amount, 0);
+  const loans = items.filter((item) => item.kind === "loan").reduce((sum, item) => sum + item.amount, 0);
   const weeklyWageIncrease = items.reduce((sum, item) => sum + number(item.weeklyWageIncrease), 0);
-  return { transfer, contracts, total: transfer + contracts, weeklyWageIncrease, items };
+  return { transfer, contracts, loans, total: transfer + contracts + loans, weeklyWageIncrease, items };
 }
 
 /** Conservative planning projection using only scheduled home gates and visible recurring costs. */

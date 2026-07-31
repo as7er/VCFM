@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v177** · 分阶段出售谈判与成交前实时复核 |
+| 当前版本 | **v178** · 续约与租借分阶段谈判 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -57,7 +57,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **阵容与球员**：体能、士气、伤病、停赛、潜力、号码、合同、赛季数据和近 5 场滚动状态；球员资料、阵容、训练与战术席显示预计伤停天数；自动阵容同时考虑能力、位置、体能和近期表现。
 - **战术**：阵型、风格、压迫、节奏、宽度、防线、槽位角色、核心球员与战术板拖拽换位。
 - **训练与青训**：训练重点、强度、赛前备战、青训名单和球员成长；可委托助理教练按赛程与阵容短板安排。
-- **转会与合同**：夏窗、冬窗、续约、外租、自由球员和 AI 报价；买入经过卖方审核转会费、球员审核合同、还价或拒绝等分阶段谈判。
+- **转会与合同**：夏窗、冬窗、续约、租借、自由球员和 AI 报价；买入、出售、续约与租借均按现实参与方逐阶段审核、还价或拒绝，成交前不会移动球员。
 - **职员体系**：主教练、球探和队医拥有能力、工资与合同；可以签自由职员、接触其他俱乐部在职职员并支付补偿。
 - **经理生涯**：董事会目标、名望、成就与执教历史；被解雇或主动请辞后进入待业市场，也可能在任时收到更高水平球队邀请。
 
@@ -129,7 +129,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v177** · staged player sales with live completion checks |
+| Current version | **v178** · staged contract-renewal and loan negotiations |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -170,7 +170,7 @@ Repository: https://github.com/as7er/vcfm
 - **Squad and players**: fitness, morale, injuries, suspensions, potential, numbers, contracts, season statistics, and rolling five-match form. Profiles, squad lists, training, and the tactics bench show expected injury days. Auto-selection considers ability, position, fitness, and form.
 - **Tactics**: formation, style, pressing, tempo, width, defensive line, slot roles, core player, and drag-and-drop changes.
 - **Training and youth**: training focus, intensity, match preparation, youth development, and assistant-manager delegation based on schedule and squad weaknesses.
-- **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Incoming transfers now pass through seller fee review, player contract review, counters, and rejection stages.
+- **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Purchases, sales, renewals, and loans pass through the relevant clubs and players in staged reviews, counters, or rejections; players do not move before completion.
 - **Staff**: managers, scouts, and physios have ability, wages, and contracts. Hire free agents or approach employed staff with compensation.
 - **Manager career**: board objectives, reputation, achievements, and job history. Sacking or resignation leads to unemployment and new offers; successful employed managers may receive prestige approaches.
 
@@ -207,6 +207,7 @@ Raw spatial-engine preview: `http://127.0.0.1:8765/sim-viewer.html`
 ```bash
 node scripts/match-realism-audit.mjs 24
 node scripts/transfer-negotiations-audit.mjs
+node scripts/deal-negotiations-audit.mjs
 node scripts/cache-audit.mjs
 node _smoke_p1.mjs
 ```

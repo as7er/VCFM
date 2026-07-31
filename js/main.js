@@ -30,8 +30,8 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=177";
-import { nationFlagHtml } from "./flags.js?v=177";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=178";
+import { nationFlagHtml } from "./flags.js?v=178";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -210,6 +210,7 @@ import {
   resolveInboxAction,
   markInboxRead,
   syncPoachBidsToInbox,
+  syncDealNegotiationsToInbox,
   syncTransferNegotiationsToInbox,
   inboxCatLabel,
   findActiveSaleNegotiation,
@@ -217,6 +218,9 @@ import {
   listTransferNegotiations,
   respondTransferNegotiation,
   submitTransferNegotiation,
+  findActiveDealNegotiation,
+  listDealNegotiations,
+  respondDealNegotiation,
   clubAtmosphere,
   atmosphereLabel,
   relationLabel,
@@ -288,7 +292,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=177";
+} from "./avatar.js?v=178";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -2181,6 +2185,7 @@ function renderInbox() {
   ensureInbox(world);
   syncPoachBidsToInbox(world);
   syncTransferNegotiationsToInbox(world);
+  syncDealNegotiationsToInbox(world);
   const en = getLang() === "en";
   const pendingOnly = inboxFilter === "pending";
   const list = listInbox(world, { pendingOnly, limit: 50 });
@@ -3216,6 +3221,7 @@ function renderDashboard() {
   // 概览信箱摘要
   ensureInbox(world);
   syncPoachBidsToInbox(world);
+  syncDealNegotiationsToInbox(world);
   const dashIb = $("#dash-inbox");
   if (dashIb) {
     const en = getLang() === "en";
@@ -4053,6 +4059,8 @@ function renderPlayerContractActions(player, fromOther) {
   if (!player || world?.sacked) return "";
   const en = getLang() === "en";
   const open = isTransferWindowOpen(world);
+  const activeTalk = findActiveDealNegotiation(world, player.id) ||
+    findActiveTransferNegotiation(world, player.id);
 
   // 租借中的本队租入
   if (!fromOther && player.loan) {
@@ -4070,16 +4078,16 @@ function renderPlayerContractActions(player, fromOther) {
   // 本队正式球员
   if (!fromOther) {
     return `<div class="contract-actions">
-      <button type="button" class="btn small primary" data-act-renew="${player.id}">${escapeHtml(t("contract.renew") || (en ? "Renew" : "续约"))}</button>
-      <button type="button" class="btn small danger" data-act-terminate="${player.id}">${escapeHtml(t("contract.terminate") || (en ? "Release" : "解约"))}</button>
-      <button type="button" class="btn small" data-act-loan-out="${player.id}" ${!open ? "disabled" : ""}>${escapeHtml(t("contract.loanOut") || (en ? "Loan out" : "外租"))}${!open ? (en ? " (window closed)" : "（窗关）") : ""}</button>
+      <button type="button" class="btn small primary" data-act-renew="${player.id}" ${activeTalk ? "disabled" : ""}>${escapeHtml(activeTalk ? (en ? "In talks" : "谈判中") : t("contract.renew") || (en ? "Renew" : "续约"))}</button>
+      <button type="button" class="btn small danger" data-act-terminate="${player.id}" ${activeTalk ? "disabled" : ""}>${escapeHtml(t("contract.terminate") || (en ? "Release" : "解约"))}</button>
+      <button type="button" class="btn small" data-act-loan-out="${player.id}" ${!open || activeTalk ? "disabled" : ""}>${escapeHtml(t("contract.loanOut") || (en ? "Loan out" : "外租"))}${!open ? (en ? " (window closed)" : "（窗关）") : ""}</button>
     </div>`;
   }
 
   // 他队：可租入
   if (fromOther && !player.loan) {
     return `<div class="contract-actions">
-      <button type="button" class="btn small" data-act-loan-in="${player.id}" data-from="${fromOther.id}" ${!open ? "disabled" : ""}>${escapeHtml(t("contract.loanInBtn") || (en ? "Loan in" : "租入"))}${!open ? (en ? " (window closed)" : "（窗关）") : ""}</button>
+      <button type="button" class="btn small" data-act-loan-in="${player.id}" data-from="${fromOther.id}" ${!open || activeTalk ? "disabled" : ""}>${escapeHtml(activeTalk ? (en ? "In talks" : "谈判中") : t("contract.loanInBtn") || (en ? "Loan in" : "租入"))}${!open ? (en ? " (window closed)" : "（窗关）") : ""}</button>
     </div>`;
   }
   return "";
@@ -4122,17 +4130,27 @@ function doRenewPlayer(playerId) {
   if (yearsIn == null) return;
   const years = Math.max(1, Math.min(5, parseInt(yearsIn, 10) || prev.offer.years));
   const final = previewRenew(world, playerId, years);
+  const contractYears = final.offer.years;
+  const wageIn = prompt(
+    getLang() === "en"
+      ? `Weekly-wage offer (reference ${formatMoney(final.offer.newWage)}):`
+      : `请输入周薪报价（参考 ${formatMoney(final.offer.newWage)}）：`,
+    String(final.offer.newWage)
+  );
+  if (wageIn == null) return;
+  const wage = parseMoneyInput(wageIn);
+  const bonus = Math.round(wage * 4 * contractYears * 0.15);
   if (
     !confirm(
       getLang() === "en"
-        ? `Renew ${final.player.name}?\n${years} years · wage ${formatMoney(final.offer.newWage)} · bonus ${formatMoney(final.offer.fee)}`
-        : `确认与 ${final.player.name} 续约？\n${years} 年 · 周薪 ${formatMoney(final.offer.newWage)} · 签约奖 ${formatMoney(final.offer.fee)}`
+        ? `Submit a renewal offer to ${final.player.name}?\n${contractYears} years · wage ${formatMoney(wage)} · bonus ${formatMoney(bonus)}\nThe player will reply in 1–2 days.`
+        : `向 ${final.player.name} 提交续约报价？\n${contractYears} 年 · 周薪 ${formatMoney(wage)} · 签约奖 ${formatMoney(bonus)}\n球员将在 1–2 天内答复。`
     )
   ) {
     return;
   }
-  const res = renewUserPlayer(world, playerId, { years });
-  toast(getLang() === "en" ? (res.ok ? `${final.player.name} renewed` : "Contract renewal failed") : res.msg);
+  const res = renewUserPlayer(world, playerId, { years: contractYears, wage });
+  toast(getLang() === "en" ? (res.ok ? "Renewal offer submitted" : res.msg) : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
@@ -4177,17 +4195,23 @@ function doLoanOut(playerId) {
     toast(en ? "Cannot loan this player" : "无法外租该球员");
     return;
   }
+  const feeIn = prompt(en ? "Requested loan fee:" : "请输入期望租借费：", String(prev.fee));
+  if (feeIn == null) return;
+  const fee = parseMoneyInput(feeIn);
+  const shareIn = prompt(en ? "Minimum wage share paid by host (50–100):" : "期望对方承担周薪比例（50–100）：", String(Math.round(prev.wageShare * 100)));
+  if (shareIn == null) return;
+  const wageShare = Math.max(0.5, Math.min(1, (parseInt(shareIn, 10) || 75) / 100));
   if (
     !confirm(
       en
-        ? `Loan out ${prev.player.name}?\nFee ~${formatMoney(prev.fee)} · host pays ~${Math.round(prev.wageShare * 100)}% wages · until ${prev.untilDay >= 9999 ? "EOS" : "D" + prev.untilDay}`
-        : `确认外租 ${prev.player.name}？\n租借费约 ${formatMoney(prev.fee)} · 对方承担约 ${Math.round(prev.wageShare * 100)}% 薪水 · 至 ${prev.untilDay >= 9999 ? "赛季末" : "D" + prev.untilDay}`
+        ? `List ${prev.player.name} for loan?\nRequested fee ${formatMoney(fee)} · host pays ${Math.round(wageShare * 100)}% wages · until ${prev.untilDay >= 9999 ? "EOS" : "D" + prev.untilDay}`
+        : `将 ${prev.player.name} 放入租借市场？\n期望租借费 ${formatMoney(fee)} · 对方承担 ${Math.round(wageShare * 100)}% 薪水 · 至 ${prev.untilDay >= 9999 ? "赛季末" : "D" + prev.untilDay}`
     )
   ) {
     return;
   }
-  const res = loanOutPlayer(world, playerId, { term });
-  toast(en ? (res.ok ? `${prev.player.name} loaned out` : "Loan move failed") : res.msg);
+  const res = loanOutPlayer(world, playerId, { term, fee, wageShare });
+  toast(en ? (res.ok ? "Player listed for loan" : res.msg) : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
@@ -4209,17 +4233,23 @@ function doLoanIn(playerId, fromClubId) {
     toast(en ? "Cannot loan this player" : "无法租入该球员");
     return;
   }
+  const feeIn = prompt(en ? "Loan-fee offer:" : "请输入租借费报价：", String(prev.fee));
+  if (feeIn == null) return;
+  const fee = parseMoneyInput(feeIn);
+  const shareIn = prompt(en ? "Wage share paid by your club (50–100):" : "我方承担周薪比例（50–100）：", String(Math.round(prev.wageShare * 100)));
+  if (shareIn == null) return;
+  const wageShare = Math.max(0.5, Math.min(1, (parseInt(shareIn, 10) || 80) / 100));
   if (
     !confirm(
       en
-        ? `Loan in ${prev.player.name} from ${prev.from?.short || ""}?\nFee ${formatMoney(prev.fee)} · you pay ~${Math.round(prev.wageShare * 100)}% wages`
-        : `确认租入 ${prev.player.name}（${prev.from?.short || ""}）？\n租借费 ${formatMoney(prev.fee)} · 我方约承担 ${Math.round(prev.wageShare * 100)}% 薪水`
+        ? `Submit a loan bid for ${prev.player.name} from ${prev.from?.short || ""}?\nFee ${formatMoney(fee)} · you pay ${Math.round(wageShare * 100)}% wages`
+        : `提交租入 ${prev.player.name}（${prev.from?.short || ""}）的报价？\n租借费 ${formatMoney(fee)} · 我方承担 ${Math.round(wageShare * 100)}% 薪水`
     )
   ) {
     return;
   }
-  const res = loanInPlayer(world, playerId, fromClubId, { term });
-  toast(en ? (res.ok ? `${prev.player.name} joined on loan` : "Loan move failed") : res.msg);
+  const res = loanInPlayer(world, playerId, fromClubId, { term, fee, wageShare });
+  toast(en ? (res.ok ? "Loan offer submitted" : res.msg) : res.msg);
   if (res.ok) {
     saveGame(world);
     refreshAll();
@@ -6121,6 +6151,11 @@ function renderTransfer() {
       .filter((negotiation) => findActiveTransferNegotiation(world, negotiation.playerId))
       .map((negotiation) => negotiation.playerId)
   );
+  const activeDealIds = new Set(
+    listDealNegotiations(world, { limit: 100 })
+      .filter((negotiation) => findActiveDealNegotiation(world, negotiation.playerId))
+      .map((negotiation) => negotiation.playerId)
+  );
   const en = getLang() === "en";
   const watchFilter = $("#filter-watch-only");
   if (watchFilter && !watchFilter.dataset.bound) {
@@ -6132,7 +6167,7 @@ function renderTransfer() {
       const valTxt = formatScoutValue(world, p);
       const ovrTxt = formatScoutOvr(world, p);
       const negotiating = activeNegotiationIds.has(p.id);
-      const loanable = !p.loan && !buyDisabled && !negotiating;
+      const loanable = !p.loan && !buyDisabled && !negotiating && !activeDealIds.has(p.id);
       return `<tr>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}</span></td>
         <td>${nationLabel(p)}</td>
@@ -6168,6 +6203,7 @@ function renderTransfer() {
     .map((p) => {
       const onLoan = !!p.loan;
       const saleNegotiation = findActiveSaleNegotiation(world, p.id);
+      const dealNegotiation = findActiveDealNegotiation(world, p.id);
       return `<tr>
       <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}${onLoan ? ` <span class="badge loan">${en ? "loan" : "租"}</span>` : ""}</span></td>
       <td>${nationLabel(p)}</td>
@@ -6177,11 +6213,11 @@ function renderTransfer() {
       <td class="tr-actions">
         <button class="btn small" data-player-link="${p.id}">${en ? "Info" : "详情"}</button>
         <button class="btn small danger" data-sell="${p.id}" ${
-          buyDisabled || onLoan || saleNegotiation ? "disabled" : ""
-        }>${onLoan ? (en ? "On loan" : "租借中") : saleNegotiation ? (en ? "Listed" : "已挂牌") : open ? (en ? "List" : "挂牌") : en ? "Closed" : "窗关"}</button>
+          buyDisabled || onLoan || saleNegotiation || dealNegotiation ? "disabled" : ""
+        }>${onLoan ? (en ? "On loan" : "租借中") : saleNegotiation ? (en ? "Listed" : "已挂牌") : dealNegotiation ? (en ? "In talks" : "谈判中") : open ? (en ? "List" : "挂牌") : en ? "Closed" : "窗关"}</button>
         <button class="btn small" data-loan-out="${p.id}" ${
-          buyDisabled || onLoan || saleNegotiation ? "disabled" : ""
-        }>${open && !onLoan && !saleNegotiation ? (en ? "Loan out" : "外租") : en ? "—" : "—"}</button>
+          buyDisabled || onLoan || saleNegotiation || dealNegotiation ? "disabled" : ""
+        }>${open && !onLoan && !saleNegotiation && !dealNegotiation ? (en ? "Loan out" : "外租") : en ? "—" : "—"}</button>
       </td>
     </tr>`;
     })
@@ -6212,6 +6248,23 @@ function renderTransfer() {
 }
 
 /** 转会页：合同待办 + 外租/租入列表 */
+function dealNegotiationStatus(negotiation, en) {
+  const labels = {
+    party_review: en ? "Player reviewing renewal" : "球员审核续约",
+    party_counter: en ? "Renewal counter-offer" : "球员续约还价",
+    club_review: en ? "Parent club reviewing loan" : "母队审核租借",
+    club_counter: en ? "Parent club counter-offer" : "母队租借还价",
+    market_search: en ? "Finding a loan club" : "寻找租入方",
+    offer_review: en ? "Loan offer awaiting decision" : "租借报价待处理",
+    buyer_review: en ? "Loan club reviewing counter" : "租入方审核还价",
+    player_review: en ? "Player reviewing loan" : "球员审核租借",
+    completed: en ? "Completed" : "已完成",
+    rejected: en ? "Rejected" : "已拒绝",
+    cancelled: en ? "Cancelled" : "已取消",
+  };
+  return labels[negotiation.status] || negotiation.status;
+}
+
 function renderContractsLoansPanel() {
   const box = $("#contracts-loans-panel");
   if (!box || !world) return;
@@ -6221,6 +6274,10 @@ function renderContractsLoansPanel() {
     return;
   }
   const en = getLang() === "en";
+  const negotiations = listDealNegotiations(world, { limit: 10 });
+  const activePlayerIds = new Set(
+    negotiations.filter((item) => findActiveDealNegotiation(world, item.playerId)?.id === item.id).map((item) => item.playerId)
+  );
   const attention = club.players
     .filter((p) => !p.loan && needsContractAttention(p))
     .sort((a, b) => (a.contractYears || 0) - (b.contractYears || 0) || b.ovr - a.ovr);
@@ -6245,8 +6302,8 @@ function renderContractsLoansPanel() {
               <span class="badge contract-short">${escapeHtml(tag)}</span>
             </div>
             <div class="cl-actions">
-              <button type="button" class="btn small primary" data-cl-renew="${p.id}">${escapeHtml(t("contract.renew") || (en ? "Renew" : "续约"))}</button>
-              <button type="button" class="btn small danger" data-cl-term="${p.id}">${escapeHtml(t("contract.terminate") || (en ? "Release" : "解约"))}</button>
+              <button type="button" class="btn small primary" data-cl-renew="${p.id}" ${activePlayerIds.has(p.id) ? "disabled" : ""}>${escapeHtml(activePlayerIds.has(p.id) ? (en ? "In talks" : "谈判中") : t("contract.renew") || (en ? "Renew" : "续约"))}</button>
+              <button type="button" class="btn small danger" data-cl-term="${p.id}" ${activePlayerIds.has(p.id) ? "disabled" : ""}>${escapeHtml(t("contract.terminate") || (en ? "Release" : "解约"))}</button>
             </div>
             ${
               offer
@@ -6287,7 +6344,45 @@ function renderContractsLoansPanel() {
         .join("")
     : `<p class="muted" style="margin:0">${en ? "No incoming loans." : "暂无租入球员。"}</p>`;
 
+  const negotiationRows = negotiations.length
+    ? negotiations.map((negotiation) => {
+        const active = !!findActiveDealNegotiation(world, negotiation.playerId) &&
+          findActiveDealNegotiation(world, negotiation.playerId)?.id === negotiation.id;
+        const actionable = negotiation.status === "party_counter" || negotiation.status === "club_counter" || negotiation.status === "offer_review";
+        const waiting = active && !actionable;
+        const kind = negotiation.kind === "renewal"
+          ? en ? "Renewal" : "续约"
+          : negotiation.kind === "loan_in"
+            ? en ? "Loan in" : "租入"
+            : en ? "Loan out" : "外租";
+        const terms = negotiation.kind === "renewal"
+          ? `${negotiation.years}${en ? "y" : "年"} · ${formatMoney(negotiation.wage)} · ${en ? "bonus" : "奖"} ${formatMoney(negotiation.signingBonus)}`
+          : `${en ? "fee" : "租借费"} ${formatMoney(negotiation.fee)} · ${en ? "wages" : "薪资"} ${Math.round((negotiation.wageShare || 0) * 100)}%`;
+        const actions = actionable
+          ? `<div class="cl-actions">
+              <button type="button" class="btn small primary" data-deal-accept="${escapeHtml(negotiation.id)}">${en ? "Accept" : "接受"}</button>
+              ${negotiation.kind === "loan_out" && negotiation.status === "offer_review" ? `<button type="button" class="btn small" data-deal-counter="${escapeHtml(negotiation.id)}">${en ? "Counter" : "还价"}</button>` : ""}
+              <button type="button" class="btn small" data-deal-reject="${escapeHtml(negotiation.id)}">${en ? "Walk away" : "退出"}</button>
+            </div>`
+          : waiting
+            ? `<div class="cl-actions"><button type="button" class="btn small" data-deal-withdraw="${escapeHtml(negotiation.id)}">${en ? "Withdraw" : "撤回"}</button></div>`
+            : "";
+        const reply = waiting && negotiation.decisionDay
+          ? ` · ${en ? "reply by" : "预计答复"} D${negotiation.decisionDay}`
+          : "";
+        return `<div class="cl-row">
+          <div class="cl-main"><strong>${escapeHtml(negotiation.playerName || negotiation.playerId)}</strong><span class="badge">${escapeHtml(kind)}</span></div>
+          <div class="muted">${escapeHtml(dealNegotiationStatus(negotiation, en))}${reply} · ${terms}</div>
+          ${actions}
+        </div>`;
+      }).join("")
+    : `<p class="muted" style="margin:0">${en ? "No contract or loan negotiations yet." : "暂无续约或租借谈判。"}</p>`;
+
   box.innerHTML = `
+    <div class="cl-section">
+      <h3>${en ? "Contract & loan negotiations" : "续约与租借谈判"}</h3>
+      ${negotiationRows}
+    </div>
     <div class="cl-section">
       <h3>${escapeHtml(t("contract.attention") || (en ? "Contracts needing attention" : "合同待办"))}</h3>
       ${renewRows}
@@ -6312,6 +6407,37 @@ function renderContractsLoansPanel() {
   });
   box.querySelectorAll("[data-cl-recall]").forEach((b) => {
     b.onclick = () => doRecallLoan(b.dataset.clRecall);
+  });
+  const handleDeal = (id, action, options = {}) => {
+    const result = respondDealNegotiation(world, id, action, options);
+    toast(en ? (result.ok ? "Negotiation updated" : result.msg) : result.msg);
+    if (result.ok) {
+      saveGame(world);
+      refreshAll();
+    }
+  };
+  box.querySelectorAll("[data-deal-accept]").forEach((button) => {
+    button.onclick = () => handleDeal(button.dataset.dealAccept, "accept");
+  });
+  box.querySelectorAll("[data-deal-reject]").forEach((button) => {
+    button.onclick = () => handleDeal(button.dataset.dealReject, "reject");
+  });
+  box.querySelectorAll("[data-deal-withdraw]").forEach((button) => {
+    button.onclick = () => handleDeal(button.dataset.dealWithdraw, "withdraw");
+  });
+  box.querySelectorAll("[data-deal-counter]").forEach((button) => {
+    button.onclick = () => {
+      const target = negotiations.find((item) => item.id === button.dataset.dealCounter);
+      if (!target) return;
+      const feeIn = prompt(en ? "Counter loan fee:" : "租借费还价：", String(target.fee || 0));
+      if (feeIn == null) return;
+      const shareIn = prompt(en ? "Host wage share (50–100):" : "对方承担周薪比例（50–100）：", String(Math.round((target.wageShare || 0.75) * 100)));
+      if (shareIn == null) return;
+      handleDeal(target.id, "counter", {
+        fee: parseMoneyInput(feeIn),
+        wageShare: Math.max(0.5, Math.min(1, (parseInt(shareIn, 10) || 75) / 100)),
+      });
+    };
   });
 }
 

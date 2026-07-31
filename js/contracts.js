@@ -5,8 +5,8 @@ import { assertTransferOpen } from "./transfers.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { clubCashAvailability } from "./cash-reservations.js";
 
-function cashFailure(world, club, amount, label) {
-  const cash = clubCashAvailability(world, club, amount);
+function cashFailure(world, club, amount, label, options = {}) {
+  const cash = clubCashAvailability(world, club, amount, options);
   if (cash.ok) return null;
   return cash.reserved > 0
     ? `未承诺现金不足：转会谈判已占用 ${formatMoney(cash.reserved)}，${label}需 ${formatMoney(amount)}`
@@ -24,11 +24,11 @@ export function ensureContract(p) {
   return p;
 }
 
-export function newContractYears(p) {
+export function newContractYears(p, random = Math.random) {
   if (p.age >= 34) return 1;
-  if (p.age >= 32) return 1 + Math.floor(Math.random() * 2);
-  if (p.age <= 21) return 2 + Math.floor(Math.random() * 3);
-  return 2 + Math.floor(Math.random() * 3); // 2–4
+  if (p.age >= 32) return 1 + Math.floor(random() * 2);
+  if (p.age <= 21) return 2 + Math.floor(random() * 3);
+  return 2 + Math.floor(random() * 3); // 2–4
 }
 
 /**
@@ -38,14 +38,15 @@ export function newContractYears(p) {
  */
 export function renewOffer(p, opts = {}) {
   ensureContract(p);
+  const random = typeof opts.random === "function" ? opts.random : Math.random;
   let years =
     opts.years != null
       ? Math.max(1, Math.min(5, +opts.years))
-      : newContractYears(p);
+      : newContractYears(p, random);
   if (p.age >= 34) years = Math.min(years, 1);
   else if (p.age >= 32) years = Math.min(years, 2);
 
-  const baseMult = 1.05 + Math.random() * 0.12 + (p.ovr >= 15 ? 0.08 : 0);
+  const baseMult = 1.05 + random() * 0.12 + (p.ovr >= 15 ? 0.08 : 0);
   // 长约略贵周薪
   const yearBump = 1 + Math.max(0, years - 2) * 0.03;
   const wageMult = baseMult * yearBump;
@@ -68,9 +69,16 @@ export function renewPlayer(club, player, offer = null, world = null) {
   if (player.loan) return { ok: false, msg: "租借球员无法续约（由母队管理合同）" };
   ensureContract(player);
   const o = offer || renewOffer(player);
-  const fundingError = cashFailure(world, club, o.fee, "签约奖");
+  const fundingError = cashFailure(world, club, o.fee, "签约奖", {
+    excludeDealId: o.negotiationId || null,
+  });
   if (fundingError) return { ok: false, msg: fundingError };
-  recordFinanceEntry(club, -o.fee, { category: "contract", source: "contract-renewal", season: null, day: null });
+  recordFinanceEntry(club, -o.fee, {
+    category: "contract",
+    source: "contract-renewal",
+    season: world?.season ?? null,
+    day: world?.day ?? null,
+  });
   player.contractYears = o.years;
   player.wage = o.newWage;
   player._needsRenew = false;

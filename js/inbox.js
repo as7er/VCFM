@@ -13,6 +13,10 @@ import {
   ensureTransferNegotiations,
   respondTransferNegotiation,
 } from "./transfer-negotiations.js";
+import {
+  ensureDealNegotiations,
+  respondDealNegotiation,
+} from "./deal-negotiations.js";
 
 const CAT_LABEL = {
   board: "董事会",
@@ -343,6 +347,109 @@ export function syncTransferNegotiationsToInbox(world) {
   }
 }
 
+function dealNegotiationMail(world, negotiation) {
+  const playerName = negotiation.playerName || negotiation.playerId;
+  const owner = world.clubs?.find((club) => club.id === negotiation.ownerClubId);
+  const host = world.clubs?.find((club) => club.id === negotiation.hostClubId);
+  const fee = formatMoney(negotiation.fee || 0);
+  const wage = formatMoney(negotiation.wage || 0);
+  const share = Math.round((negotiation.wageShare || 0) * 100);
+
+  if (negotiation.kind === "renewal" && negotiation.status === "party_counter") {
+    return {
+      category: "player",
+      priority: 3,
+      title: `${playerName} 提出续约还价`,
+      titleEn: `${playerName} counters the renewal offer`,
+      body: `球员要求 ${negotiation.years} 年合同、周薪 ${wage}、签约奖 ${formatMoney(negotiation.signingBonus)}。`,
+      bodyEn: `The player asks for ${negotiation.years} year(s), ${wage} per week and a ${formatMoney(negotiation.signingBonus)} signing bonus.`,
+      actions: [
+        { id: "accept", label: "接受合同", labelEn: "Accept", primary: true },
+        { id: "reject", label: "退出谈判", labelEn: "Walk away" },
+      ],
+    };
+  }
+  if (negotiation.kind === "loan_in" && negotiation.status === "club_counter") {
+    return {
+      category: "transfer",
+      priority: 3,
+      title: `${owner?.name || "母队"} 对 ${playerName} 的租借还价`,
+      titleEn: `${owner?.nameEn || owner?.name || "Parent club"} counter the loan bid for ${playerName}`,
+      body: `租借费 ${fee}，我方承担 ${share}% 周薪。接受后球员将评估出场机会。`,
+      bodyEn: `Loan fee ${fee}; your club pays ${share}% of wages. Accepting sends the proposal to the player.`,
+      actions: [
+        { id: "accept", label: "接受还价", labelEn: "Accept", primary: true },
+        { id: "reject", label: "退出谈判", labelEn: "Walk away" },
+      ],
+    };
+  }
+  if (negotiation.kind === "loan_out" && negotiation.status === "offer_review") {
+    return {
+      category: "transfer",
+      priority: 3,
+      title: `${host?.name || "租入方"} 报价租借 ${playerName}`,
+      titleEn: `${host?.nameEn || host?.name || "Loan club"} bid to loan ${playerName}`,
+      body: `租借费 ${fee}，对方承担 ${share}% 周薪。可接受或拒绝，也可在转会页还价。`,
+      bodyEn: `Loan fee ${fee}; they pay ${share}% of wages. Accept or reject here, or counter on the Transfers page.`,
+      actions: [
+        { id: "accept", label: "接受报价", labelEn: "Accept", primary: true },
+        { id: "reject", label: "拒绝报价", labelEn: "Reject" },
+      ],
+    };
+  }
+  if (negotiation.status === "completed") {
+    const renewal = negotiation.kind === "renewal";
+    return {
+      category: renewal ? "player" : "transfer",
+      priority: 2,
+      title: renewal ? `${playerName} 已完成续约` : `${playerName} 的租借已完成`,
+      titleEn: renewal ? `${playerName} signs a new contract` : `${playerName} completes the loan move`,
+      body: negotiation.reason || "各方已签署协议。",
+      bodyEn: renewal ? `New contract: ${negotiation.years} year(s), ${wage} per week.` : `Loan fee ${fee}; host pays ${share}% of wages.`,
+    };
+  }
+  if (negotiation.status === "rejected" || negotiation.status === "cancelled") {
+    return {
+      category: negotiation.kind === "renewal" ? "player" : "transfer",
+      priority: 2,
+      title: `${playerName} 的${negotiation.kind === "renewal" ? "续约" : "租借"}谈判未完成`,
+      titleEn: `${negotiation.kind === "renewal" ? "Renewal" : "Loan"} talks for ${playerName} end`,
+      body: negotiation.reason || "谈判条件已不再成立。",
+      bodyEn: `The talks ended: ${negotiation.reason || "conditions changed"}.`,
+    };
+  }
+  return null;
+}
+
+export function syncDealNegotiationsToInbox(world) {
+  if (!world) return;
+  ensureInbox(world);
+  for (const negotiation of ensureDealNegotiations(world)) {
+    const related = world.inbox.filter(
+      (mail) => mail.ref?.kind === "deal_negotiation" && mail.ref.negotiationId === negotiation.id
+    );
+    for (const mail of related) {
+      if (
+        (mail.status === "pending" || mail.status === "read") &&
+        mail.ref.negotiationRevision !== negotiation.revision
+      ) finishMail(mail, "谈判状态已更新");
+    }
+    if (negotiation.userHandledRevision === negotiation.revision) continue;
+    if (related.some((mail) => mail.ref?.negotiationRevision === negotiation.revision)) continue;
+    const article = dealNegotiationMail(world, negotiation);
+    if (!article) continue;
+    pushInbox(world, {
+      ...article,
+      dedupeKey: `deal_negotiation_${negotiation.id}_${negotiation.revision}`,
+      ref: {
+        kind: "deal_negotiation",
+        negotiationId: negotiation.id,
+        negotiationRevision: negotiation.revision,
+      },
+    });
+  }
+}
+
 /** 过期待办 */
 export function expireInbox(world) {
   ensureInbox(world);
@@ -391,6 +498,17 @@ export function resolveInboxAction(world, mailId, actionId) {
   if (mail.ref?.kind === "transfer_negotiation") {
     if (act === "accept" || act === "reject") {
       const res = respondTransferNegotiation(world, mail.ref.negotiationId, act);
+      if (res.ok) {
+        mail.ref.negotiationRevision = res.negotiation?.revision;
+        finishMail(mail, res.msg);
+      }
+      return res;
+    }
+  }
+
+  if (mail.ref?.kind === "deal_negotiation") {
+    if (act === "accept" || act === "reject") {
+      const res = respondDealNegotiation(world, mail.ref.negotiationId, act);
       if (res.ok) {
         mail.ref.negotiationRevision = res.negotiation?.revision;
         finishMail(mail, res.msg);
@@ -513,6 +631,7 @@ export function processInboxDay(world) {
   expireInbox(world);
   syncPoachBidsToInbox(world);
   syncTransferNegotiationsToInbox(world);
+  syncDealNegotiationsToInbox(world);
 
   const user = world.clubs?.find((c) => c.id === world.userClubId);
   if (!user) return;

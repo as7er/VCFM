@@ -63,7 +63,16 @@ function worldWithReservation(userClub, negotiation) {
   const world = worldWithReservation(user);
   assert.deepEqual(
     clubCashAvailability(world, user, 850_000),
-    { ok: true, cash: 3_000_000, reserved: 2_150_000, available: 850_000, required: 850_000, shortfall: 0 }
+    {
+      ok: true,
+      cash: 3_000_000,
+      reserved: 2_150_000,
+      transferReserved: 2_150_000,
+      dealReserved: 0,
+      available: 850_000,
+      required: 850_000,
+      shortfall: 0,
+    }
   );
   assert.equal(clubCashAvailability(world, user, 850_001).ok, false);
 }
