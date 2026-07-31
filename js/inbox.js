@@ -171,7 +171,18 @@ export function syncPoachBidsToInbox(world) {
     if (m.ref?.kind !== "poach" || m.status === "done" || m.status === "expired") continue;
     const bid = world.poachBids.find((b) => b.id === m.ref.bidId);
     if (!bid || bid.status !== "pending") {
-      finishMail(m, bid ? `已${bid.status === "accepted" ? "接受" : bid.status === "rejected" ? "拒绝" : "失效"}` : "已失效");
+      finishMail(
+        m,
+        bid
+          ? bid.status === "accepted"
+            ? "已成交"
+            : bid.status === "negotiating"
+              ? "已接受报价，等待球员决定"
+              : bid.status === "rejected"
+                ? "已拒绝"
+                : "已失效"
+          : "已失效"
+      );
     }
   }
 }
@@ -191,6 +202,52 @@ function transferNegotiationMail(world, negotiation) {
   const wage = formatMoney(negotiation.wage);
   const terms = `${negotiation.years} 年 · 周薪 ${wage}`;
   const termsEn = `${negotiation.years} year(s) · wage ${wage}`;
+
+  if (negotiation.kind === "user_sell") {
+    if (negotiation.status === "seller_review") {
+      return {
+        priority: 3,
+        title: `${buyerName} 正式报价 ${playerName}`,
+        titleEn: `${buyerNameEn} submit a formal bid for ${playerName}`,
+        body: `报价 ${fee}；为球员准备 ${terms}。你可接受或拒绝，也可前往转会页还价。`,
+        bodyEn: `Fee ${fee}; proposed terms are ${termsEn}. Accept or reject here, or counter on the Transfers page.`,
+        actions: [
+          { id: "accept", label: "接受报价", labelEn: "Accept", primary: true },
+          { id: "reject", label: "拒绝报价", labelEn: "Reject" },
+        ],
+      };
+    }
+    if (negotiation.status === "completed") {
+      return {
+        priority: 2,
+        title: `${playerName} 已转会至 ${buyerName}`,
+        titleEn: `${playerName} completes move to ${buyerNameEn}`,
+        body: `转会费 ${fee}。球员与买方已完成 ${terms} 的合同。`,
+        bodyEn: `Fee ${fee}. The player has signed ${termsEn} with the buyer.`,
+      };
+    }
+    if (negotiation.status === "rejected") {
+      const party = negotiation.rejectedBy === "player" ? "球员" : negotiation.rejectedBy === "buyer" ? "买方" : "市场";
+      const partyEn = negotiation.rejectedBy === "player" ? "The player" : negotiation.rejectedBy === "buyer" ? "The buyer" : "The market";
+      return {
+        priority: 2,
+        title: `${playerName} 的出售谈判未能完成`,
+        titleEn: `Sale talks for ${playerName} end without a deal`,
+        body: `${party}未接受交易条件。${negotiation.reason || ""}`,
+        bodyEn: `${partyEn} did not accept the deal. ${negotiation.reason || ""}`,
+      };
+    }
+    if (negotiation.status === "cancelled") {
+      return {
+        priority: 2,
+        title: `${playerName} 的出售谈判已取消`,
+        titleEn: `Sale talks for ${playerName} are cancelled`,
+        body: negotiation.reason || "出售条件已不再成立。",
+        bodyEn: `The sale can no longer proceed: ${negotiation.reason || "conditions changed"}.`,
+      };
+    }
+    return null;
+  }
 
   if (negotiation.status === "club_counter") {
     return {
@@ -250,7 +307,7 @@ function transferNegotiationMail(world, negotiation) {
   return null;
 }
 
-/** 将买入谈判的还价与终局结果同步进信箱。 */
+/** 将转会谈判的待处理报价与终局结果同步进信箱。 */
 export function syncTransferNegotiationsToInbox(world) {
   if (!world) return;
   ensureInbox(world);
@@ -330,7 +387,7 @@ export function resolveInboxAction(world, mailId, actionId) {
     }
   }
 
-  // —— 用户买入谈判还价 ——
+  // —— 用户买入/出售谈判 ——
   if (mail.ref?.kind === "transfer_negotiation") {
     if (act === "accept" || act === "reject") {
       const res = respondTransferNegotiation(world, mail.ref.negotiationId, act);

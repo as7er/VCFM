@@ -249,10 +249,12 @@ import {
 } from "./inbox.js";
 import {
   ensureTransferNegotiations,
+  findActiveSaleNegotiation,
   findActiveTransferNegotiation,
   listTransferNegotiations,
   processTransferNegotiationsDay,
   respondTransferNegotiation,
+  submitSaleListing,
   submitTransferNegotiation,
 } from "./transfer-negotiations.js";
 import {
@@ -329,9 +331,11 @@ export {
   pushInbox,
   inboxCatLabel,
   ensureTransferNegotiations,
+  findActiveSaleNegotiation,
   findActiveTransferNegotiation,
   listTransferNegotiations,
   respondTransferNegotiation,
+  submitSaleListing,
   submitTransferNegotiation,
   processRelationsDay,
   ensureSquadRelations,
@@ -1533,7 +1537,8 @@ export function processAiTransfers(world) {
     const candidates = [];
     for (const other of world.clubs) {
       if (other.id === club.id) continue;
-      if (other.id === world.userClubId && other.players.length <= 16) continue;
+      // 用户球员只能通过可处理的正式报价离队，不能被后台 AI 即时卖走。
+      if (other.id === world.userClubId) continue;
       // 略偏好同级
       const sameDiv = (other.division || 3) === (club.division || 3);
       for (const p of other.players) {
@@ -1707,7 +1712,7 @@ export function previewBuyDeal(world, playerId, fromClubId, years = 3, wageMult 
   };
 }
 
-export function sellPlayer(world, playerId) {
+export function sellPlayer(world, playerId, options = {}) {
   if (world.sacked) return { ok: false, msg: "你已被解雇，无法操作转会" };
   const win = assertTransferOpen(world);
   if (!win.ok) return win;
@@ -1718,37 +1723,12 @@ export function sellPlayer(world, playerId) {
   if (user.players.length <= 14) return { ok: false, msg: "阵容过少，无法再出售" };
   const player = user.players[idx];
   if (player.loan) return { ok: false, msg: "租借球员不可出售" };
-  // 随机买家
-  const buyers = world.clubs.filter((c) => c.id !== user.id && c.players.length < 26);
-  if (!buyers.length) return { ok: false, msg: "暂无买家" };
-  const buyer = buyers[Math.floor(rng() * buyers.length)];
   ensureStaff(user);
-  const price = Math.round(player.value * (0.85 + rng() * 0.2) * scoutSellMod(user));
-  if (buyer.money < price * 0.5) {
-    // 仍允许低价
-  }
-  user.players.splice(idx, 1);
-  recordFinanceEntry(user, price, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
-  recordFinanceEntry(buyer, -price, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
-  player.clubId = buyer.id;
-  player.number = null;
-  buyer.players.push(player);
-  assignSquadNumbers(buyer);
-  autoLineup(user);
-  autoLineup(buyer);
-
-  world.news.unshift({
-    day: world.day,
-    text: `📤 售出 ${player.name} 至 ${buyer.name}，收入 ${formatMoney(price)}`,
-  });
-  mediaTransfer(world, {
-    type: "sell",
-    playerName: player.name,
-    clubName: user.name,
-    otherName: buyer.name,
-    feeText: formatMoney(price),
-  });
-  return { ok: true, msg: `售出 ${player.name}，收入 ${formatMoney(price)}` };
+  const askingFee = Math.max(
+    1,
+    Math.round(Number(options.askingFee) || player.value * scoutSellMod(user))
+  );
+  return submitSaleListing(world, playerId, { askingFee });
 }
 
 /** 球员列表（带球队信息）；division 限制同级 */

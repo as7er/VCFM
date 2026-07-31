@@ -3,12 +3,11 @@
  * 用户可在转会页接受/拒绝
  */
 
-import { formatMoney, estimateValue, autoLineup, assignSquadNumbers } from "./models.js";
+import { formatMoney, estimateValue } from "./models.js";
 import { ensureContract } from "./contracts.js";
 import { isTransferWindowOpen } from "./transfers.js";
 import { ensureStaff, scoutBuyMod } from "./staff.js";
-import { pushMedia } from "./media.js";
-import { recordFinanceEntry } from "./finance-ledger.js";
+import { acceptIncomingTransferOffer } from "./transfer-negotiations.js";
 
 export function ensurePoachBids(world) {
   if (!Array.isArray(world.poachBids)) world.poachBids = [];
@@ -104,37 +103,25 @@ export function acceptPoachBid(world, bidId) {
   const buyer = world.clubs.find((c) => c.id === bid.buyerId);
   if (!user || !buyer) return { ok: false, msg: "俱乐部无效" };
   if (user.players.length <= 14) return { ok: false, msg: "阵容过少，无法放人" };
-
-  const idx = user.players.findIndex((p) => p.id === bid.playerId);
-  if (idx < 0) {
+  const player = user.players.find((p) => p.id === bid.playerId);
+  if (!player) {
     bid.status = "expired";
     return { ok: false, msg: "球员已不在队中" };
   }
-  const player = user.players[idx];
-  user.players.splice(idx, 1);
-  recordFinanceEntry(user, bid.fee, { category: "transfer", source: "poach-sale", season: world.season, day: world.day });
-  player.clubId = buyer.id;
-  player.number = null;
-  player.morale = Math.min(100, (player.morale || 70) + 5);
-  buyer.players.push(player);
-  recordFinanceEntry(buyer, -bid.fee, { category: "transfer", source: "poach-sale", season: world.season, day: world.day });
-  assignSquadNumbers(buyer);
-  autoLineup(user);
-  autoLineup(buyer);
-  bid.status = "accepted";
-
+  const result = acceptIncomingTransferOffer(world, {
+    playerId: player.id,
+    buyerClubId: buyer.id,
+    fee: bid.fee,
+    sourceBidId: bid.id,
+  });
+  if (!result.ok) return result;
+  bid.status = "negotiating";
+  bid.negotiationId = result.negotiation.id;
   world.news.unshift({
     day: world.day,
-    text: `🤝 接受 ${buyer.name} 报价，售出 ${player.name}，收入 ${formatMoney(bid.fee)}`,
+    text: `🤝 接受 ${buyer.name} 对 ${player.name} 的 ${formatMoney(bid.fee)} 报价，等待球员决定`,
   });
-  pushMedia(world, {
-    outlet: "转会速递",
-    headline: `${player.name} 加盟 ${buyer.name}`,
-    body: `${user.name} 接受了 ${formatMoney(bid.fee)} 的报价，转会尘埃落定。`,
-    tone: "neutral",
-    category: "transfer",
-  });
-  return { ok: true, msg: `已售出 ${player.name}，收入 ${formatMoney(bid.fee)}` };
+  return result;
 }
 
 export function rejectPoachBid(world, bidId) {

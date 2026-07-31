@@ -4,6 +4,7 @@ import { simulateMatchSync } from "../js/match.js";
 import { createWorld } from "../js/models.js";
 import { CLUB_TEMPLATES } from "../js/data.js";
 import { createSeededRandom, ensureMatchSeed } from "../js/random.js";
+import { ensureWorldStaff } from "../js/staff.js";
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -28,6 +29,8 @@ function matchFingerprint(result) {
 
 const startClub = CLUB_TEMPLATES.find((club) => club.division === 3);
 const source = createWorld(startClub.id, "Seed Audit");
+// 正常载入会在开赛前补齐并持久化职员；先初始化再克隆，才能比较同一存档。
+ensureWorldStaff(source);
 const fixture = source.fixtures.find((item) => item.home === source.userClubId || item.away === source.userClubId);
 assert.ok(fixture, "seed audit needs a user fixture");
 const worldA = clone(source);

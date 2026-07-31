@@ -7,10 +7,9 @@ import { ensureLoans } from "./loans.js";
 import { ensureStaff, staffWageBill } from "./staff.js";
 import { ensureFinanceLedger, financeLedgerSummary, recordFinanceEntry, resetFinanceLedgerSeason } from "./finance-ledger.js";
 import {
-  ensureTransferNegotiations,
-  isActiveTransferNegotiation,
-} from "./transfer-negotiations.js";
-import { transferNegotiationCashCost } from "./cash-reservations.js";
+  ACTIVE_TRANSFER_NEGOTIATION_STATUSES,
+  transferNegotiationCashCost,
+} from "./cash-reservations.js";
 import { ensureContract } from "./contracts.js";
 
 export const CLUB_FINANCE_VERSION = 2;
@@ -188,8 +187,11 @@ export function clubFinanceCommitments(world, club) {
     return { transfer: 0, contracts: 0, total: 0, weeklyWageIncrease: 0, items: [] };
   }
   const items = [];
-  for (const negotiation of ensureTransferNegotiations(world)) {
-    if (!isActiveTransferNegotiation(negotiation) || negotiation.buyerClubId !== club.id) continue;
+  for (const negotiation of Array.isArray(world.transferNegotiations) ? world.transferNegotiations : []) {
+    if (
+      !ACTIVE_TRANSFER_NEGOTIATION_STATUSES.has(negotiation?.status) ||
+      negotiation.buyerClubId !== club.id
+    ) continue;
     const wage = number(negotiation.wage);
     items.push({
       kind: "transfer",

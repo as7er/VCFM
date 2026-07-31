@@ -30,8 +30,8 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=176";
-import { nationFlagHtml } from "./flags.js?v=176";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=177";
+import { nationFlagHtml } from "./flags.js?v=177";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -212,6 +212,7 @@ import {
   syncPoachBidsToInbox,
   syncTransferNegotiationsToInbox,
   inboxCatLabel,
+  findActiveSaleNegotiation,
   findActiveTransferNegotiation,
   listTransferNegotiations,
   respondTransferNegotiation,
@@ -287,7 +288,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=176";
+} from "./avatar.js?v=177";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -5871,6 +5872,9 @@ function openBuyNegotiator(playerId, fromClubId) {
 
 function transferNegotiationStatus(negotiation, en) {
   const labels = {
+    market_search: en ? "Listed · finding buyers" : "已挂牌 · 寻找买家",
+    seller_review: en ? "Offer awaiting your decision" : "买方报价待处理",
+    buyer_review: en ? "Buyer reviewing counter-offer" : "买方审核还价",
     club_review: en ? "Club reviewing offer" : "俱乐部审核报价",
     club_counter: en ? "Club counter-offer" : "俱乐部还价",
     player_review: en ? "Player reviewing contract" : "球员审核合同",
@@ -5887,28 +5891,38 @@ function renderTransferNegotiations() {
   if (!box) return;
   const en = getLang() === "en";
   const title = $("#transfer-negotiations-title");
-  if (title) title.textContent = en ? "Transfer negotiations" : "买入谈判";
+  if (title) title.textContent = en ? "Transfer negotiations" : "转会谈判";
   const hint = $("#transfer-negotiations-hint");
   if (hint) {
     hint.textContent = en
-      ? "The selling club reviews the fee first, then the player reviews the contract. Counter-offers arrive in your inbox."
-      : "报价先由卖方俱乐部审核，再由球员审核合同；还价会进入信箱。";
+      ? "Purchases and sales progress over several days. Club decisions, counter-offers, player terms, and final checks use the same live data."
+      : "买入与出售均需数日推进；俱乐部决定、还价、球员意愿和成交复核读取同一份实时数据。";
   }
   const negotiations = listTransferNegotiations(world, { limit: 12 });
   if (!negotiations.length) {
-    box.innerHTML = `<p class="muted" style="margin:0">${en ? "No negotiations yet." : "暂无买入谈判"}</p>`;
+    box.innerHTML = `<p class="muted" style="margin:0">${en ? "No negotiations yet." : "暂无转会谈判"}</p>`;
     return;
   }
   box.innerHTML = negotiations
     .map((negotiation) => {
       const seller = world.clubs?.find((club) => club.id === negotiation.sellerClubId);
+      const buyer = world.clubs?.find((club) => club.id === negotiation.buyerClubId);
       const player = (world.clubs || [])
         .flatMap((club) => club.players || [])
         .find((candidate) => candidate.id === negotiation.playerId);
       const playerName = player?.name || negotiation.playerId;
-      const waiting = negotiation.status === "club_review" || negotiation.status === "player_review";
+      const sale = negotiation.kind === "user_sell";
+      const waiting = sale
+        ? negotiation.status === "market_search" || negotiation.status === "buyer_review" || negotiation.status === "player_review"
+        : negotiation.status === "club_review" || negotiation.status === "player_review";
       const counter = negotiation.status === "club_counter" || negotiation.status === "player_counter";
-      const actionHtml = counter
+      const actionHtml = sale && negotiation.status === "seller_review"
+        ? `<div class="poach-actions">
+            <button class="btn small primary" data-negotiation-accept="${escapeHtml(negotiation.id)}">${en ? "Accept" : "接受"}</button>
+            <button class="btn small" data-negotiation-counter="${escapeHtml(negotiation.id)}">${en ? "Counter" : "还价"}</button>
+            <button class="btn small" data-negotiation-reject="${escapeHtml(negotiation.id)}">${en ? "Reject" : "拒绝"}</button>
+          </div>`
+        : counter
         ? `<div class="poach-actions">
             <button class="btn small primary" data-negotiation-accept="${escapeHtml(negotiation.id)}">${en ? "Accept" : "接受"}</button>
             <button class="btn small" data-negotiation-reject="${escapeHtml(negotiation.id)}">${en ? "Walk away" : "退出"}</button>
@@ -5924,10 +5938,18 @@ function renderTransferNegotiations() {
       const reason = negotiation.reason && !en
         ? `<div class="muted" style="margin-top:0.2rem">${escapeHtml(negotiation.reason)}</div>`
         : "";
+      const counterpart = sale
+        ? buyer
+          ? clubDisplayName(buyer)
+          : en ? "Transfer market" : "转会市场"
+        : seller ? clubDisplayName(seller) : negotiation.sellerClubId;
+      const terms = sale && negotiation.wage == null
+        ? `${en ? "asking" : "挂牌价"} ${formatMoney(negotiation.askingFee || negotiation.fee)}`
+        : `${en ? "fee" : "转会费"} ${formatMoney(negotiation.fee)} · ${negotiation.years}${en ? "y" : "年"} / ${en ? "wage" : "周薪"} ${formatMoney(negotiation.wage)}`;
       return `<div class="poach-row">
         <div>
-          <strong>${escapeHtml(playerName)}</strong> · ${escapeHtml(seller ? clubDisplayName(seller) : negotiation.sellerClubId)}
-          <div class="muted">${escapeHtml(transferNegotiationStatus(negotiation, en))}${reply} · ${en ? "fee" : "转会费"} ${formatMoney(negotiation.fee)} · ${negotiation.years}${en ? "y" : "年"} / ${en ? "wage" : "周薪"} ${formatMoney(negotiation.wage)}</div>
+          <strong>${escapeHtml(playerName)}</strong> · ${escapeHtml(counterpart)}
+          <div class="muted">${escapeHtml(transferNegotiationStatus(negotiation, en))}${reply} · ${terms}</div>
           ${reason}
         </div>
         ${actionHtml}
@@ -5935,14 +5957,14 @@ function renderTransferNegotiations() {
     })
     .join("");
 
-  const handle = (id, action) => {
+  const handle = (id, action, options = {}) => {
     const target = negotiations.find((item) => item.id === id);
     if (!target) return;
     if (
       action === "accept" &&
       !confirm(en ? "Accept these terms? This may complete the transfer." : "确认接受这些条款？若为球员还价，转会将立即完成。")
     ) return;
-    const res = respondTransferNegotiation(world, id, action);
+    const res = respondTransferNegotiation(world, id, action, options);
     toast(en ? (res.ok ? "Negotiation updated" : res.msg) : res.msg);
     if (res.ok) {
       saveGame(world);
@@ -5954,6 +5976,18 @@ function renderTransferNegotiations() {
   });
   box.querySelectorAll("[data-negotiation-reject]").forEach((button) => {
     button.onclick = () => handle(button.dataset.negotiationReject, "reject");
+  });
+  box.querySelectorAll("[data-negotiation-counter]").forEach((button) => {
+    button.onclick = () => {
+      const target = negotiations.find((item) => item.id === button.dataset.negotiationCounter);
+      if (!target) return;
+      const value = prompt(
+        en ? `Current offer ${formatMoney(target.fee)}\nYour counter-offer:` : `当前报价 ${formatMoney(target.fee)}\n请输入还价：`,
+        String(Math.round((target.fee || 0) * 1.08))
+      );
+      if (value == null) return;
+      handle(target.id, "counter", { fee: parseMoneyInput(value) });
+    };
   });
   box.querySelectorAll("[data-negotiation-withdraw]").forEach((button) => {
     button.onclick = () => handle(button.dataset.negotiationWithdraw, "withdraw");
@@ -6133,6 +6167,7 @@ function renderTransfer() {
   st.innerHTML = sorted
     .map((p) => {
       const onLoan = !!p.loan;
+      const saleNegotiation = findActiveSaleNegotiation(world, p.id);
       return `<tr>
       <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}${onLoan ? ` <span class="badge loan">${en ? "loan" : "租"}</span>` : ""}</span></td>
       <td>${nationLabel(p)}</td>
@@ -6142,11 +6177,11 @@ function renderTransfer() {
       <td class="tr-actions">
         <button class="btn small" data-player-link="${p.id}">${en ? "Info" : "详情"}</button>
         <button class="btn small danger" data-sell="${p.id}" ${
-          buyDisabled || onLoan ? "disabled" : ""
-        }>${onLoan ? (en ? "On loan" : "租借中") : open ? (en ? "Sell" : "出售") : en ? "Closed" : "窗关"}</button>
+          buyDisabled || onLoan || saleNegotiation ? "disabled" : ""
+        }>${onLoan ? (en ? "On loan" : "租借中") : saleNegotiation ? (en ? "Listed" : "已挂牌") : open ? (en ? "List" : "挂牌") : en ? "Closed" : "窗关"}</button>
         <button class="btn small" data-loan-out="${p.id}" ${
-          buyDisabled || onLoan ? "disabled" : ""
-        }>${open && !onLoan ? (en ? "Loan out" : "外租") : en ? "—" : "—"}</button>
+          buyDisabled || onLoan || saleNegotiation ? "disabled" : ""
+        }>${open && !onLoan && !saleNegotiation ? (en ? "Loan out" : "外租") : en ? "—" : "—"}</button>
       </td>
     </tr>`;
     })
@@ -6154,9 +6189,17 @@ function renderTransfer() {
 
   st.querySelectorAll("[data-sell]").forEach((b) => {
     b.onclick = () => {
-      if (!confirm(en ? "Sell this player?" : "确认出售该球员？")) return;
-      const res = sellPlayer(world, b.dataset.sell);
-      toast(en ? (res.ok ? "Player sold" : "Sale failed") : res.msg);
+      const player = club.players.find((candidate) => candidate.id === b.dataset.sell);
+      if (!player) return;
+      const input = prompt(
+        en ? `${player.name}\nEstimated value ${formatMoney(player.value)}\nAsking price:` : `${player.name}\n参考身价 ${formatMoney(player.value)}\n请输入挂牌价：`,
+        String(player.value || 0)
+      );
+      if (input == null) return;
+      const askingFee = parseMoneyInput(input);
+      if (!confirm(en ? `List ${player.name} for ${formatMoney(askingFee)}?` : `以 ${formatMoney(askingFee)} 挂牌 ${player.name}？`)) return;
+      const res = sellPlayer(world, b.dataset.sell, { askingFee });
+      toast(en ? (res.ok ? "Player listed" : res.msg) : res.msg);
       if (res.ok) {
         saveGame(world);
         refreshAll();

@@ -1,6 +1,9 @@
 /** Cash reserved by active user transfer negotiations. */
 
 export const ACTIVE_TRANSFER_NEGOTIATION_STATUSES = new Set([
+  "market_search",
+  "seller_review",
+  "buyer_review",
   "club_review",
   "club_counter",
   "player_review",
