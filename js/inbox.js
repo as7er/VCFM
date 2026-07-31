@@ -17,6 +17,12 @@ import {
   ensureDealNegotiations,
   respondDealNegotiation,
 } from "./deal-negotiations.js";
+import {
+  ensurePlayerPathway,
+  playingTimeProgress,
+  playingTimeRoleLabel,
+  PLAYING_TIME_ROLES,
+} from "./player-pathway.js";
 
 const CAT_LABEL = {
   board: "董事会",
@@ -561,7 +567,9 @@ export function resolveInboxAction(world, mailId, actionId) {
       rebuff: "criticize",
     };
     if (mapAct[act]) {
-      const res = applyPlayerTalk(world, mail.ref.playerId, mapAct[act]);
+      const res = applyPlayerTalk(world, mail.ref.playerId, mapAct[act], {
+        requestedRole: mail.ref.requestedRole || null,
+      });
       if (res.ok) finishMail(mail, res.msg);
       return res;
     }
@@ -652,8 +660,17 @@ function maybePlayerRequest(world, user) {
     .filter((p) => isAvailable(p) && !p.loan)
     .map((p) => {
       ensureContract(p);
-      const apps = p.stats?.apps || p.season?.apps || 0;
-      const lowApps = apps < 3 && (world.day || 0) > 20 && (p.ovr || 0) >= 12 && !xi.has(p.id);
+      const playingTime = ensurePlayerPathway(p, user, world);
+      const usage = playingTimeProgress(world, user, p);
+      const target = PLAYING_TIME_ROLES[playingTime.role]?.minutesShare || 0.16;
+      const expectsRegularRole = target >= PLAYING_TIME_ROLES.rotation.minutesShare || playingTime.committed;
+      const lowApps =
+        (world.day || 0) > 20 &&
+        usage.availableMatches >= 3 &&
+        expectsRegularRole &&
+        usage.minutesShare < target * 0.62 &&
+        (p.ovr || 0) >= 12 &&
+        !xi.has(p.id);
       const shortContract = needsContractAttention(p) || (p.contractYears || 2) <= 1;
       const lowMorale = (p.morale || 70) <= 48;
       let score = 0;
@@ -661,7 +678,7 @@ function maybePlayerRequest(world, user) {
       if (shortContract) score += 2;
       if (lowMorale) score += 2;
       if (xi.has(p.id) && lowMorale) score += 1;
-      return { p, score, lowApps, shortContract, lowMorale };
+      return { p, score, lowApps, shortContract, lowMorale, playingTime, usage, target };
     })
     .filter((x) => x.score >= 2)
     .sort((a, b) => b.score - a.score);
@@ -673,16 +690,21 @@ function maybePlayerRequest(world, user) {
   if (world.inbox.some((m) => m.dedupeKey === key && m.status === "pending")) return;
 
   if (pick.lowApps) {
+    const actualPct = Math.round(pick.usage.minutesShare * 100);
+    const targetPct = Math.round(pick.target * 100);
+    const requestedRole = pick.playingTime.role === "prospect" || pick.playingTime.role === "squad"
+      ? "rotation"
+      : pick.playingTime.role;
     pushInbox(world, {
       category: "player",
       priority: 2,
       title: `${p.name} 要求更多出场时间`,
       titleEn: `${p.name} asks for more playing time`,
-      body: `${p.name}（${p.pos} · 能力 ${p.ovr}）认为自己坐板凳太久，希望近两周获得稳定机会。处理不当可能影响更衣室。`,
-      bodyEn: `${p.name} (${p.pos} · ability ${p.ovr}) feels he has spent too long on the bench and wants regular minutes over the next two weeks. Poor handling may affect the dressing room.`,
+      body: `${p.name} 当前定位为${playingTimeRoleLabel(pick.playingTime.role)}，最近 ${pick.usage.availableMatches} 场可用比赛只获得 ${pick.usage.minutes} 分钟（${actualPct}% / 定位目标约 ${targetPct}%），希望未来 28 天得到稳定机会。`,
+      bodyEn: `${p.name} is currently a ${playingTimeRoleLabel(pick.playingTime.role, "en")}. Across ${pick.usage.availableMatches} available matches he received ${pick.usage.minutes} minutes (${actualPct}% versus a ${targetPct}% role target) and wants a firm 28-day commitment.`,
       dedupeKey: key,
       expiresDay: (world.day || 0) + 10,
-      ref: { kind: "player", playerId: p.id, topic: "playtime" },
+      ref: { kind: "player", playerId: p.id, topic: "playtime", requestedRole },
       actions: [
         { id: "promise", label: "承诺出场", labelEn: "Promise minutes", primary: true },
         { id: "praise", label: "安抚表扬", labelEn: "Praise" },

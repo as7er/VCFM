@@ -82,10 +82,21 @@ assert.equal(unloadListeners.length, 1, "pending saves should register an unload
 
 const legacy = makeWorld(5);
 let repairCalls = 0;
-schema.migrateSaveSchema(legacy, () => {
-  repairCalls++;
+const migrationStages = [];
+schema.migrateSaveSchema(legacy, {
+  migrations: {
+    1: () => {
+      repairCalls++;
+      migrationStages.push(1);
+    },
+    2: () => {
+      repairCalls++;
+      migrationStages.push(2);
+    },
+  },
 });
-assert.equal(repairCalls, 1);
+assert.equal(repairCalls, 2);
+assert.deepEqual(migrationStages, [1, 2]);
 assert.equal(legacy.schemaVersion, schema.CURRENT_SAVE_SCHEMA_VERSION);
 assert.equal(save.importSaveText(JSON.stringify(legacy)).day, 5);
 

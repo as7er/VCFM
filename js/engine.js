@@ -295,6 +295,17 @@ import {
   noteUserMatchResult,
   ensureScoutMissions,
 } from "./worldpulse.js";
+import {
+  ensurePlayerPathway,
+  processPlayingTimePromises,
+  recordPlayerDevelopment,
+  setPlayingTimeRole,
+  playingTimeProgress,
+  playingTimeRoleLabel,
+  playerDevelopmentTimeline,
+  developmentAttrLabel,
+  PLAYING_TIME_ROLES,
+} from "./player-pathway.js";
 
 export {
   simulateMatch,
@@ -399,6 +410,13 @@ export {
   reputationTierLabel,
   resignCooldownLeft,
   isManagerEmployed,
+  ensurePlayerPathway,
+  setPlayingTimeRole,
+  playingTimeProgress,
+  playingTimeRoleLabel,
+  playerDevelopmentTimeline,
+  developmentAttrLabel,
+  PLAYING_TIME_ROLES,
 };
 
 function rng() {
@@ -424,7 +442,7 @@ function staffRatingSafe(club, role) {
   return club.staff[role]?.rating || 8;
 }
 
-function growYouthPlayer(player, growthRate) {
+function growYouthPlayer(player, growthRate, context = {}) {
   if (!player.potential) player.potential = Math.min(20, player.ovr + 3);
   if (player.ovr >= player.potential) return false;
   let grew = false;
@@ -436,8 +454,24 @@ function growYouthPlayer(player, growthRate) {
       // 未达潜力时才涨
       const room = player.potential - player.ovr;
       if (room > 0 || player.attrs[k] < player.potential) {
+        const before = Number(player.attrs[k] || 1);
+        const ovrBefore = Number(player.ovr || playerOverall(player));
         player.attrs[k] = Math.min(20, (player.attrs[k] || 1) + 1);
         grew = true;
+        if (context.record) {
+          recordPlayerDevelopment(player, {
+            season: context.world?.season,
+            day: context.world?.day,
+            type: "academy-training",
+            source: "youth-development",
+            changes: [{ attribute: k, before, after: player.attrs[k] }],
+            ovrBefore,
+            ovrAfter: playerOverall(player),
+            reason: "青训设施、教练能力与本周培养计划共同推动成长",
+            reasonEn: "Academy facilities, coaching and the weekly development plan drove improvement",
+            details: { academyLevel: context.club?.youth?.level || 1, growthRate },
+          });
+        }
       }
     }
   }
@@ -462,11 +496,11 @@ function processYouthDay(world) {
       const growth =
         (cfg.growth + coachGrowthBonus(club) + trainingGrowthBonus(club) * 0.5) * yMult;
       for (const yp of ya.players) {
-        growYouthPlayer(yp, growth);
+        growYouthPlayer(yp, growth, { world, club, record: club.id === world.userClubId });
       }
       for (const p of club.players) {
         if (p.fromYouth && p.age <= 22 && p.potential && p.ovr < p.potential && chance(growth * 0.35)) {
-          growYouthPlayer(p, growth * 0.5);
+          growYouthPlayer(p, growth * 0.5, { world, club, record: club.id === world.userClubId });
           p.wage = estimateWage(p);
         }
       }
@@ -541,6 +575,15 @@ export function promoteYouth(world, clubId, playerId, { silent = false } = {}) {
   autoLineup(club);
 
   if (!silent && clubId === world.userClubId) {
+    recordPlayerDevelopment(player, {
+      season: world.season,
+      day: world.day,
+      type: "milestone",
+      source: "academy-promotion",
+      reason: "从青训学院升入一线队",
+      reasonEn: "Promoted from the academy to the first team",
+      details: { clubId: club.id },
+    });
     world.news.unshift({
       day: world.day,
       text: `🌟 青训提拔：${player.name}（${POS_LABEL[player.pos]}）升入一线队，能力 ${player.ovr} / 潜力 ${player.potential}`,
@@ -613,6 +656,13 @@ export function advanceDay(world) {
     pushInbox(world, relOut.inboxDraft);
     events.push({ type: "player_unhappy", player: relOut.inboxDraft.playerName });
   }
+  const userClub = clubById(world, world.userClubId);
+  for (const draft of processPlayingTimePromises(world, userClub)) {
+    pushInbox(world, draft);
+    if (draft.priority >= 3) {
+      events.push({ type: "playing_time_breach", playerId: draft.ref?.playerId });
+    }
+  }
   processScoutMissions(world);
   processWorldPulse(world);
   processYouthPulse(world);
@@ -676,7 +726,6 @@ export function advanceDay(world) {
   }
 
   // 媒体日常脉搏
-  const userClub = clubById(world, world.userClubId);
   if (userClub && !world.seasonOver) {
     mediaDailyPulse(world, userClub);
     narrativeTablePulse(world, userClub, getSortedTable);
@@ -902,7 +951,11 @@ export function finishSeason(world) {
     const kept = [];
     for (const p of club.players) {
       // 退役前先归档本赛季，保留生涯/分赛季历史
-      const declined = agePlayerOneYear(p);
+      const declined = agePlayerOneYear(p, {
+        season: world.season,
+        day: world.day,
+        record: club.id === world.userClubId,
+      });
       if (declined && club.id === world.userClubId) declinedUser.push(p.name);
       const rc = retireChance(p.age);
       if (rc > 0 && chance(rc)) {
@@ -924,7 +977,11 @@ export function finishSeason(world) {
     // 青训
     const yKept = [];
     for (const p of ya.players) {
-      agePlayerOneYear(p);
+      agePlayerOneYear(p, {
+        season: world.season,
+        day: world.day,
+        record: club.id === world.userClubId,
+      });
       // 青训一般不退役；满 20 岁仍在青训则强制释放或提拔潜力高的
       if (p.age >= 20) {
         if (p.potential >= 14 && club.players.length < 23) {
@@ -933,6 +990,15 @@ export function finishSeason(world) {
           ensurePlayerHistory(p);
           club.players.push(p);
           if (club.id === world.userClubId) {
+            recordPlayerDevelopment(p, {
+              season: world.season,
+              day: world.day,
+              type: "milestone",
+              source: "academy-age-promotion",
+              reason: "达到青训年龄上限后升入一线队",
+              reasonEn: "Promoted after reaching the academy age limit",
+              details: { clubId: club.id },
+            });
             world.news.unshift({
               day: world.day,
               text: `🌱 ${p.name} 已超龄，自动升入一线队（能力 ${p.ovr} / 潜力 ${p.potential}）`,

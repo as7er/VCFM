@@ -4,6 +4,7 @@
  */
 
 import { pushMedia } from "./media.js";
+import { promiseMorePlayingTime } from "./player-pathway.js";
 
 export function ensurePlayerRelation(p) {
   if (!p) return p;
@@ -73,7 +74,7 @@ export function atmosphereLabel(score, lang = "zh") {
  * 约谈动作
  * @param {"praise"|"criticize"|"promise"|"contract"|"listen"} action
  */
-export function applyPlayerTalk(world, playerId, action) {
+export function applyPlayerTalk(world, playerId, action, options = {}) {
   const club = world?.clubs?.find((c) => c.id === world.userClubId);
   if (!club) return { ok: false, msg: "无球队" };
   const p = club.players.find((x) => x.id === playerId);
@@ -102,11 +103,9 @@ export function applyPlayerTalk(world, playerId, action) {
     msg = `批评了 ${p.name}`;
     cooldownDays = 4;
   } else if (action === "promise") {
-    dRel = 1;
-    dMor = 3;
-    p._promisedPlay = (world.day || 0) + 14;
-    p._promiseAppsBase = p.stats?.apps || 0;
-    msg = `向 ${p.name} 承诺更多出场`;
+    const promise = promiseMorePlayingTime(world, club, p, options.requestedRole || null);
+    if (!promise.ok) return promise;
+    msg = promise.msg;
     cooldownDays = 10; // 承诺类谈话较严肃，冷却长
   } else if (action === "contract") {
     dRel = 1;
@@ -140,46 +139,12 @@ export function applyPlayerTalk(world, playerId, action) {
   };
 }
 
-/** 检查承诺出场是否兑现（赛季出场少则伤关系） */
-export function processPromiseChecks(world) {
-  const club = world?.clubs?.find((c) => c.id === world.userClubId);
-  if (!club) return;
-  const day = world.day || 0;
-  for (const p of club.players || []) {
-    if (!p._promisedPlay) continue;
-    if (day < p._promisedPlay) continue;
-    ensurePlayerRelation(p);
-    const apps = p.stats?.apps || 0;
-    // 承诺到期：若近两周几乎没上（用场次粗判）— 简化：承诺窗口结束时 apps 未增加则惩罚
-    const base = p._promiseAppsBase ?? 0;
-    if (apps <= base) {
-      p.relation = Math.max(-2, (p.relation || 0) - 1);
-      p.morale = Math.max(25, Math.round((p.morale || 70) - 5));
-      world.news?.unshift({
-        day,
-        text: `😤 ${p.name} 认为出场承诺未兑现，关系下降。`,
-      });
-    } else {
-      p.relation = Math.min(2, (p.relation || 0) + 0); // 已在约谈时加过
-    }
-    delete p._promisedPlay;
-    delete p._promiseAppsBase;
-  }
-}
-
-export function beginPromiseTrack(p) {
-  if (!p) return;
-  p._promiseAppsBase = p.stats?.apps || 0;
-}
-
 /** 每日：氛围新闻 + 低关系可能发信 */
 export function processRelationsDay(world) {
   if (!world || world.seasonOver || world.sacked) return;
   const club = world.clubs?.find((c) => c.id === world.userClubId);
   if (!club) return;
   ensureSquadRelations(club);
-  processPromiseChecks(world);
-
   const atm = clubAtmosphere(club);
   club._atmosphere = atm;
 

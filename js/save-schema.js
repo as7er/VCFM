@@ -1,4 +1,4 @@
-export const CURRENT_SAVE_SCHEMA_VERSION = 1;
+export const CURRENT_SAVE_SCHEMA_VERSION = 2;
 
 function isRecord(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -41,10 +41,25 @@ export function validateSaveStructure(world) {
  * Runs legacy repair before committing the new schema marker. Current saves still
  * run the idempotent repair pass so newly introduced derived fields stay healthy.
  */
-export function migrateSaveSchema(world, repairWorld) {
+export function migrateSaveSchema(world, config) {
   validateSaveStructure(world);
-  if (typeof repairWorld !== "function") throw new Error("save migration hook is missing");
-  repairWorld(world, world.schemaVersion == null ? 0 : Number(world.schemaVersion));
-  world.schemaVersion = CURRENT_SAVE_SCHEMA_VERSION;
+  const legacyRepair = typeof config === "function" ? config : null;
+  const migrations = config?.migrations || {};
+  const ensureCurrent = config?.ensureCurrent || null;
+  const originalVersion = world.schemaVersion == null ? 0 : Number(world.schemaVersion);
+  let version = originalVersion;
+  while (version < CURRENT_SAVE_SCHEMA_VERSION) {
+    const targetVersion = version + 1;
+    const migrate = migrations[targetVersion] || legacyRepair;
+    if (typeof migrate !== "function") {
+      throw new Error(`save migration v${version}->v${targetVersion} is missing`);
+    }
+    migrate(world, { fromVersion: version, toVersion: targetVersion });
+    world.schemaVersion = targetVersion;
+    version = targetVersion;
+  }
+  if (originalVersion === CURRENT_SAVE_SCHEMA_VERSION && typeof ensureCurrent === "function") {
+    ensureCurrent(world, { fromVersion: version, toVersion: version });
+  }
   return world;
 }

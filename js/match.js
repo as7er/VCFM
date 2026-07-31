@@ -73,6 +73,7 @@ import {
 } from "./sim/adapt.js";
 import { eligiblePlayerIds } from "./squad-registration.js";
 import { deriveMatchAnalysis } from "./match-analysis.js";
+import { recordMatchPlayingTime } from "./player-pathway.js";
 
 let activeRandom = Math.random;
 function rng() {
@@ -2403,6 +2404,20 @@ function updateMorale(club, gf, ga) {
   }
 }
 
+function appearedPlayerIds(state, club) {
+  const sk = sideKey(state, club);
+  const ids = new Set(state.startingLineups?.[sk] || []);
+  for (const event of state.events || []) {
+    if (event.type === "sub" && event.teamId === club.id && event.inId) ids.add(event.inId);
+  }
+  return ids;
+}
+
+function appearedPlayers(state, club) {
+  const ids = appearedPlayerIds(state, club);
+  return (club.players || []).filter((player) => ids.has(player.id));
+}
+
 /**
  * 根据本场事件与比分，给出场球员打 1–10 评分（FM 风格）
  * @returns {{ home: object[], away: object[], motm: object|null }}
@@ -2436,7 +2451,7 @@ function applyMatchRatings(state) {
 
   const rateSide = (club, gf, ga, won, drew) => {
     const list = [];
-    const xi = getLineupPlayers(club);
+    const xi = appearedPlayers(state, club);
     for (const p of xi) {
       if (!p) continue;
       const st = ensureStats(p);
@@ -2551,6 +2566,15 @@ export function finalizeMatch(state) {
         player.lastPlayedDay = world.day;
       }
     }
+    if (club.id === world.userClubId) {
+      recordMatchPlayingTime(world, club, {
+        fixture,
+        startedIds: started,
+        events,
+        eligibleIds: state.eligiblePlayerIds?.[side],
+        isCup,
+      });
+    }
   }
 
   // 上座与票价只能由开赛前已知的信息决定。这里先锁定上下文，稍后再做账，
@@ -2577,7 +2601,7 @@ export function finalizeMatch(state) {
   // 国内联赛和洲际赛事分别记账；国内杯暂不设球员榜。
   if (!isCup) {
     const countApps = (club) => {
-      for (const p of getLineupPlayers(club)) {
+      for (const p of appearedPlayers(state, club)) {
         ensureStats(p).apps++;
         ensureLeagueStats(p, club.division, club.id).apps++;
       }
@@ -2603,7 +2627,7 @@ export function finalizeMatch(state) {
     }
   } else if (String(state.competitionType || "").startsWith("continental")) {
     const countApps = (club) => {
-      for (const p of getLineupPlayers(club)) continentalStats(state, p, club).apps++;
+      for (const p of appearedPlayers(state, club)) continentalStats(state, p, club).apps++;
     };
     countApps(home);
     countApps(away);

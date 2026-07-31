@@ -5748,6 +5748,48 @@ html[data-theme="light"] .badge-chip {
   flex-wrap: wrap;
   gap: 0.35rem;
 }
+.playing-time-role-card {
+  margin: 0.45rem 0;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg2);
+}
+.playing-time-role-card p { margin: 0.3rem 0; line-height: 1.45; }
+.playing-time-role-head,
+.playing-time-role-controls,
+.player-development-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.playing-time-role-controls select { flex: 1; min-width: 0; }
+.player-development-log { display: grid; gap: 0.4rem; }
+.player-development-entry {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg2);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.player-development-entry-head { margin-bottom: 0.28rem; }
+.player-development-entry-head span { color: var(--muted); white-space: nowrap; }
+.development-change,
+.development-overall {
+  display: inline-block;
+  margin: 0.1rem 0.2rem 0.1rem 0;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.12);
+}
+.development-change.positive { color: var(--good); }
+.development-change.negative { color: var(--bad); }
+@media (max-width: 520px) {
+  .playing-time-role-controls { align-items: stretch; flex-direction: column; }
+  .playing-time-role-controls .btn { width: 100%; }
+}
 .player-dot.dragging, .tac-slot.dragging { opacity: 0.55; }
 
 /* ===== 赛前简报 / 生涯 / 设施 / 转会 / PWA ===== */
@@ -6571,7 +6613,7 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
 .view-switch button.active { background: var(--primary); color: #fff; }
 #squad-table.squad-compact .squad-detail { display: none; }
 #squad-table.squad-compact { min-width: 46rem; }
-#squad-table.squad-full { min-width: 78rem; }
+#squad-table.squad-full { min-width: 84rem; }
 #squad-table th:first-child,
 #squad-table td:first-child {
   position: sticky;

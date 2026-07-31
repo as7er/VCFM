@@ -18,6 +18,7 @@ import {
 } from "./data.js";
 import { applyClubBranding } from "./branding.js";
 import { CURRENT_SAVE_SCHEMA_VERSION } from "./save-schema.js";
+import { recordPlayerDevelopment } from "./player-pathway.js";
 
 let _id = 1;
 export function uid(prefix = "p") {
@@ -314,7 +315,9 @@ function changeRandomAgeingAttr(p, keys, delta) {
  * 年龄 +1，并按位置拆分身体、技术与心智能力曲线。
  * 边锋/前锋更早失去爆发力，门将与中卫更晚；经验属性可在成熟期继续增长。
  */
-export function agePlayerOneYear(p) {
+export function agePlayerOneYear(p, context = {}) {
+  const beforeAttrs = { ...(p.attrs || {}) };
+  const ovrBefore = Number(p.ovr || playerOverall(p));
   p.age = (p.age || 17) + 1;
   let declined = false;
   const summary = { physical: 0, technical: 0, mental: 0, improvedMental: 0 };
@@ -367,6 +370,33 @@ export function agePlayerOneYear(p) {
   p.wage = p.fromYouth && p.age <= 18
     ? Math.max(200, Math.round(estimateWage(p) * 0.25))
     : estimateWage(p);
+  if (context.record) {
+    const changes = Object.keys(p.attrs || {})
+      .filter((key) => Number(p.attrs[key]) !== Number(beforeAttrs[key]))
+      .map((key) => ({ attribute: key, before: beforeAttrs[key], after: p.attrs[key] }));
+    const improved = changes.filter((change) => Number(change.after) > Number(change.before)).length;
+    const declinedCount = changes.length - improved;
+    recordPlayerDevelopment(p, {
+      season: context.season,
+      day: context.day,
+      type: "ageing",
+      source: "season-transition",
+      changes,
+      ovrBefore,
+      ovrAfter: p.ovr,
+      reason: declinedCount && improved
+        ? "年龄曲线带来经验成长与身体衰退"
+        : declinedCount
+          ? "位置与年龄对应的自然衰退"
+          : "成熟期经验与比赛理解增长",
+      reasonEn: declinedCount && improved
+        ? "Ageing combined experience gains with physical decline"
+        : declinedCount
+          ? "Natural position-specific ageing decline"
+          : "Maturity improved experience and game understanding",
+      details: { age: p.age, position: p.pos, ageing: { ...summary } },
+    });
+  }
   return declined;
 }
 

@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v181** · 存档可靠性与统一验证 |
+| 当前版本 | **v182** · 出场承诺与成长记录 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -55,7 +55,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 ### 球队管理
 
-- **阵容与球员**：体能、士气、伤病、停赛、潜力、号码、合同、赛季数据和近 5 场滚动状态；联赛与洲际赛事使用 25 人报名名单、本土培养名额和 U21/B 名单资格，自动阵容与比赛替补读取同一资格结果。
+- **阵容与球员**：体能、士气、伤病、停赛、潜力、号码、合同、赛季数据和近 5 场滚动状态；五档出场定位按逐场真实分钟滚动复核，训练、青训成长和年龄曲线会留下可解释的属性变化记录；联赛与洲际赛事使用 25 人报名名单、本土培养名额和 U21/B 名单资格。
 - **战术**：阵型、风格、压迫、节奏、宽度、防线、槽位角色、核心球员与战术板拖拽换位。
 - **训练与青训**：训练重点、强度、赛前备战、青训名单和球员成长；可委托助理教练按赛程与阵容短板安排。
 - **转会与合同**：夏窗、冬窗、续约、租借、自由球员和 AI 报价；买入、出售、续约与租借均按现实参与方逐阶段审核、还价或拒绝，成交前不会移动球员。
@@ -69,6 +69,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **信息系统**：信箱、世界新闻、媒体、球探任务、关注列表、球员对话、全局搜索和可连续浏览的球员资料。
 - **存档**：3 个槽位、自动保存、手动保存、JSON 导出与导入；旧存档会在加载时补齐新增字段。
 - **v181 存档可靠性**：Worker 压缩失败时同步保存各槽最新快照，页面退出前冲刷待存队列；版本化 Schema 与结构校验保护旧档迁移和导入。
+- **v182 球员路径**：出场承诺按可用比赛、首发、替补和实际分钟评估，连续违约会影响关系、士气与离队意愿；比赛结算修正为所有真实出场球员统一记出场与评分。
 - **离线与性能**：Service Worker 按资源独立预缓存，单项失败不再清空整批离线资源；大型比赛视图只在进入比赛或战报时加载。
 - **统一验证**：核心审计由 `node scripts/verify.mjs` 统一执行，`--full` 追加 24 场真实性校准；GitHub Actions 覆盖 push、PR、手动与定时验证。
 
@@ -130,7 +131,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v181** · save reliability and unified verification |
+| Current version | **v182** · playing-time promises and development records |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -169,7 +170,7 @@ Repository: https://github.com/as7er/vcfm
 
 ### Club management
 
-- **Squad and players**: fitness, morale, injuries, suspensions, potential, numbers, contracts, season statistics, and rolling five-match form. League and continental matches use 25-player registrations, homegrown quotas, and U21/List B eligibility; lineup and substitution selection consume the same eligibility result.
+- **Squad and players**: fitness, morale, injuries, suspensions, potential, numbers, contracts, season statistics, and rolling five-match form. Five playing-time roles are reviewed against real match minutes, while training, academy growth, and ageing create explainable attribute-change records. League and continental matches use 25-player registrations, homegrown quotas, and U21/List B eligibility.
 - **Tactics**: formation, style, pressing, tempo, width, defensive line, slot roles, core player, and drag-and-drop changes.
 - **Training and youth**: training focus, intensity, match preparation, youth development, and assistant-manager delegation based on schedule and squad weaknesses.
 - **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Purchases, sales, renewals, and loans pass through the relevant clubs and players in staged reviews, counters, or rejections; players do not move before completion.
@@ -183,6 +184,7 @@ Repository: https://github.com/as7er/vcfm
 - **Information systems**: inbox, world news, media, scouting missions, shortlist, player talks, global search, and continuous player-profile browsing.
 - **Saves**: 3 slots, autosave, manual save, and JSON export/import. Older saves are migrated with defaults for new fields.
 - **v181 save reliability**: compression-worker failures synchronously persist each slot's newest snapshot, pending jobs flush before unload, and a versioned schema validates migrations and imports.
+- **v182 player pathways**: playing-time promises use availability, starts, substitute appearances, and actual minutes; repeated breaches affect morale, relationships, and willingness to stay. Match settlement now credits every real participant with an appearance and rating.
 - **Offline and performance**: Service Worker assets are precached independently so one failure cannot discard the batch; the large match view loads only when entering a match or archived report.
 - **Unified verification**: `node scripts/verify.mjs` runs the core audits, while `--full` adds the 24-match realism calibration. GitHub Actions covers pushes, pull requests, manual runs, and a schedule.
 

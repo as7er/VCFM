@@ -6,6 +6,17 @@ import { createWorld } from "../js/models.js";
 const EXPECTED_CLUBS = 198;
 const ABILITY_REFERENCE_POPULATION = 3572;
 
+function seededRandom(seed) {
+  let value = seed >>> 0;
+  return () => {
+    value += 0x6d2b79f5;
+    let next = value;
+    next = Math.imul(next ^ (next >>> 15), next | 1);
+    next ^= next + Math.imul(next ^ (next >>> 7), next | 61);
+    return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /** 与 models.calibrateWorldAbilityDistribution 同源的人口缩放配额 */
 function expectedAbilityQuotas(population, reference = ABILITY_REFERENCE_POPULATION) {
   const scaled = (base) => Math.max(1, Math.round(base * (population / reference)));
@@ -49,7 +60,15 @@ assert.equal(CLUB_TEMPLATES.filter((club) => club.division === 10 && club.realit
 
 const startClub = CLUB_TEMPLATES.find((club) => club.division === 3);
 const worlds = [];
-for (let run = 0; run < 4; run++) worlds.push(createWorld(startClub.id, `Reality Audit ${run + 1}`));
+const originalRandom = Math.random;
+try {
+  for (let run = 0; run < 4; run++) {
+    Math.random = seededRandom(0x1822026 + run);
+    worlds.push(createWorld(startClub.id, `Reality Audit ${run + 1}`));
+  }
+} finally {
+  Math.random = originalRandom;
+}
 
 const abilityRuns = worlds.map((world) => {
   const players = world.clubs.flatMap((club) => club.players);

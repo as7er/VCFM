@@ -30,7 +30,7 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=181";
+import { nationFlagHtml } from "./flags.js?v=182";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -234,6 +234,13 @@ import {
   ensureSquadRelations,
   ensurePlayerRelation,
   applyPlayerTalk,
+  ensurePlayerPathway,
+  setPlayingTimeRole,
+  playingTimeProgress,
+  playingTimeRoleLabel,
+  playerDevelopmentTimeline,
+  developmentAttrLabel,
+  PLAYING_TIME_ROLES,
   financeSnapshot,
   startScoutMission,
   ensureScoutMissions,
@@ -300,7 +307,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=181";
+} from "./avatar.js?v=182";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -388,7 +395,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=181").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=182").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1044,6 +1051,9 @@ function repairWorldFields(w) {
       ensureHonors(p);
       ensurePlayerInjury(p);
     }
+    if (c.id === w.userClubId) {
+      for (const p of c.players || []) ensurePlayerPathway(p, c, w);
+    }
   }
   for (const p of w.freeAgents || []) {
     ensureRealisticPlayerTalent(p);
@@ -1070,8 +1080,19 @@ function repairWorldFields(w) {
   }
 }
 
+function repairPlayerPathways(w) {
+  const club = (w.clubs || []).find((item) => item.id === w.userClubId);
+  for (const player of club?.players || []) ensurePlayerPathway(player, club, w);
+}
+
 function migrateWorld(w) {
-  return migrateSaveSchema(w, repairWorldFields);
+  return migrateSaveSchema(w, {
+    migrations: {
+      1: repairWorldFields,
+      2: repairPlayerPathways,
+    },
+    ensureCurrent: repairWorldFields,
+  });
 }
 
 function enterMain() {
@@ -3751,6 +3772,9 @@ function renderSquad() {
       const avgR = seasonAvgRating(p);
       const lastR = s.lastRating != null ? s.lastRating : null;
       const form = playerForm(p);
+      const playingTime = ensurePlayerPathway(p, club, world);
+      const playingProgress = playingTimeProgress(world, club, p);
+      const playingTitle = `${playingTimeRoleLabel(playingTime.role, en ? "en" : "zh")} · ${Math.round(playingProgress.minutesShare * 100)}% / ${Math.round(playingProgress.target * 100)}%`;
       const formTitle = form == null
         ? (en ? "Form: no recent ratings yet" : "状态：暂无近期评分")
         : `${en ? "Form" : "状态"} ${formatForm(form)} · ${formToneLabel(form, en ? "en" : "zh")} (${en ? "last" : "近"}${(s.recentRatings || []).length}${en ? " apps" : "场"})`;
@@ -3800,6 +3824,7 @@ function renderSquad() {
         <td>${Math.round(p.fitness ?? 0)}%</td>
         <td class="squad-detail">${Math.round(p.morale ?? 0)}</td>
         <td class="rel-cell squad-detail rel-${relationTone(p.relation)}">${escapeHtml(relationLabel((ensurePlayerRelation(p), p.relation), getLang() === "en" ? "en" : "zh"))}</td>
+        <td class="squad-detail" title="${escapeHtml(playingTitle)}"><span class="badge ${playingProgress.fulfilment >= 0.9 ? "DEF" : playingProgress.fulfilment >= 0.7 ? "MID" : "ATT"}">${escapeHtml(playingTimeRoleLabel(playingTime.role, en ? "en" : "zh"))}</span></td>
         <td class="contract-cell">${contractCell}</td>
         <td class="squad-detail">${formatMoney(p.value)}</td>
         <td class="squad-detail">${formatMoney(p.wage)}</td>
@@ -4019,6 +4044,8 @@ function showPlayerModal(playerId, context = {}) {
       }
     </p>
 
+    ${!fromOther ? `<h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${en ? "Development record" : "成长记录"}</h3>${renderPlayerDevelopmentPanel(player)}` : ""}
+
     <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem">${en ? "Career total (club)" : "生涯总计（俱乐部）"}</h3>
     <p class="muted" style="margin:0">${en ? "Apps" : "出场"} ${career.apps}
       ${
@@ -4190,6 +4217,16 @@ function renderPlayerTalkPanel(player) {
   if (!player || world?.sacked) return "";
   ensurePlayerRelation(player);
   const en = getLang() === "en";
+  const club = world.clubs?.find((item) => item.id === world.userClubId);
+  const playingTime = ensurePlayerPathway(player, club, world);
+  const progress = playingTimeProgress(world, club, player);
+  const targetPct = Math.round(progress.target * 100);
+  const actualPct = Math.round(progress.minutesShare * 100);
+  const promise = playingTime.promise;
+  const roleCooling = Number(playingTime.nextChangeDay || 0) > Number(world.day || 0);
+  const roleOptions = Object.values(PLAYING_TIME_ROLES)
+    .map((role) => `<option value="${role.key}"${role.key === playingTime.role ? " selected" : ""}>${escapeHtml(en ? role.labelEn : role.label)} · ${Math.round(role.minutesShare * 100)}%</option>`)
+    .join("");
   const cd = player.talkCooldown || 0;
   const cooling = cd > (world.day || 0);
   return `<div class="player-talk-panel">
@@ -4198,14 +4235,49 @@ function renderPlayerTalkPanel(player) {
       <strong class="rel-${relationTone(player.relation)}">${escapeHtml(relationLabel(player.relation, en ? "en" : "zh"))}</strong>
       ${cooling ? ` · ${en ? "Cooldown until D" : "冷却至第"}${cd}${en ? "" : " 天"}` : ""}
     </p>
+    <div class="playing-time-role-card">
+      <div class="playing-time-role-head">
+        <strong>${en ? "Playing-time status" : "出场定位承诺"}</strong>
+        <span class="badge ${progress.fulfilment >= 0.9 ? "DEF" : progress.fulfilment >= 0.7 ? "MID" : "ATT"}">${actualPct}% / ${targetPct}%</span>
+      </div>
+      <p class="muted">${escapeHtml(playingTimeRoleLabel(playingTime.role, en ? "en" : "zh"))} · ${progress.availableMatches} ${en ? "available matches" : "场可用比赛"} · ${progress.appearances} ${en ? "apps" : "次出场"} · ${progress.starts} ${en ? "starts" : "次首发"} · ${progress.minutes} ${en ? "minutes" : "分钟"}${promise?.dueDay ? ` · ${en ? "review D" : "复核 D"}${promise.dueDay}` : ` · ${en ? "inferred, not promised" : "当前为阵容推定，尚未正式承诺"}`}</p>
+      <div class="playing-time-role-controls">
+        <select data-playing-time-role aria-label="${escapeHtml(en ? "Playing-time role" : "出场定位")}">${roleOptions}</select>
+        <button type="button" class="btn small" data-playing-time-save ${roleCooling ? "disabled" : ""}>${en ? "Agree role" : "确认承诺"}</button>
+      </div>
+      ${player.wantsTransfer ? `<p class="stat-low">${en ? "Repeated broken promises have made the player consider leaving." : "连续违约已使球员考虑离队。"}</p>` : ""}
+    </div>
     <div class="player-talk-actions">
       <button type="button" class="btn small primary" data-talk="praise" ${cooling ? "disabled" : ""}>${en ? "Praise" : "表扬"}</button>
       <button type="button" class="btn small" data-talk="listen" ${cooling ? "disabled" : ""}>${en ? "Listen" : "倾听"}</button>
-      <button type="button" class="btn small" data-talk="promise" ${cooling ? "disabled" : ""}>${en ? "Promise mins" : "承诺出场"}</button>
       <button type="button" class="btn small" data-talk="contract" ${cooling ? "disabled" : ""}>${en ? "Contract" : "谈续约"}</button>
       <button type="button" class="btn small" data-talk="criticize" ${cooling ? "disabled" : ""}>${en ? "Criticize" : "批评"}</button>
     </div>
   </div>`;
+}
+
+function renderPlayerDevelopmentPanel(player) {
+  const en = getLang() === "en";
+  const entries = playerDevelopmentTimeline(player, 10);
+  if (!entries.length) {
+    return `<div class="player-development-empty muted">${en ? "No recorded attribute changes yet. Weekly training and season transitions will add explainable entries." : "暂无属性变化记录；每周训练和赛季转换后会记录具体变化与原因。"}</div>`;
+  }
+  return `<div class="player-development-log">${entries.map((entry) => {
+    const date = entry.season != null
+      ? `S${entry.season}${entry.day != null ? ` · D${entry.day}` : ""}`
+      : entry.day != null ? `D${entry.day}` : "—";
+    const changes = (entry.changes || []).map((change) => {
+      const sign = change.delta > 0 ? "+" : "";
+      return `<span class="development-change ${change.delta > 0 ? "positive" : "negative"}">${escapeHtml(developmentAttrLabel(change.attribute, en ? "en" : "zh"))} ${change.before}→${change.after} (${sign}${change.delta})</span>`;
+    }).join(" ");
+    const overall = entry.ovrBefore != null && entry.ovrAfter != null && entry.ovrBefore !== entry.ovrAfter
+      ? `<span class="development-overall">OVR ${entry.ovrBefore}→${entry.ovrAfter}</span>`
+      : "";
+    return `<div class="player-development-entry">
+      <div class="player-development-entry-head"><strong>${escapeHtml(en ? entry.reasonEn : entry.reason)}</strong><span>${escapeHtml(date)}</span></div>
+      <div>${changes || `<span class="badge MID">${escapeHtml(en ? "Milestone" : "生涯节点")}</span>`} ${overall}</div>
+    </div>`;
+  }).join("")}</div>`;
 }
 
 function relationTone(rel) {
@@ -4227,6 +4299,17 @@ function bindPlayerTalkActions(player, fromOther, browseContext = null) {
         refreshAll();
       }
     };
+  });
+  document.querySelector("[data-playing-time-save]")?.addEventListener("click", () => {
+    const club = world.clubs?.find((item) => item.id === world.userClubId);
+    const role = document.querySelector("[data-playing-time-role]")?.value;
+    const res = setPlayingTimeRole(world, club, player, role, { source: "manager-profile" });
+    toast(res.msg);
+    if (res.ok) {
+      saveGame(world);
+      showPlayerModal(player.id, browseContext || {});
+      refreshAll();
+    }
   });
 }
 

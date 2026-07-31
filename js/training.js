@@ -10,6 +10,7 @@ import {
   injuryRiskMultiplier,
   processInjuryRecoveryDay,
 } from "./injuries.js";
+import { recordPlayerDevelopment } from "./player-pathway.js";
 
 export const TRAINING_FOCUSES = {
   recovery: {
@@ -227,7 +228,7 @@ function ageGrowthFactor(age) {
   return 0.08;
 }
 
-function growFirstTeamPlayer(player, growthRate, focusCfg) {
+function growFirstTeamPlayer(player, growthRate, focusCfg, context = {}) {
   if (!player || player.injured > 0) return false;
   if (!player.potential) player.potential = Math.min(20, (player.ovr || 10) + 1);
   if ((player.ovr || 0) >= player.potential) return false;
@@ -239,11 +240,33 @@ function growFirstTeamPlayer(player, growthRate, focusCfg) {
   if (!keys.length) return false;
 
   const k = keys[Math.floor(rng() * keys.length)];
+  const before = Number(player.attrs[k] || 1);
+  const ovrBefore = Number(player.ovr || playerOverall(player));
   player.attrs[k] = Math.min(20, (player.attrs[k] || 1) + 1);
   player.ovr = playerOverall(player);
   player.value = estimateValue(player);
   if (!player.fromYouth || player.age > 18) {
     player.wage = estimateWage(player);
+  }
+  if (context.record) {
+    recordPlayerDevelopment(player, {
+      season: context.world?.season,
+      day: context.world?.day,
+      type: "training",
+      source: "first-team-training",
+      changes: [{ attribute: k, before, after: player.attrs[k] }],
+      ovrBefore,
+      ovrAfter: player.ovr,
+      reason: `${focusCfg.label}与${context.intensity?.label || "正常"}强度训练见效`,
+      reasonEn: `${focusCfg.key} focus and ${context.intensity?.key || "normal"} intensity produced improvement`,
+      details: {
+        focus: focusCfg.key,
+        intensity: context.intensity?.key || null,
+        coachRating: context.coachRating ?? null,
+        growthRate: Math.round(growthRate * ageGrowthFactor(player.age) * 1000) / 1000,
+        ageFactor: ageGrowthFactor(player.age),
+      },
+    });
   }
   return true;
 }
@@ -525,7 +548,13 @@ export function processTrainingDay(world) {
         coachGrowthBonus(club) +
         trainingGrowthBonus(club);
       for (const p of club.players || []) {
-        if (growFirstTeamPlayer(p, growthRate, focus)) {
+        if (growFirstTeamPlayer(p, growthRate, focus, {
+          world,
+          club,
+          intensity: inten,
+          coachRating: coach,
+          record: isUser,
+        })) {
           if (isUser) grewNames.push(p.name);
         }
       }
