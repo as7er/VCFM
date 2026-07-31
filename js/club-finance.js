@@ -1,7 +1,7 @@
 /** Shared club finances: every club earns and pays from the same visible data. */
 
 import { DIVISIONS } from "./data.js";
-import { ensureFacilities, facilityWeeklyUpkeep, youthFacilityInfo } from "./facilities.js";
+import { ensureFacilities, facilityWeeklyUpkeep, stadiumInfo, youthFacilityInfo } from "./facilities.js";
 import { ensureLoans } from "./loans.js";
 import { ensureStaff, staffWageBill } from "./staff.js";
 import { ensureFinanceLedger, financeLedgerSummary, recordFinanceEntry, resetFinanceLedgerSeason } from "./finance-ledger.js";
@@ -140,6 +140,95 @@ export function recordMatchdayFinance(club, gate, day, season = null) {
   finance.lastTicketFactors = Array.isArray(gate?.factors) ? gate.factors : [];
   finance.seasonHomeGates += 1;
   return income;
+}
+
+export function ensureClubFinanceBudget(club) {
+  const finance = ensureClubFinance(club);
+  if (!finance.budgetPlan || typeof finance.budgetPlan !== "object") {
+    finance.budgetPlan = {};
+  }
+  const reserveWeeks = Math.round(number(finance.budgetPlan.reserveWeeks) || 8);
+  const transferShare = Math.round(number(finance.budgetPlan.transferShare) || 70);
+  finance.budgetPlan.reserveWeeks = Math.max(4, Math.min(20, reserveWeeks));
+  finance.budgetPlan.transferShare = Math.max(25, Math.min(100, transferShare));
+  return finance.budgetPlan;
+}
+
+export function updateClubFinanceBudget(club, patch = {}) {
+  const plan = ensureClubFinanceBudget(club);
+  if (patch.reserveWeeks != null) {
+    plan.reserveWeeks = Math.max(4, Math.min(20, Math.round(number(patch.reserveWeeks))));
+  }
+  if (patch.transferShare != null) {
+    plan.transferShare = Math.max(25, Math.min(100, Math.round(number(patch.transferShare))));
+  }
+  return plan;
+}
+
+/** Conservative planning projection using only scheduled home gates and visible recurring costs. */
+export function clubSeasonBudgetSnapshot(world, club) {
+  if (!world || !club) return null;
+  const finance = ensureClubFinance(club, world.season);
+  const plan = ensureClubFinanceBudget(club);
+  const operating = clubWeeklyOperatingSnapshot(world, club);
+  const futureClubFixtures = (world.fixtures || []).filter(
+    (fixture) =>
+      !fixture.played &&
+      (fixture.home === club.id || fixture.away === club.id) &&
+      number(fixture.day) >= number(world.day)
+  );
+  const lastFixtureDay = futureClubFixtures.reduce(
+    (latest, fixture) => Math.max(latest, number(fixture.day)),
+    number(world.day)
+  );
+  const remainingWeeks = Math.max(0, Math.ceil((lastFixtureDay - number(world.day)) / 7));
+  const remainingHomeMatches = futureClubFixtures.filter((fixture) => fixture.home === club.id).length;
+  const estimatedGate = Math.round(number(stadiumInfo(club)?.matchday) * 0.88);
+  const projectedTickets = remainingHomeMatches * estimatedGate;
+  const recurringNet = operating.commercialIncome - operating.operatingOut;
+  const projectedOperatingNet = recurringNet * remainingWeeks;
+  const seasonPayoutAlreadyRecorded =
+    number(finance.seasonBroadcastIncome) + number(finance.seasonPrizeIncome) > 0;
+  const projectedLeaguePayout = seasonPayoutAlreadyRecorded
+    ? 0
+    : number(finance.lastBroadcastPayout) + number(finance.lastPrizePayout);
+  const projectedEndCash = Math.round(
+    number(club.money) + projectedOperatingNet + projectedTickets + projectedLeaguePayout
+  );
+  const reserveCash = Math.round(operating.operatingOut * plan.reserveWeeks);
+  const safeTransferCeiling = Math.max(0, Math.floor(number(club.money) - reserveCash));
+  const plannedTransferBudget = Math.floor(safeTransferCeiling * (plan.transferShare / 100));
+  const projectedEndAfterBudget = projectedEndCash - plannedTransferBudget;
+  const projectedWeeklyRevenue =
+    operating.commercialIncome +
+    (remainingWeeks > 0 ? projectedTickets / remainingWeeks : 0) +
+    (remainingWeeks > 0 ? projectedLeaguePayout / remainingWeeks : 0);
+  const wageShare = projectedWeeklyRevenue > 0
+    ? Math.round((operating.wageOut / projectedWeeklyRevenue) * 100)
+    : 999;
+  const status =
+    projectedEndAfterBudget < 0
+      ? "critical"
+      : projectedEndAfterBudget < reserveCash
+        ? "tight"
+        : "stable";
+  return {
+    plan,
+    operating,
+    remainingWeeks,
+    remainingHomeMatches,
+    estimatedGate,
+    projectedTickets,
+    projectedOperatingNet,
+    projectedLeaguePayout,
+    projectedEndCash,
+    reserveCash,
+    safeTransferCeiling,
+    plannedTransferBudget,
+    projectedEndAfterBudget,
+    wageShare,
+    status,
+  };
 }
 
 export function resetClubSeasonFinance(club, season = null) {

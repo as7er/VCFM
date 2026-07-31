@@ -30,10 +30,11 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=171";
-import { nationFlagHtml } from "./flags.js?v=171";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=172";
+import { nationFlagHtml } from "./flags.js?v=172";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
-import { recordFinanceEntry } from "./finance-ledger.js";
+import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
+import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
 import {
   ensureCompetitions,
   sortedContinentalTable,
@@ -285,7 +286,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=171";
+} from "./avatar.js?v=172";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -1043,7 +1044,7 @@ function enterMain() {
 
 // ---------- Tabs ----------
 const MAIN_NAV_GROUPS = {
-  overview: ["dashboard", "inbox", "media", "career"],
+  overview: ["dashboard", "finance", "inbox", "media", "career"],
   team: ["squad", "tactics", "training", "youth", "staff", "facilities"],
   matches: ["fixtures", "table"],
   transfer: ["transfer"],
@@ -1114,6 +1115,28 @@ function bindMainOnce() {
       try { localStorage.setItem("vcfm-squad-view", squadTableView); } catch (_) { /* ignore */ }
       renderSquad();
     });
+  });
+  $("#finance-category-filter")?.addEventListener("change", (event) => {
+    financeLedgerFilter = event.target.value || "all";
+    renderFinance();
+  });
+  $("#finance-reserve-weeks")?.addEventListener("input", (event) => {
+    const club = world ? getUserClub(world) : null;
+    if (!club) return;
+    updateClubFinanceBudget(club, { reserveWeeks: event.target.value });
+    renderFinance();
+  });
+  $("#finance-reserve-weeks")?.addEventListener("change", () => {
+    if (world) saveGame(world);
+  });
+  $("#finance-transfer-share")?.addEventListener("input", (event) => {
+    const club = world ? getUserClub(world) : null;
+    if (!club) return;
+    updateClubFinanceBudget(club, { transferShare: event.target.value });
+    renderFinance();
+  });
+  $("#finance-transfer-share")?.addEventListener("change", () => {
+    if (world) saveGame(world);
   });
 
   $("#btn-save").onclick = () => {
@@ -1514,6 +1537,7 @@ function refreshAll() {
   ensureManagerCareer(world);
   renderTopbar();
   renderDashboard();
+  renderFinance();
   renderSquad();
   renderYouth();
   renderFacilities();
@@ -1544,6 +1568,8 @@ let selectedLeagueCentreView = "table";
 let selectedLeagueDivision = null;
 /** 数据榜联赛范围：默认展示全部 11 个国内联赛。 */
 let selectedStatsDivision = "all";
+/** 财政流水分类筛选。 */
+let financeLedgerFilter = "all";
 /** 从俱乐部/国家队名单进入球员资料时，保留连续浏览与返回上下文。 */
 let activePlayerBrowseContext = null;
 
@@ -3283,6 +3309,199 @@ function renderDashboard() {
         .map((b) => `<span class="badge-chip" title="${escapeHtml(b.detail || "")}">🏅 ${escapeHtml(b.title)}</span>`)
         .join(" ");
     }
+  }
+}
+
+const FINANCE_CATEGORY_ORDER = [
+  "ticket",
+  "commercial",
+  "broadcast",
+  "prize",
+  "transfer",
+  "loan",
+  "wage",
+  "facility",
+  "contract",
+  "staff",
+  "scouting",
+  "board",
+  "other",
+];
+
+function financeCategoryLabel(category, en) {
+  const labels = {
+    ticket: ["门票", "Matchday"],
+    commercial: ["商业", "Commercial"],
+    broadcast: ["转播", "Broadcast"],
+    prize: ["奖金", "Prize money"],
+    transfer: ["转会", "Transfers"],
+    loan: ["租借", "Loans"],
+    wage: ["薪资", "Wages"],
+    facility: ["设施", "Facilities"],
+    contract: ["合同", "Contracts"],
+    staff: ["职员", "Staff"],
+    scouting: ["球探", "Scouting"],
+    board: ["董事会", "Board"],
+    other: ["其他", "Other"],
+  };
+  const pair = labels[category] || [category || "其他", category || "Other"];
+  return en ? pair[1] : pair[0];
+}
+
+function financeSourceLabel(source, en) {
+  const labels = {
+    legacy: ["期初迁移", "Opening migration"],
+    "weekly-settlement": ["俱乐部周结算", "Weekly club settlement"],
+    matchday: ["主场比赛日", "Home matchday"],
+    "transfer-fee": ["球员转会费", "Player transfer fee"],
+    "signing-bonus": ["球员签约奖", "Player signing bonus"],
+    "ai-transfer": ["俱乐部间转会", "Club transfer"],
+    "poach-sale": ["挖角成交", "Accepted transfer bid"],
+    "loan-fee": ["球员租借费", "Player loan fee"],
+    "loan-recall": ["窗外召回费", "Loan recall fee"],
+    "facility-upgrade": ["设施建设", "Facility project"],
+    "season-broadcast": ["赛季转播分成", "Season broadcast share"],
+    "season-prize": ["联赛名次奖金", "League prize money"],
+    "contract-renewal": ["球员续约", "Player renewal"],
+    "contract-termination": ["球员解约补偿", "Player release compensation"],
+    "free-agent-signing": ["自由球员签约", "Free-agent signing"],
+    "staff-termination": ["职员解约补偿", "Staff termination"],
+    "staff-signing": ["自由职员签约", "Free staff signing"],
+    "staff-poach": ["职员挖角", "Staff approach"],
+    "staff-market-refresh": ["刷新职员市场", "Staff market refresh"],
+    "scout-mission": ["球探任务", "Scout assignment"],
+    "board-bonus": ["董事会目标奖金", "Board objective bonus"],
+    "board-fine": ["董事会罚款", "Board fine"],
+    system: ["系统结算", "System settlement"],
+  };
+  const pair = labels[source] || [source || "其他结算", source || "Other transaction"];
+  return en ? pair[1] : pair[0];
+}
+
+function financeCategoryBadge(category, en) {
+  const safe = String(category || "other").replace(/[^a-z0-9_-]/gi, "");
+  return `<span class="finance-category-label"><span class="finance-category-dot finance-cat-${safe}"></span>${escapeHtml(financeCategoryLabel(category, en))}</span>`;
+}
+
+function renderFinance() {
+  if (!world) return;
+  const club = getUserClub(world);
+  if (!club) return;
+  const en = getLang() === "en";
+  const snapshot = financeSnapshot(world);
+  const budget = clubSeasonBudgetSnapshot(world, club);
+  const ledger = financeLedgerSummary(club, world.season);
+  if (!snapshot || !budget) return;
+
+  const statusLabels = {
+    stable: en ? "Stable" : "稳健",
+    tight: en ? "Tight" : "偏紧",
+    critical: en ? "Critical" : "告急",
+  };
+  const statusEl = $("#finance-status");
+  if (statusEl) {
+    statusEl.textContent = statusLabels[budget.status] || statusLabels.stable;
+    statusEl.className = `finance-status ${budget.status}`;
+  }
+
+  const metrics = $("#finance-metrics");
+  if (metrics) {
+    const runway = snapshot.weeksCover >= 99 ? "99+" : String(snapshot.weeksCover);
+    metrics.innerHTML = `
+      <div><span>${en ? "Cash" : "现金余额"}</span><strong>${formatMoney(snapshot.money)}</strong></div>
+      <div><span>${en ? "Season net" : "本季净额"}</span><strong class="${snapshot.seasonNetApprox >= 0 ? "stat-high" : "stat-low"}">${formatMoney(snapshot.seasonNetApprox)}</strong></div>
+      <div><span>${en ? "Weekly operation" : "每周运营"}</span><strong>${formatMoney(snapshot.weekly)}</strong></div>
+      <div><span>${en ? "Runway" : "资金续航"}</span><strong>${runway} ${en ? "weeks" : "周"}</strong></div>`;
+  }
+
+  const reserveInput = $("#finance-reserve-weeks");
+  const shareInput = $("#finance-transfer-share");
+  if (reserveInput) reserveInput.value = String(budget.plan.reserveWeeks);
+  if (shareInput) shareInput.value = String(budget.plan.transferShare);
+  const reserveValue = $("#finance-reserve-weeks-value");
+  const shareValue = $("#finance-transfer-share-value");
+  if (reserveValue) reserveValue.textContent = `${budget.plan.reserveWeeks} ${en ? "weeks" : "周"}`;
+  if (shareValue) shareValue.textContent = `${budget.plan.transferShare}%`;
+  const seasonEl = $("#finance-budget-season");
+  if (seasonEl) seasonEl.textContent = en ? `Season ${world.season}` : `${world.season} 赛季`;
+
+  const projection = $("#finance-budget-projection");
+  if (projection) {
+    const wageShare = budget.wageShare >= 999 ? "999%+" : `${budget.wageShare}%`;
+    projection.innerHTML = `
+      <div><span>${en ? "Cash reserve" : "现金储备"}</span><strong>${formatMoney(budget.reserveCash)}</strong></div>
+      <div><span>${en ? "Safe transfer ceiling" : "安全转会上限"}</span><strong>${formatMoney(budget.safeTransferCeiling)}</strong></div>
+      <div><span>${en ? "Planned transfer budget" : "计划转会预算"}</span><strong class="stat-high">${formatMoney(budget.plannedTransferBudget)}</strong></div>
+      <div><span>${en ? "Projected season-end cash" : "预计季末余额"}</span><strong class="${budget.projectedEndAfterBudget >= 0 ? "stat-high" : "stat-low"}">${formatMoney(budget.projectedEndAfterBudget)}</strong></div>
+      <div><span>${en ? "Remaining home gates" : "剩余联赛主场"}</span><strong>${budget.remainingHomeMatches} · ${formatMoney(budget.projectedTickets)}</strong></div>
+      <div><span>${en ? "Projected wage ratio" : "预计工资占比"}</span><strong class="${budget.wageShare <= 70 ? "stat-high" : budget.wageShare <= 90 ? "stat-mid" : "stat-low"}">${wageShare}</strong></div>`;
+  }
+
+  const totals = new Map();
+  for (const entry of ledger.entries) {
+    const category = entry.category || "other";
+    if (!totals.has(category)) totals.set(category, { income: 0, expense: 0, net: 0 });
+    const row = totals.get(category);
+    const amount = Number(entry.amount) || 0;
+    if (amount >= 0) row.income += amount;
+    else row.expense += -amount;
+    row.net += amount;
+  }
+  const categories = [
+    ...FINANCE_CATEGORY_ORDER.filter((category) => totals.has(category)),
+    ...[...totals.keys()].filter((category) => !FINANCE_CATEGORY_ORDER.includes(category)).sort(),
+  ];
+  const breakdownBody = $("#finance-breakdown-table tbody");
+  if (breakdownBody) {
+    breakdownBody.innerHTML = categories.length
+      ? categories.map((category) => {
+          const row = totals.get(category);
+          return `<tr>
+            <td>${financeCategoryBadge(category, en)}</td>
+            <td class="stat-high">${row.income ? formatMoney(row.income) : "—"}</td>
+            <td class="stat-low">${row.expense ? formatMoney(row.expense) : "—"}</td>
+            <td class="${row.net >= 0 ? "stat-high" : "stat-low"}">${formatMoney(row.net)}</td>
+          </tr>`;
+        }).join("")
+      : `<tr><td colspan="4" class="muted">${en ? "No season transactions" : "本赛季暂无流水"}</td></tr>`;
+  }
+  const countEl = $("#finance-entry-count");
+  if (countEl) countEl.textContent = en ? `${ledger.entries.length} entries` : `${ledger.entries.length} 笔`;
+
+  const filter = $("#finance-category-filter");
+  if (filter) {
+    const filterCategories = categories.length ? categories : FINANCE_CATEGORY_ORDER;
+    filter.innerHTML = `<option value="all">${en ? "All categories" : "全部分类"}</option>${filterCategories
+      .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(financeCategoryLabel(category, en))}</option>`)
+      .join("")}`;
+    if (financeLedgerFilter !== "all" && !filterCategories.includes(financeLedgerFilter)) {
+      financeLedgerFilter = "all";
+    }
+    filter.value = financeLedgerFilter;
+  }
+
+  const visibleEntries = ledger.entries
+    .filter((entry) => financeLedgerFilter === "all" || entry.category === financeLedgerFilter)
+    .slice()
+    .reverse()
+    .slice(0, 120);
+  const ledgerBody = $("#finance-ledger-table tbody");
+  if (ledgerBody) {
+    ledgerBody.innerHTML = visibleEntries.length
+      ? visibleEntries.map((entry) => {
+          const amount = Number(entry.amount) || 0;
+          const date = entry.day === 0
+            ? (en ? "Opening" : "期初")
+            : `${entry.season != null ? `S${entry.season} · ` : ""}D${entry.day ?? "—"}`;
+          return `<tr>
+            <td class="muted">${escapeHtml(date)}</td>
+            <td>${financeCategoryBadge(entry.category || "other", en)}</td>
+            <td>${escapeHtml(financeSourceLabel(entry.source, en))}</td>
+            <td class="stat-high">${amount > 0 ? formatMoney(amount) : "—"}</td>
+            <td class="stat-low">${amount < 0 ? formatMoney(-amount) : "—"}</td>
+          </tr>`;
+        }).join("")
+      : `<tr><td colspan="5" class="muted">${en ? "No matching transactions" : "没有符合筛选条件的流水"}</td></tr>`;
   }
 }
 

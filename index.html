@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=171" />
+  <link rel="stylesheet" href="css/style.css?v=172" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -132,6 +132,7 @@
           </nav>
           <nav class="tabs" aria-label="二级导航">
           <button data-tab="dashboard" class="tab active" data-i18n="tab.dashboard">概览</button>
+          <button data-tab="finance" class="tab" data-i18n="tab.finance">财政</button>
           <button data-tab="squad" class="tab" data-i18n="tab.squad">阵容</button>
           <button data-tab="youth" class="tab" data-i18n="tab.youth">青训</button>
           <button data-tab="facilities" class="tab" data-i18n="tab.facilities">设施</button>
@@ -256,6 +257,76 @@
             <section class="card dashboard-news-card">
               <h2 data-i18n="dash.news">新闻</h2>
               <ul id="news-list" class="news-list"></ul>
+            </section>
+          </div>
+        </div>
+
+        <!-- 财政 -->
+        <div id="tab-finance" class="tab-panel">
+          <div class="finance-layout">
+            <section class="card finance-summary-card">
+              <div class="row-between finance-section-head">
+                <h2 data-i18n="finance.title">俱乐部财政</h2>
+                <span id="finance-status" class="finance-status"></span>
+              </div>
+              <div id="finance-metrics" class="finance-metrics"></div>
+            </section>
+
+            <section class="card finance-budget-card">
+              <div class="row-between finance-section-head">
+                <h2 data-i18n="finance.budget">赛季预算</h2>
+                <span id="finance-budget-season" class="muted"></span>
+              </div>
+              <div class="finance-budget-controls">
+                <label>
+                  <span data-i18n="finance.reserveWeeks">现金储备</span>
+                  <input id="finance-reserve-weeks" type="range" min="4" max="20" step="1" value="8" />
+                  <strong id="finance-reserve-weeks-value">8</strong>
+                </label>
+                <label>
+                  <span data-i18n="finance.transferShare">转会分配</span>
+                  <input id="finance-transfer-share" type="range" min="25" max="100" step="5" value="70" />
+                  <strong id="finance-transfer-share-value">70%</strong>
+                </label>
+              </div>
+              <div id="finance-budget-projection" class="finance-budget-projection"></div>
+            </section>
+
+            <section class="card finance-breakdown-card">
+              <div class="row-between finance-section-head">
+                <h2 data-i18n="finance.breakdown">本季收支分类</h2>
+                <span id="finance-entry-count" class="muted"></span>
+              </div>
+              <div class="table-wrap">
+                <table id="finance-breakdown-table">
+                  <thead><tr>
+                    <th data-i18n="finance.category">分类</th>
+                    <th data-i18n="finance.income">收入</th>
+                    <th data-i18n="finance.expense">支出</th>
+                    <th data-i18n="finance.net">净额</th>
+                  </tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="card finance-ledger-card">
+              <div class="row-between finance-section-head">
+                <h2 data-i18n="finance.ledger">财务流水</h2>
+                <select id="finance-category-filter" aria-label="finance category"></select>
+              </div>
+              <div class="table-wrap finance-ledger-wrap">
+                <table id="finance-ledger-table">
+                  <thead><tr>
+                    <th data-i18n="finance.date">日期</th>
+                    <th data-i18n="finance.category">分类</th>
+                    <th data-i18n="finance.item">项目</th>
+                    <th data-i18n="finance.income">收入</th>
+                    <th data-i18n="finance.expense">支出</th>
+                  </tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
             </section>
           </div>
         </div>
@@ -1245,12 +1316,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=171"></script>
+  <script type="module" src="js/main.js?v=172"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v171";
+        var CURRENT_CACHE = "vcfm-v172";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1261,7 +1332,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=171").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=172").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1270,8 +1341,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v171")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v171", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v172")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v172", "1");
               location.reload();
             }
           } catch (e) {

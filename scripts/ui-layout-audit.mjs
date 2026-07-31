@@ -13,7 +13,7 @@ const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
 assert.equal(new Set(ids).size, ids.length, "HTML ids must be unique after dashboard reflow");
 
 const tabs = [...html.matchAll(/data-tab="([^"]+)"/g)].map((match) => match[1]);
-assert.equal(tabs.length, 15, "all existing game pages must remain reachable");
+assert.equal(tabs.length, 16, "all existing game pages must remain reachable");
 for (const tab of tabs) {
   if (tab !== "table") assert.ok(html.includes(`id="tab-${tab}"`), `missing panel for ${tab}`);
   assert.ok(main.includes(`"${tab}"`), `navigation groups must include ${tab}`);
@@ -26,6 +26,7 @@ assert.ok(main.includes("squadTableView"));
 assert.doesNotMatch(main, /(?<!\$)\$\(\"\.(?:primary-tab|tab|tab-panel)\"\)\.forEach/, "navigation loops must use the multi-element selector");
 assert.ok(css.includes("#squad-table.squad-compact .squad-detail"));
 assert.ok(css.includes(".dashboard-layout"));
+assert.ok(css.includes(".finance-layout"));
 assert.ok(css.includes(".btn:focus-visible"));
 assert.ok(css.includes("min-height: 100dvh"), "mobile modals should use the viewport");
 
