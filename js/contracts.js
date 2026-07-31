@@ -3,6 +3,15 @@
 import { estimateWage, estimateValue, formatMoney, assignSquadNumbers, autoLineup } from "./models.js";
 import { assertTransferOpen } from "./transfers.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
+import { clubCashAvailability } from "./cash-reservations.js";
+
+function cashFailure(world, club, amount, label) {
+  const cash = clubCashAvailability(world, club, amount);
+  if (cash.ok) return null;
+  return cash.reserved > 0
+    ? `未承诺现金不足：转会谈判已占用 ${formatMoney(cash.reserved)}，${label}需 ${formatMoney(amount)}`
+    : `资金不足，${label}需 ${formatMoney(amount)}`;
+}
 
 export function ensureContract(p) {
   if (!p) return p;
@@ -54,14 +63,13 @@ export function needsContractAttention(p) {
   return false;
 }
 
-export function renewPlayer(club, player, offer = null) {
+export function renewPlayer(club, player, offer = null, world = null) {
   if (!club || !player) return { ok: false, msg: "无效球员" };
   if (player.loan) return { ok: false, msg: "租借球员无法续约（由母队管理合同）" };
   ensureContract(player);
   const o = offer || renewOffer(player);
-  if (club.money < o.fee) {
-    return { ok: false, msg: `资金不足，签约奖需 ${formatMoney(o.fee)}` };
-  }
+  const fundingError = cashFailure(world, club, o.fee, "签约奖");
+  if (fundingError) return { ok: false, msg: fundingError };
   recordFinanceEntry(club, -o.fee, { category: "contract", source: "contract-renewal", season: null, day: null });
   player.contractYears = o.years;
   player.wage = o.newWage;
@@ -106,9 +114,8 @@ export function terminatePlayer(world, club, player) {
   }
 
   const cost = terminateCost(player);
-  if (club.money < cost) {
-    return { ok: false, msg: `解约补偿不足，需 ${formatMoney(cost)}` };
-  }
+  const fundingError = cashFailure(world, club, cost, "解约补偿");
+  if (fundingError) return { ok: false, msg: fundingError };
 
   const idx = club.players.findIndex((p) => p.id === player.id);
   if (idx < 0) return { ok: false, msg: "球员不在阵中" };
@@ -264,9 +271,8 @@ export function signFreeAgent(world, playerId) {
 
   const p = world.freeAgents[idx];
   const offer = renewOffer(p);
-  if (club.money < offer.fee) {
-    return { ok: false, msg: `签约奖不足 ${formatMoney(offer.fee)}` };
-  }
+  const fundingError = cashFailure(world, club, offer.fee, "签约奖");
+  if (fundingError) return { ok: false, msg: fundingError };
   recordFinanceEntry(club, -offer.fee, { category: "contract", source: "free-agent-signing", season: world.season, day: world.day });
   world.freeAgents.splice(idx, 1);
   p.clubId = club.id;

@@ -12,6 +12,7 @@ import { clubWeeklyOperatingSnapshot, ensureClubFinance, financeLedgerSummary } 
 import { isTransferWindowOpen } from "./transfers.js";
 import { DIVISIONS } from "./data.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
+import { clubCashAvailability } from "./cash-reservations.js";
 
 // ---------- 球探任务 ----------
 
@@ -32,7 +33,15 @@ export function startScoutMission(world, region = "div3") {
   const club = world.clubs.find((c) => c.id === world.userClubId);
   if (!club) return { ok: false, msg: "无球队" };
   const cost = region === "div2" ? 25_000 : region === "intl" ? 40_000 : 15_000;
-  if ((club.money || 0) < cost) return { ok: false, msg: `资金不足 ${formatMoney(cost)}` };
+  const cash = clubCashAvailability(world, club, cost);
+  if (!cash.ok) {
+    return {
+      ok: false,
+      msg: cash.reserved > 0
+        ? `未承诺现金不足：转会谈判已占用 ${formatMoney(cash.reserved)}，球探任务需 ${formatMoney(cost)}`
+        : `资金不足 ${formatMoney(cost)}`,
+    };
+  }
   recordFinanceEntry(club, -cost, { category: "scouting", source: "scout-mission", season: world.season, day: world.day });
   const days = region === "intl" ? 10 : region === "div2" ? 7 : 5;
   const mission = {

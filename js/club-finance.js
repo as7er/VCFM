@@ -9,8 +9,8 @@ import { ensureFinanceLedger, financeLedgerSummary, recordFinanceEntry, resetFin
 import {
   ensureTransferNegotiations,
   isActiveTransferNegotiation,
-  transferNegotiationCashCost,
 } from "./transfer-negotiations.js";
+import { transferNegotiationCashCost } from "./cash-reservations.js";
 import { ensureContract } from "./contracts.js";
 
 export const CLUB_FINANCE_VERSION = 2;

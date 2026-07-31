@@ -4,6 +4,15 @@ import { FIRST_NAMES, LAST_NAMES, DIVISIONS } from "./data.js";
 import { formatMoney } from "./models.js";
 import { isTransferWindowOpen } from "./transfers.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
+import { clubCashAvailability } from "./cash-reservations.js";
+
+function staffCashFailure(world, club, amount, label) {
+  const cash = clubCashAvailability(world, club, amount);
+  if (cash.ok) return null;
+  return cash.reserved > 0
+    ? `未承诺现金不足：转会谈判已占用 ${formatMoney(cash.reserved)}，${label}需 ${formatMoney(amount)}`
+    : `资金不足，${label}需 ${formatMoney(amount)}`;
+}
 
 const ROLES = {
   coach: {
@@ -376,7 +385,8 @@ export function fireStaff(worldOrClub, roleMaybe, roleArg) {
   if (!s) return { ok: false, msg: "没有该职位职员" };
   ensureStaffContract(s, club);
   const cost = Math.max(s.wage * 4, Math.round(staffCompensationFee(s) * 0.35));
-  if (club.money < cost) return { ok: false, msg: `解约补偿不足（需 ${formatMoney(cost)}）` };
+  const fundingError = staffCashFailure(world, club, cost, "解约补偿");
+  if (fundingError) return { ok: false, msg: fundingError };
   recordFinanceEntry(club, -cost, { category: "staff", source: "staff-termination", season: world?.season ?? null, day: world?.day ?? null });
   const released = { ...s, clubId: null, contractYears: 0 };
   club.staff[role] = makeCaretaker(club, role);
@@ -401,9 +411,9 @@ export function hireStaff(world, club, candidate, fee = null) {
   const role = candidate.role;
   const signFee = fee != null ? fee : staffSigningFee(candidate);
   const newWage = Math.max(candidate.wage || wageFromRating(candidate.rating), wageFromRating(candidate.rating));
-  if (club.money < signFee + newWage * 4) {
-    return { ok: false, msg: "资金不足以支付签约费与初期薪水" };
-  }
+  const initialNeed = signFee + newWage * 4;
+  const fundingError = staffCashFailure(world, club, initialNeed, "签约费与初期薪水");
+  if (fundingError) return { ok: false, msg: fundingError };
   const old = club.staff[role];
   recordFinanceEntry(club, -signFee, { category: "staff", source: "staff-signing", season: world?.season ?? null, day: world?.day ?? null });
   if (old) {
@@ -577,9 +587,8 @@ export function approachStaff(world, buyerClubId, staffId, fromClubId = null) {
   const wageOffer = buildWageOffer(staff, buyer);
   const contractYears = buildContractOffer(staff, freeAgent);
   const totalNeed = compensation + (freeAgent ? staffSigningFee(staff) : 0) + wageOffer * 4;
-  if (buyer.money < totalNeed) {
-    return { ok: false, msg: `资金不足（需约 ${formatMoney(totalNeed)} 含补偿与初期薪水）` };
-  }
+  const fundingError = staffCashFailure(world, buyer, totalNeed, "补偿与初期薪水");
+  if (fundingError) return { ok: false, msg: fundingError };
 
   // 已有对本队同人的 pending 不重复
   if (
@@ -737,13 +746,14 @@ export function completeStaffMove(world, approach) {
   const compensation = approach.compensation || 0;
   const wageOffer = approach.wageOffer || buildWageOffer(staff, buyer);
   const years = approach.contractYears || buildContractOffer(staff, !fromClub);
-  const need = compensation + wageOffer * 4;
-  if (buyer.money < need) {
+  const staffFee = approach.freeAgent ? staffSigningFee(staff) : 0;
+  const need = compensation + staffFee + wageOffer * 4;
+  const fundingError = staffCashFailure(world, buyer, need, "补偿、签约费与初期薪水");
+  if (fundingError) {
     approach.status = "rejected";
-    return { ok: false, msg: "买方资金不足，交易取消" };
+    return { ok: false, msg: `${fundingError}，交易取消` };
   }
 
-  const staffFee = approach.freeAgent ? staffSigningFee(staff) : 0;
   recordFinanceEntry(buyer, -(compensation + staffFee), { category: "staff", source: "staff-poach", season: world.season, day: world.day });
   // 自由身签约费已在上面；在职只付 compensation
   if (!approach.freeAgent && compensation > 0 && fromClub) {

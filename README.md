@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v175** · 转会现金锁定与多谈判防超支 |
+| 当前版本 | **v176** · 全局未承诺现金与主动支出防绕过 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -129,7 +129,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v175** · transfer cash reservations and aggregate spend checks |
+| Current version | **v176** · uncommitted cash across all discretionary club spending |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |

@@ -6,6 +6,7 @@
 import { formatMoney, YOUTH_LEVELS, YOUTH_UPGRADE_COST, ensureYouthAcademy, fillYouthSquad } from "./models.js";
 import { DIVISIONS } from "./data.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
+import { clubCashAvailability } from "./cash-reservations.js";
 
 export const FACILITY_MAX = 5;
 
@@ -166,8 +167,14 @@ export function startFacilityUpgrade(world, clubId, kind) {
   const next = cur + 1;
   const cost = upgradeCost(kind, next);
   if (cost == null) return { ok: false, msg: "无法升级" };
-  if (club.money < cost) {
-    return { ok: false, msg: `资金不足，需要 ${formatMoney(cost)}` };
+  const cash = clubCashAvailability(world, club, cost);
+  if (!cash.ok) {
+    return {
+      ok: false,
+      msg: cash.reserved > 0
+        ? `未承诺现金不足：转会谈判已占用 ${formatMoney(cash.reserved)}，升级需要 ${formatMoney(cost)}`
+        : `资金不足，需要 ${formatMoney(cost)}`,
+    };
   }
 
   const days = (BUILD_DAYS[kind] && BUILD_DAYS[kind][next]) || 14;

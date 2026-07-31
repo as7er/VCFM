@@ -13,6 +13,7 @@ import {
 import { assertTransferOpen, ensureTransferWindow, getTransferPhase } from "./transfers.js";
 import { ensureContract } from "./contracts.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
+import { clubCashAvailability } from "./cash-reservations.js";
 
 function clubById(world, id) {
   return world?.clubs?.find((c) => c.id === id) || null;
@@ -246,8 +247,14 @@ export function loanInPlayer(world, playerId, fromClubId, opts = {}) {
   const term = opts.term === "season" ? "season" : "half";
   const fee = loanFeeFor(player);
   const wageShare = 0.7 + Math.random() * 0.3;
-  if (user.money < fee) {
-    return { ok: false, msg: `资金不足，租借费需 ${formatMoney(fee)}` };
+  const cash = clubCashAvailability(world, user, fee);
+  if (!cash.ok) {
+    return {
+      ok: false,
+      msg: cash.reserved > 0
+        ? `未承诺现金不足：转会谈判已占用 ${formatMoney(cash.reserved)}，租借费需 ${formatMoney(fee)}`
+        : `资金不足，租借费需 ${formatMoney(fee)}`,
+    };
   }
 
   const untilDay = loanUntilDay(world, term);
@@ -348,8 +355,14 @@ export function recallLoan(world, playerId) {
   let fee = 0;
   if (phase === "closed") {
     fee = Math.round((found.player.wage || 1000) * 2);
-    if (user.money < fee) {
-      return { ok: false, msg: `窗外召回需支付 ${formatMoney(fee)}` };
+    const cash = clubCashAvailability(world, user, fee);
+    if (!cash.ok) {
+      return {
+        ok: false,
+        msg: cash.reserved > 0
+          ? `未承诺现金不足：转会谈判已占用 ${formatMoney(cash.reserved)}，窗外召回需 ${formatMoney(fee)}`
+          : `窗外召回需支付 ${formatMoney(fee)}`,
+      };
     }
     recordFinanceEntry(user, -fee, { category: "loan", source: "loan-recall", season: world.season, day: world.day });
   }

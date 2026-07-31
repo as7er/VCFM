@@ -17,13 +17,17 @@ import { mediaTransfer } from "./media.js";
 import { isTransferWindowOpen, transferWindowLabel } from "./transfers.js";
 import { POS_LABEL } from "./data.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
+import {
+  ACTIVE_TRANSFER_NEGOTIATION_STATUSES,
+  activeTransferCashCommitments,
+  transferNegotiationCashCost,
+} from "./cash-reservations.js";
 
-export const ACTIVE_TRANSFER_NEGOTIATION_STATUSES = new Set([
-  "club_review",
-  "club_counter",
-  "player_review",
-  "player_counter",
-]);
+export {
+  ACTIVE_TRANSFER_NEGOTIATION_STATUSES,
+  activeTransferCashCommitments,
+  transferNegotiationCashCost,
+};
 
 const MAX_SQUAD = 28;
 const MIN_SELLER_SQUAD = 14;
@@ -107,21 +111,6 @@ export function listTransferNegotiations(world, { limit = 16 } = {}) {
       return (b.updatedDay || b.createdDay || 0) - (a.updatedDay || a.createdDay || 0);
     })
     .slice(0, Math.max(1, limit));
-}
-
-export function transferNegotiationCashCost(negotiation) {
-  return money(negotiation.fee) + signingBonus(negotiation.wage, negotiation.years);
-}
-
-export function activeTransferCashCommitments(world, buyerClubId, { excludeId = null } = {}) {
-  return ensureTransferNegotiations(world)
-    .filter(
-      (negotiation) =>
-        isActiveTransferNegotiation(negotiation) &&
-        negotiation.buyerClubId === buyerClubId &&
-        negotiation.id !== excludeId
-    )
-    .reduce((sum, negotiation) => sum + transferNegotiationCashCost(negotiation), 0);
 }
 
 function validateLiveDeal(

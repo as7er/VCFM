@@ -170,6 +170,7 @@ import {
   settleWorldWeeklyFinances,
   recordFinanceEntry,
 } from "./club-finance.js";
+import { clubCashAvailability } from "./cash-reservations.js";
 import {
   simulateMatch,
   simulateMatchSync,
@@ -1038,7 +1039,7 @@ export function renewUserPlayer(world, playerId, opts = {}) {
   if (p.loan) return { ok: false, msg: "租借球员无法续约" };
   const offer =
     opts.years != null ? renewOffer(p, { years: opts.years }) : renewOffer(p);
-  const res = renewPlayer(club, p, offer);
+  const res = renewPlayer(club, p, offer, world);
   if (res.ok) {
     p._needsRenew = false;
     world.news.unshift({ day: world.day, text: `📝 ${res.msg}` });
@@ -1613,7 +1614,15 @@ export function buyPlayer(world, playerId, fromClubId, options = {}) {
   ensureStaff(user);
   ensureContract(player);
   const price = Math.round(player.value * (1.05 + rng() * 0.15) * scoutBuyMod(user));
-  if (user.money < price) return { ok: false, msg: `资金不足，需要 ${formatMoney(price)}` };
+  const priceCash = clubCashAvailability(world, user, price);
+  if (!priceCash.ok) {
+    return {
+      ok: false,
+      msg: priceCash.reserved > 0
+        ? `未承诺现金不足：转会谈判已占用 ${formatMoney(priceCash.reserved)}，本交易需要 ${formatMoney(price)}`
+        : `资金不足，需要 ${formatMoney(price)}`,
+    };
+  }
   if (user.players.length >= 28) return { ok: false, msg: "阵容已满（最多 28 人）" };
   if (from.players.length <= 14) return { ok: false, msg: "对方拒绝出售（阵容过少）" };
 
@@ -1626,10 +1635,13 @@ export function buyPlayer(world, playerId, fromClubId, options = {}) {
   }
   const newWage = Math.max(player.wage || 800, Math.round(estimateWage(player) * wageMult));
   const signingBonus = Math.round(newWage * years * 0.5);
-  if (user.money < price + signingBonus) {
+  const dealCash = clubCashAvailability(world, user, price + signingBonus);
+  if (!dealCash.ok) {
     return {
       ok: false,
-      msg: `资金不足：转会费 ${formatMoney(price)} + 签约奖 ${formatMoney(signingBonus)}`,
+      msg: dealCash.reserved > 0
+        ? `未承诺现金不足：转会谈判已占用 ${formatMoney(dealCash.reserved)}，转会费与签约奖需 ${formatMoney(price + signingBonus)}`
+        : `资金不足：转会费 ${formatMoney(price)} + 签约奖 ${formatMoney(signingBonus)}`,
     };
   }
 

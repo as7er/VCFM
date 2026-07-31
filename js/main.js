@@ -30,11 +30,12 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=175";
-import { nationFlagHtml } from "./flags.js?v=175";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=176";
+import { nationFlagHtml } from "./flags.js?v=176";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
+import { clubCashAvailability } from "./cash-reservations.js";
 import {
   ensureCompetitions,
   sortedContinentalTable,
@@ -286,7 +287,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=175";
+} from "./avatar.js?v=176";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -1350,16 +1351,21 @@ function bindMainOnce() {
   }
 
   $("#btn-refresh-staff").onclick = () => {
-    refreshStaffMarket(world);
-    // 刷新费
     const club = getUserClub(world);
     const fee = 50_000;
-    if (club.money >= fee) {
-      recordFinanceEntry(club, -fee, { category: "staff", source: "staff-market-refresh", season: world.season, day: world.day });
-      toast(t("toast.staffRefresh"));
-    } else {
-      toast(t("toast.staffRefreshFree"));
+    const cash = clubCashAvailability(world, club, fee);
+    if (!cash.ok) {
+      const en = getLang() === "en";
+      toast(cash.reserved > 0
+        ? (en
+            ? `Only ${formatMoney(cash.available)} is uncommitted; active transfer talks reserve ${formatMoney(cash.reserved)}.`
+            : `未承诺现金仅 ${formatMoney(cash.available)}；进行中的转会谈判已占用 ${formatMoney(cash.reserved)}。`)
+        : (en ? `Staff-market refresh requires ${formatMoney(fee)}.` : `刷新职员市场需要 ${formatMoney(fee)}。`));
+      return;
     }
+    refreshStaffMarket(world);
+    recordFinanceEntry(club, -fee, { category: "staff", source: "staff-market-refresh", season: world.season, day: world.day });
+    toast(t("toast.staffRefresh"));
     saveGame(world);
     renderStaff();
     renderTopbar();
