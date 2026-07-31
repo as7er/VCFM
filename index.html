@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=178" />
+  <link rel="stylesheet" href="css/style.css?v=179" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -388,6 +388,35 @@
                     <th class="squad-detail" data-i18n="th.scout">球探估值</th>
                     <th class="squad-detail" data-i18n="th.wage">周薪</th>
                     <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card squad-registration-card" style="margin-top:0.75rem">
+            <div class="row-between squad-heading">
+              <div>
+                <h2 id="registration-heading" style="margin:0">赛事报名</h2>
+                <p class="hint" id="registration-window-hint" style="margin:0.3rem 0 0"></p>
+              </div>
+              <div class="squad-heading-tools">
+                <select id="registration-competition" aria-label="registration competition"></select>
+                <button type="button" class="btn small primary" id="btn-registration-auto">自动报名</button>
+              </div>
+            </div>
+            <div id="registration-summary" class="registration-summary"></div>
+            <div class="table-wrap" style="max-height:26rem;overflow:auto">
+              <table id="registration-table">
+                <thead>
+                  <tr>
+                    <th id="registration-th-status">报名</th>
+                    <th data-i18n="th.name">姓名</th>
+                    <th data-i18n="th.pos">位置</th>
+                    <th data-i18n="th.age">年龄</th>
+                    <th data-i18n="th.ovr">能力</th>
+                    <th id="registration-th-development">培养资格</th>
+                    <th id="registration-th-route">参赛路径</th>
                   </tr>
                 </thead>
                 <tbody></tbody>
@@ -1316,12 +1345,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=178"></script>
+  <script type="module" src="js/main.js?v=179"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v178";
+        var CURRENT_CACHE = "vcfm-v179";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1332,7 +1361,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=178").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=179").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1341,8 +1370,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v178")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v178", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v179")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v179", "1");
               location.reload();
             }
           } catch (e) {

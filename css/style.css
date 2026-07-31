@@ -1180,6 +1180,12 @@ html[data-theme="light"] .pitch {
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
 }
 .player-dot.tac-slot .circle { position: relative; }
+.player-dot.tac-slot.unavailable .circle {
+  opacity: 0.45;
+  filter: grayscale(0.45);
+  outline: 2px dashed var(--danger);
+  outline-offset: 2px;
+}
 
 .tac-bench-chip.unavailable {
   opacity: 0.45;
@@ -6386,6 +6392,25 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
 #finance-category-filter { min-width: 9rem; }
 
 .squad-heading-tools { display: flex; align-items: center; gap: 0.65rem; }
+.registration-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0.75rem 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.registration-summary > div {
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  border-right: 1px solid var(--border);
+}
+.registration-summary > div:last-child { border-right: 0; }
+.registration-summary span,
+.registration-summary strong { display: block; }
+.registration-summary span { color: var(--muted); font-size: 0.78rem; }
+.registration-summary strong { margin-top: 0.2rem; font-size: 0.9rem; }
+.squad-registration-card input[type="checkbox"] { width: 1rem; height: 1rem; }
 .view-switch {
   display: inline-flex;
   padding: 0.18rem;
@@ -6512,6 +6537,9 @@ summary:focus-visible {
   .finance-budget-projection { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .squad-heading { align-items: flex-start; gap: 0.6rem; }
   .squad-heading-tools { align-items: flex-end; flex-direction: column; }
+  .registration-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .registration-summary > div:nth-child(2) { border-right: 0; }
+  .registration-summary > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
   #squad-table { font-size: 0.82rem; }
   #squad-table.squad-compact { min-width: 42rem; }
   .modal-close { width: 2.75rem; height: 2.75rem; top: 0.25rem; right: 0.25rem; }

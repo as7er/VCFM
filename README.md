@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v178** · 续约与租借分阶段谈判 |
+| 当前版本 | **v179** · 报名名单、本土培养与赛事资格 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -54,7 +54,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 ### 球队管理
 
-- **阵容与球员**：体能、士气、伤病、停赛、潜力、号码、合同、赛季数据和近 5 场滚动状态；球员资料、阵容、训练与战术席显示预计伤停天数；自动阵容同时考虑能力、位置、体能和近期表现。
+- **阵容与球员**：体能、士气、伤病、停赛、潜力、号码、合同、赛季数据和近 5 场滚动状态；联赛与洲际赛事使用 25 人报名名单、本土培养名额和 U21/B 名单资格，自动阵容与比赛替补读取同一资格结果。
 - **战术**：阵型、风格、压迫、节奏、宽度、防线、槽位角色、核心球员与战术板拖拽换位。
 - **训练与青训**：训练重点、强度、赛前备战、青训名单和球员成长；可委托助理教练按赛程与阵容短板安排。
 - **转会与合同**：夏窗、冬窗、续约、租借、自由球员和 AI 报价；买入、出售、续约与租借均按现实参与方逐阶段审核、还价或拒绝，成交前不会移动球员。
@@ -129,7 +129,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v178** · staged contract-renewal and loan negotiations |
+| Current version | **v179** · squad registration, homegrown status, and competition eligibility |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -167,7 +167,7 @@ Repository: https://github.com/as7er/vcfm
 
 ### Club management
 
-- **Squad and players**: fitness, morale, injuries, suspensions, potential, numbers, contracts, season statistics, and rolling five-match form. Profiles, squad lists, training, and the tactics bench show expected injury days. Auto-selection considers ability, position, fitness, and form.
+- **Squad and players**: fitness, morale, injuries, suspensions, potential, numbers, contracts, season statistics, and rolling five-match form. League and continental matches use 25-player registrations, homegrown quotas, and U21/List B eligibility; lineup and substitution selection consume the same eligibility result.
 - **Tactics**: formation, style, pressing, tempo, width, defensive line, slot roles, core player, and drag-and-drop changes.
 - **Training and youth**: training focus, intensity, match preparation, youth development, and assistant-manager delegation based on schedule and squad weaknesses.
 - **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Purchases, sales, renewals, and loans pass through the relevant clubs and players in staged reviews, counters, or rejections; players do not move before completion.

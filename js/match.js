@@ -71,6 +71,7 @@ import {
   buildHighlightWindows,
   buildHighlightSegments,
 } from "./sim/adapt.js";
+import { eligiblePlayerIds } from "./squad-registration.js";
 
 let activeRandom = Math.random;
 function rng() {
@@ -543,9 +544,11 @@ export function createMatchSession(world, fixture) {
   const importance = fixtureImportance(world, fixture);
   if (home.id !== world.userClubId) aiTuneTactics(home, away, world);
   if (away.id !== world.userClubId) aiTuneTactics(away, home, world);
+  const homeEligibleIds = eligiblePlayerIds(world, home, fixture);
+  const awayEligibleIds = eligiblePlayerIds(world, away, fixture);
   // 用户保留手动/上次首发；AI 强制重排
-  ensureMatchLineup(home, { forceAuto: home.id !== world.userClubId, day: world.day, importance });
-  ensureMatchLineup(away, { forceAuto: away.id !== world.userClubId, day: world.day, importance });
+  ensureMatchLineup(home, { forceAuto: home.id !== world.userClubId, day: world.day, importance, eligibleIds: homeEligibleIds });
+  ensureMatchLineup(away, { forceAuto: away.id !== world.userClubId, day: world.day, importance, eligibleIds: awayEligibleIds });
   // 主客都保证有核心（用户已指定则保留；AI / 未指定则自动选进攻最强的）
   // 避免「只有用户队会回撤内切/绝对进攻权」的单方面表现
   ensureCorePlayer(home);
@@ -593,6 +596,7 @@ export function createMatchSession(world, fixture) {
     subsUsed: { home: 0, away: 0 },
     /** 正式比赛：每队最多 5 次换人（与当代足球/FMM 一致） */
     maxSubs: 5,
+    eligiblePlayerIds: { home: homeEligibleIds, away: awayEligibleIds },
     userSide:
       home.id === world.userClubId ? "home" : away.id === world.userClubId ? "away" : null,
     userClub,
@@ -985,6 +989,7 @@ function wireSimInjuries(state) {
         (p) =>
           !xiIds.has(p.id) &&
           !taken.has(p.id) &&
+          (!state.eligiblePlayerIds?.[sk] || state.eligiblePlayerIds[sk].has(p.id)) &&
           (p.injured || 0) <= 0 &&
           !state.sentOff[sk].has(p.id) &&
           (p.fitness || 0) > 50
@@ -1603,6 +1608,7 @@ function aiAutoSub(state, club, outId, minute) {
     .filter(
       (p) =>
         !xiIds.has(p.id) &&
+        (!state.eligiblePlayerIds?.[sk] || state.eligiblePlayerIds[sk].has(p.id)) &&
         (p.injured || 0) <= 0 &&
         !state.sentOff[sk].has(p.id) &&
         (p.fitness || 0) > 50
@@ -1631,6 +1637,9 @@ export function applySubstitution(state, club, outId, inId, minute, silent = fal
   const inn = club.players.find((p) => p.id === inId);
   const outP = club.players.find((p) => p.id === outId);
   if (!inn || !outP) return { ok: false, msg: "球员无效" };
+  if (state.eligiblePlayerIds?.[sk] && !state.eligiblePlayerIds[sk].has(inId)) {
+    return { ok: false, msg: "该球员未取得本赛事参赛资格" };
+  }
   if ((inn.injured || 0) > 0) return { ok: false, msg: "替补受伤无法上场" };
   if (state.sentOff[sk].has(inId)) return { ok: false, msg: "该球员已被罚下" };
 
@@ -1789,12 +1798,12 @@ export function applyUserHalfTime(state, orders = {}) {
   if (orders.formation && FORMATIONS[orders.formation] && orders.formation !== prevForm) {
     t.formation = orders.formation;
     // 换阵型：重排首发 + 重置默认角色
-    ensureMatchLineup(club);
+    ensureMatchLineup(club, { eligibleIds: state.eligiblePlayerIds?.[state.userSide] });
     ensureLineupRoles(club, { reset: true });
     formChanged = true;
   } else if (orders.formation && FORMATIONS[orders.formation]) {
     t.formation = orders.formation;
-    ensureMatchLineup(club);
+    ensureMatchLineup(club, { eligibleIds: state.eligiblePlayerIds?.[state.userSide] });
     ensureLineupRoles(club);
   }
 
@@ -1982,7 +1991,7 @@ export function applyLiveTactics(state, orders = {}) {
   }
   if (orders.formation && FORMATIONS[orders.formation] && orders.formation !== t.formation) {
     t.formation = orders.formation;
-    ensureMatchLineup(club);
+    ensureMatchLineup(club, { eligibleIds: state.eligiblePlayerIds?.[state.userSide] });
     ensureLineupRoles(club, { reset: true });
     formChanged = true;
     changed = true;
@@ -2903,6 +2912,7 @@ export function getBenchPlayers(club, state) {
     .filter(
       (p) =>
         !xi.has(p.id) &&
+        (!state.eligiblePlayerIds?.[sk] || state.eligiblePlayerIds[sk].has(p.id)) &&
         (p.injured || 0) <= 0 &&
         (p.suspendedMatches || 0) <= 0 &&
         !state.sentOff[sk].has(p.id)

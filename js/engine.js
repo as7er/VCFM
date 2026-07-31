@@ -169,6 +169,17 @@ import {
 } from "./club-finance.js";
 import { clubCashAvailability } from "./cash-reservations.js";
 import {
+  autoRegisterClub,
+  availableRegistrationContexts,
+  developmentStatus,
+  eligiblePlayerIds,
+  ensureWorldRegistrations,
+  playerCompetitionEligibility,
+  recordDevelopmentSeason,
+  registrationSummary,
+  setPlayerRegistered,
+} from "./squad-registration.js";
+import {
   simulateMatch,
   simulateMatchSync,
   createMatchSession,
@@ -353,6 +364,14 @@ export {
   submitLoanNegotiation,
   submitRenewalNegotiation,
   cancelActiveDealNegotiations,
+  autoRegisterClub,
+  availableRegistrationContexts,
+  developmentStatus,
+  eligiblePlayerIds,
+  ensureWorldRegistrations,
+  playerCompetitionEligibility,
+  registrationSummary,
+  setPlayerRegistered,
   processRelationsDay,
   ensureSquadRelations,
   clubAtmosphere,
@@ -827,6 +846,10 @@ function checkBoardEvent(world) {
 export function finishSeason(world) {
   if (world.seasonOver) return { retired: [] };
 
+  // Record the actual club and association where each 15-21-year-old trained
+  // before ages advance and loans return for the next season.
+  recordDevelopmentSeason(world, world.season);
+
   // 个人荣誉（用本赛季 stats，在归档/升降级前）
   awardSeasonHonors(world);
 
@@ -1042,6 +1065,7 @@ export function startNextSeason(world) {
   const qualifiers = world._nextContinentalQualifiers || null;
   delete world._nextContinentalQualifiers;
   resetCompetitions(world, qualifiers);
+  ensureWorldRegistrations(world);
   const user = getUserClub(world);
   const divName = DIVISIONS[user.division]?.name || "";
   world.news.unshift({

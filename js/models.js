@@ -1601,14 +1601,15 @@ export function autoLineup(club, options = {}) {
   const formation = FORMATIONS[club.tactics.formation] || FORMATIONS["4-3-3"];
   const used = new Set();
   const lineup = [];
+  const eligibleIds = options.eligibleIds instanceof Set ? options.eligibleIds : null;
   for (const slot of formation.slots) {
     const candidates = club.players
-      .filter((p) => p.pos === slot.pos && !used.has(p.id) && playerSelectable(p))
+      .filter((p) => p.pos === slot.pos && !used.has(p.id) && playerSelectable(p) && (!eligibleIds || eligibleIds.has(p.id)))
       .sort((a, b) => xiSortScore(b, options) - xiSortScore(a, options));
     let pickP = candidates[0];
     if (!pickP) {
       pickP = club.players
-        .filter((p) => !used.has(p.id) && playerSelectable(p))
+        .filter((p) => !used.has(p.id) && playerSelectable(p) && (!eligibleIds || eligibleIds.has(p.id)))
         .sort((a, b) => xiSortScore(b, options) - xiSortScore(a, options))[0];
     }
     if (pickP) {
@@ -1647,10 +1648,10 @@ export function assignPlayersToFormationSlots(xi, slots) {
  * 保留用户已选首发：仅替换伤停/不存在/人数不足的位置
  * AI 队或 lineup 空时退回 autoLineup
  */
-export function ensureMatchLineup(club, { forceAuto = false, day = null, importance = 0.5 } = {}) {
+export function ensureMatchLineup(club, { forceAuto = false, day = null, importance = 0.5, eligibleIds = null } = {}) {
   ensureTactics(club);
   if (forceAuto || !club.tactics.lineup?.length) {
-    return autoLineup(club, { day, importance });
+    return autoLineup(club, { day, importance, eligibleIds });
   }
   const formation = FORMATIONS[club.tactics.formation] || FORMATIONS["4-3-3"];
   const need = formation.slots.length;
@@ -1661,19 +1662,19 @@ export function ensureMatchLineup(club, { forceAuto = false, day = null, importa
   for (let i = 0; i < need; i++) {
     const id = club.tactics.lineup[i];
     const p = id ? map.get(id) : null;
-    if (p && playerSelectable(p) && !used.has(p.id)) {
+    if (p && playerSelectable(p) && !used.has(p.id) && (!(eligibleIds instanceof Set) || eligibleIds.has(p.id))) {
       used.add(p.id);
       next.push(p.id);
       continue;
     }
     const slot = formation.slots[i];
     const candidates = club.players
-      .filter((x) => x.pos === slot.pos && !used.has(x.id) && playerSelectable(x))
+      .filter((x) => x.pos === slot.pos && !used.has(x.id) && playerSelectable(x) && (!(eligibleIds instanceof Set) || eligibleIds.has(x.id)))
       .sort((a, b) => xiSortScore(b, { day, importance }) - xiSortScore(a, { day, importance }));
     let pickP = candidates[0];
     if (!pickP) {
       pickP = club.players
-        .filter((x) => !used.has(x.id) && playerSelectable(x))
+        .filter((x) => !used.has(x.id) && playerSelectable(x) && (!(eligibleIds instanceof Set) || eligibleIds.has(x.id)))
         .sort((a, b) => xiSortScore(b, { day, importance }) - xiSortScore(a, { day, importance }))[0];
     }
     if (pickP) {

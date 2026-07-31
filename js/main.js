@@ -30,8 +30,8 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=178";
-import { nationFlagHtml } from "./flags.js?v=178";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=179";
+import { nationFlagHtml } from "./flags.js?v=179";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -149,6 +149,14 @@ import {
   startFacilityUpgrade,
   ensureFacilities,
   ensureWorldFinances,
+  autoRegisterClub,
+  availableRegistrationContexts,
+  developmentStatus,
+  eligiblePlayerIds,
+  ensureWorldRegistrations,
+  playerCompetitionEligibility,
+  registrationSummary,
+  setPlayerRegistered,
   stadiumInfo,
   trainingFacilityInfo,
   youthFacilityInfo,
@@ -292,7 +300,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=178";
+} from "./avatar.js?v=179";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -885,6 +893,8 @@ function initStart() {
       ensureMedia(world);
       for (const c of world.clubs) ensureStaff(c);
       ensureWorldFinances(world);
+      ensureCompetitions(world);
+      ensureWorldRegistrations(world);
       refreshStaffMarket(world);
       const u = world.clubs.find((c) => c.id === clubId);
       mediaSeasonKickoff(world, u, t("div." + (u.division || 3)) || DIVISIONS[u.division || 3]?.name || "League");
@@ -1027,11 +1037,13 @@ function migrateWorld(w) {
     ensureRealisticPlayerTalent(p);
     ensurePlayerInjury(p);
   }
+  ensureCompetitions(w);
   if ((w.abilityDistributionVersion || 0) < ABILITY_DISTRIBUTION_VERSION) {
     calibrateWorldAbilityDistribution(w.clubs || []);
     for (const club of w.clubs || []) autoLineup(club);
     w.abilityDistributionVersion = ABILITY_DISTRIBUTION_VERSION;
   }
+  ensureWorldRegistrations(w);
   applyWorldClubBranding(w, clubBrandingById, getLang());
   // 旧档若缺少当前五国联赛结构，提示开新档体验完整升降级
   const counts = { 1: 0, 2: 0, 3: 0 };
@@ -1258,7 +1270,7 @@ function bindMainOnce() {
     const club = getUserClub(world);
     ensureTactics(club);
     club.tactics.formation = formSel.value;
-    autoLineup(club);
+    autoLineup(club, { eligibleIds: nextMatchEligibility(club).ids });
     renderTactics();
     saveGame(world);
   };
@@ -1309,7 +1321,7 @@ function bindMainOnce() {
       t0.defensiveLine = preset.defensiveLine;
       if (preset.formation && FORMATIONS[preset.formation]) {
         t0.formation = preset.formation;
-        autoLineup(club);
+        autoLineup(club, { eligibleIds: nextMatchEligibility(club).ids });
       }
       renderTactics();
       renderSquad();
@@ -1319,7 +1331,8 @@ function bindMainOnce() {
   }
 
   $("#btn-auto-xi").onclick = () => {
-    autoLineup(getUserClub(world));
+    const club = getUserClub(world);
+    autoLineup(club, { eligibleIds: nextMatchEligibility(club).ids });
     renderTactics();
     renderSquad();
     toast(t("toast.autoXi"));
@@ -3531,6 +3544,116 @@ let squadTableView = (() => {
   try { return localStorage.getItem("vcfm-squad-view") === "full" ? "full" : "compact"; }
   catch (_) { return "compact"; }
 })();
+let selectedRegistrationKey = "league";
+
+function fixtureForRegistrationContext(context) {
+  if (context.type === "continental") {
+    return {
+      competition: "continental",
+      competitionType: "continental-league-stage",
+      competitionId: context.competitionId,
+      competitionName: context.name,
+    };
+  }
+  return { competition: "league", competitionType: "league" };
+}
+
+function renderSquadRegistration() {
+  const table = $("#registration-table");
+  const select = $("#registration-competition");
+  const summaryBox = $("#registration-summary");
+  if (!world || !table || !select || !summaryBox) return;
+  const club = getUserClub(world);
+  const en = getLang() === "en";
+  const heading = $("#registration-heading");
+  const statusHeading = $("#registration-th-status");
+  const developmentHeading = $("#registration-th-development");
+  const routeHeading = $("#registration-th-route");
+  if (heading) heading.textContent = en ? "Competition registration" : "赛事报名";
+  if (statusHeading) statusHeading.textContent = en ? "Selected" : "报名";
+  if (developmentHeading) developmentHeading.textContent = en ? "Development status" : "培养资格";
+  if (routeHeading) routeHeading.textContent = en ? "Eligibility route" : "参赛路径";
+  const contexts = availableRegistrationContexts(world, club);
+  if (!contexts.some((context) => context.key === selectedRegistrationKey)) {
+    selectedRegistrationKey = contexts[0]?.key || "league";
+  }
+  select.innerHTML = contexts
+    .map((context) => `<option value="${escapeHtml(context.key)}"${context.key === selectedRegistrationKey ? " selected" : ""}>${escapeHtml(context.type === "league" ? (en ? "Domestic league" : "国内联赛") : context.name)}</option>`)
+    .join("");
+  const context = contexts.find((item) => item.key === selectedRegistrationKey) || contexts[0];
+  if (!context) return;
+  const summary = registrationSummary(world, club, context);
+  const entryIds = new Set(summary.entry.playerIds || []);
+  const fixture = fixtureForRegistrationContext(context);
+  const quotaText = context.type === "continental"
+    ? `${en ? "Club-trained" : "本俱乐部培养"} ${summary.clubTrained}/4 · ${en ? "Association-trained" : "本足协培养"} ${summary.associationTrained}/8`
+    : `${en ? "Association-trained" : "本足协培养"} ${summary.associationTrained}`;
+  summaryBox.innerHTML = `
+    <div><span>${en ? "A-list" : "A 名单"}</span><strong>${summary.registered}/25</strong></div>
+    <div><span>${en ? "Non-association trained" : "非本足协培养"}</span><strong class="${summary.nonAssociation > 17 ? "stat-low" : ""}">${summary.nonAssociation}/17</strong></div>
+    <div><span>${quotaText}</span><strong>${summary.exempt} ${en ? "exempt" : "人免报名"}</strong></div>
+    <div><span>${summary.locked ? (en ? "List locked" : "名单已锁定") : (en ? "Registration window open" : "报名窗口开放")}</span><strong class="${summary.valid ? "stat-high" : "stat-low"}">${summary.valid ? (en ? "Valid" : "合规") : (en ? "Invalid" : "不合规")}</strong></div>`;
+  const hint = $("#registration-window-hint");
+  if (hint) {
+    hint.textContent = context.type === "continental"
+      ? (en ? "25-player A-list: no more than 17 non-homegrown; four club-trained places. Club-trained U21 players with two years qualify for List B." : "25 人 A 名单最多 17 名非本土培养，并预留 4 个本俱乐部培养名额；在队培养满 2 年的 U21 可走 B 名单。")
+      : (en ? "25-player league list with no more than 17 non-association-trained players; U21 players are exempt." : "联赛 25 人名单最多 17 名非本足协培养；U21 球员免占名额。") ;
+  }
+  const autoButton = $("#btn-registration-auto");
+  if (autoButton) {
+    autoButton.textContent = en ? "Auto-select" : "自动报名";
+    autoButton.disabled = summary.locked;
+    autoButton.onclick = () => {
+      const result = autoRegisterClub(world, club, context);
+      toast(en ? (result.ok ? "Registration submitted" : result.msg) : result.msg);
+      if (result.ok) {
+        saveGame(world);
+        renderSquadRegistration();
+        renderTactics();
+      }
+    };
+  }
+  select.onchange = () => {
+    selectedRegistrationKey = select.value;
+    renderSquadRegistration();
+  };
+  const rows = [...(club.players || [])].sort((a, b) => b.ovr - a.ovr);
+  table.querySelector("tbody").innerHTML = rows.map((player) => {
+    const status = developmentStatus(world, club, player);
+    const eligibility = playerCompetitionEligibility(world, club, fixture, player);
+    const exempt = eligibility.route === "u21" || eligibility.route === "list-b";
+    const trained = status.clubTrained
+      ? `<span class="badge MID">${en ? "Club-trained" : "本俱乐部培养"}</span><span class="muted">${status.clubYears}${en ? "y" : "年"}</span>`
+      : status.associationTrained
+        ? `<span class="badge DEF">${en ? "Association-trained" : "本足协培养"}</span><span class="muted">${status.associationYears}${en ? "y" : "年"}</span>`
+        : `<span class="muted">${en ? "Non-homegrown" : "非本土培养"}</span>`;
+    const route = eligibility.route === "u21"
+      ? (en ? "U21 exempt" : "U21 免报名")
+      : eligibility.route === "list-b"
+        ? (en ? "List B" : "B 名单")
+        : entryIds.has(player.id)
+          ? (en ? "A-list" : "A 名单")
+          : (en ? "Not eligible" : "未报名");
+    return `<tr class="${eligibility.eligible ? "" : "row-unavailable"}">
+      <td><input type="checkbox" data-registration-player="${escapeHtml(player.id)}" ${entryIds.has(player.id) || exempt ? "checked" : ""} ${summary.locked || exempt ? "disabled" : ""} aria-label="${escapeHtml(player.name)}"></td>
+      <td>${playerLinkHtml(player.id, player.name)}</td>
+      <td><span class="badge ${player.pos}">${escapeHtml(positionLabel(player.pos))}</span></td>
+      <td>${player.age}</td>
+      <td class="${ovrClass(player.ovr)}"><strong>${player.ovr}</strong></td>
+      <td>${trained}</td>
+      <td>${escapeHtml(route)}</td>
+    </tr>`;
+  }).join("");
+  table.querySelectorAll("[data-registration-player]").forEach((checkbox) => {
+    checkbox.onchange = () => {
+      const result = setPlayerRegistered(world, club, context, checkbox.dataset.registrationPlayer, checkbox.checked);
+      toast(en ? (result.ok ? "Registration updated" : result.msg) : result.msg);
+      if (result.ok) saveGame(world);
+      renderSquadRegistration();
+      renderTactics();
+    };
+  });
+}
 
 function renderSquad() {
   const club = getUserClub(world);
@@ -3641,6 +3764,7 @@ function renderSquad() {
   tbody.querySelectorAll("button[data-pid]").forEach((btn) => {
     btn.onclick = () => showPlayerModal(btn.dataset.pid);
   });
+  renderSquadRegistration();
 }
 
 function showPlayerModal(playerId, context = {}) {
@@ -3763,6 +3887,12 @@ function showPlayerModal(playerId, context = {}) {
     }
   }
   if (displayTeam) ensureKit(displayTeam);
+  const trainingStatus = owningClub ? developmentStatus(world, owningClub, player) : null;
+  const trainingLabel = trainingStatus?.clubTrained
+    ? (en ? `Club-trained (${trainingStatus.clubYears}y)` : `本俱乐部培养（${trainingStatus.clubYears} 年）`)
+    : trainingStatus?.associationTrained
+      ? (en ? `Association-trained (${trainingStatus.associationYears}y)` : `本足协培养（${trainingStatus.associationYears} 年）`)
+      : (en ? "Non-homegrown" : "非本土培养");
   $("#modal-card")?.classList.remove("wide", "search-modal");
   $("#modal-body").innerHTML = `
     ${playerBrowseNavHtml(browseContext)}
@@ -3803,6 +3933,7 @@ function showPlayerModal(playerId, context = {}) {
             : ""
       }
       ${player._needsRenew ? ` · <span class="badge contract-urgent">${escapeHtml(t("contract.needsRenew") || "待续约")}</span>` : ""}
+      ${trainingStatus ? ` · <span class="badge ${trainingStatus.clubTrained ? "MID" : trainingStatus.associationTrained ? "DEF" : ""}">${escapeHtml(trainingLabel)}</span>` : ""}
     </p>
     ${
       fromOther
@@ -4617,6 +4748,16 @@ function afterLineupChange(club, res) {
   renderSquad();
 }
 
+function nextMatchEligibility(club) {
+  const fixture = getNextUserMatch(world);
+  return {
+    fixture,
+    ids: fixture
+      ? eligiblePlayerIds(world, club, fixture)
+      : new Set((club?.players || []).map((player) => player.id)),
+  };
+}
+
 function bindTacticsDragDrop() {
   const pitch = $("#pitch");
   const bench = $("#tac-bench");
@@ -4886,11 +5027,12 @@ function renderTactics() {
       : "";
   }
 
-  if (!tac.lineup?.length) autoLineup(club);
+  const nextEligibility = nextMatchEligibility(club);
+  if (!tac.lineup?.length) autoLineup(club, { eligibleIds: nextEligibility.ids });
   // 阵型槽位数变化时对齐 lineup 长度
   const formation = FORMATIONS[tac.formation] || FORMATIONS["4-3-3"];
   if ((tac.lineup || []).length !== formation.slots.length) {
-    autoLineup(club);
+    autoLineup(club, { eligibleIds: nextEligibility.ids });
   }
   ensureLineupRoles(club);
   const coreId = getCorePlayerId(club);
@@ -4920,6 +5062,7 @@ function renderTactics() {
   pitch.innerHTML = formation.slots
     .map((slot, i) => {
       const p = players[i];
+      const competitionEligible = !p || nextEligibility.ids.has(p.id);
       const label = p ? playerDisplaySurname(p.name, p.nationality) : "?";
       const shirtNo = p && p.number != null ? p.number : null;
       const fallback = shirtNo != null ? shirtNo : p ? p.ovr : "-";
@@ -4938,7 +5081,7 @@ function renderTactics() {
       )}" aria-label="${escapeHtml(en ? "Role" : "角色")}">${roleOpts.join("")}</select>`;
       const isCore = p && p.id === coreId;
       const full = p
-        ? `${shirtNo != null ? `#${shirtNo} ` : ""}${p.name} · ${roleLabel(roleId, en ? "en" : "zh")}${isCore ? (en ? " · CORE" : " · 核心") : ""}`
+        ? `${shirtNo != null ? `#${shirtNo} ` : ""}${p.name} · ${roleLabel(roleId, en ? "en" : "zh")}${isCore ? (en ? " · CORE" : " · 核心") : ""}${competitionEligible ? "" : (en ? " · NOT REGISTERED" : " · 未报名")}`
         : positionLabel(slot.pos);
       const badge =
         shirtNo != null
@@ -4956,7 +5099,8 @@ function renderTactics() {
       const oop = p && p.pos !== slot.pos ? " out-of-pos" : "";
       const empty = !p ? " empty" : "";
       const coreCls = isCore ? " is-core" : "";
-      return `<div class="player-dot tac-slot${p ? " clickable-player" : ""}${oop}${empty}${coreCls}"
+      const registrationCls = competitionEligible ? "" : " unavailable";
+      return `<div class="player-dot tac-slot${p ? " clickable-player" : ""}${oop}${empty}${coreCls}${registrationCls}"
         style="left:${slot.x}%;top:${slot.y}%"
         title="${escapeHtml(full)}"
         draggable="${p ? "true" : "false"}"
@@ -4987,7 +5131,7 @@ function renderTactics() {
       ? benchPlayers
           .map((p) => {
             const unavail =
-              (p.injured || 0) > 0 || (p.suspendedMatches || 0) > 0;
+              (p.injured || 0) > 0 || (p.suspendedMatches || 0) > 0 || !nextEligibility.ids.has(p.id);
             const num = p.number != null ? `#${p.number}` : "";
             const av = playerAvatarHtml(p, club, 40);
             const fit = Math.round(p.fitness ?? 100);
@@ -4998,6 +5142,8 @@ function renderTactics() {
                   ? `<em class="tac-chip-warn">${escapeHtml(injuryStatusText(p, getLang() === "en"))}</em>`
                 : (p.suspendedMatches || 0) > 0
                   ? `<em class="tac-chip-bad">${getLang() === "en" ? "SUS" : "停"}</em>`
+                  : !nextEligibility.ids.has(p.id)
+                    ? `<em class="tac-chip-bad">${getLang() === "en" ? "UNREG" : "未报名"}</em>`
                   : fit < 62
                     ? `<em class="tac-chip-warn">${fit}%</em>`
                     : `<em>${p.ovr}</em>`;
