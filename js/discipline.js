@@ -47,7 +47,7 @@ export function tickSuspensionsAfterMatch(club, newlyBannedIds = new Set()) {
 /**
  * 完整处理：先记账停赛，再 tick，返回 newlyBanned + 新闻
  */
-export function processClubMatchDiscipline(club, events) {
+export function processClubMatchDiscipline(club, events, { random = Math.random } = {}) {
   const news = [];
   const newlyBanned = new Set();
   if (!club || !events) return { news, newlyBanned };
@@ -108,7 +108,7 @@ export function processClubMatchDiscipline(club, events) {
     if (rec.red) {
       const banFinal = rec.secondYellow
         ? 1
-        : 1 + (Math.random() < 0.35 ? 1 : 0) + (Math.random() < 0.15 ? 1 : 0);
+        : 1 + (random() < 0.35 ? 1 : 0) + (random() < 0.15 ? 1 : 0);
       p.suspendedMatches = (p.suspendedMatches || 0) + banFinal;
       newlyBanned.add(p.id);
       news.push(

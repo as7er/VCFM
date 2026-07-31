@@ -35,7 +35,7 @@ export function shouldUseSim(state) {
  */
 export function ensureSimEngine(state) {
   if (state.simEng) return state.simEng;
-  state.simEng = new SimEngine(state.home, state.away);
+  state.simEng = new SimEngine(state.home, state.away, { random: state.random });
   state.simEngineMeta = { version: 2, halves: [] };
   return state.simEng;
 }

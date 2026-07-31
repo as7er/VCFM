@@ -30,8 +30,8 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=169";
-import { nationFlagHtml } from "./flags.js?v=169";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=170";
+import { nationFlagHtml } from "./flags.js?v=170";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import {
   ensureCompetitions,
@@ -284,7 +284,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=169";
+} from "./avatar.js?v=170";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;

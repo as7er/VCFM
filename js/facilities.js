@@ -280,6 +280,7 @@ export function matchdayIncome(club, options = {}) {
     opponentStrength = 0,
     formBonus = 1.0,
     seasonPhaseBonus = 1.0,
+    random = Math.random,
   } = options;
 
   const st = stadiumInfo(club);
@@ -320,7 +321,7 @@ export function matchdayIncome(club, options = {}) {
     fillMin = Math.min(1.0, fillMin + 0.08); // 强强对话吸引球迷
   }
 
-  const fill = fillMin + Math.random() * (fillMax - fillMin);
+  const fill = fillMin + random() * (fillMax - fillMin);
   const capacity = st.capacity || 0;
   const attendance = Math.max(0, Math.round(capacity * fill));
   const gateIncome = Math.round(base * fill);

@@ -80,7 +80,7 @@ function estimateShotXg(shot) {
  * 这是让决策"有概率性、不死板"的核心——同样局面不再永远同一选择，
  * 但高分动作仍更可能被选中（贴近真实球员的临场差异）。
  */
-function weightedPick(items, temp = 0.35) {
+function weightedPick(items, temp = 0.35, random = Math.random) {
   const valid = items.filter((it) => it && it.w > 0);
   if (!valid.length) return null;
   if (valid.length === 1) return valid[0].key;
@@ -92,7 +92,7 @@ function weightedPick(items, temp = 0.35) {
     sum += e;
     return e;
   });
-  let r = Math.random() * sum;
+  let r = random() * sum;
   for (let i = 0; i < valid.length; i++) {
     r -= exps[i];
     if (r <= 0) return valid[i].key;
@@ -125,6 +125,7 @@ export class SimEngine {
     this.home = home;
     this.away = away;
     this.opts = opts;
+    this.random = typeof opts.random === "function" ? opts.random : Math.random;
     this.t = 0; // 已模拟时间（秒）
     this.agents = [];
     this.ball = null;
@@ -361,7 +362,7 @@ export class SimEngine {
     const tempo = this._tacticLevel(a.team, "tempo");
     const base = clamp(1.9 - (tempo - 3) * 0.18, 1.35, 2.45);
     const spread = clamp(1.7 - (tempo - 3) * 0.1, 1.1, 2.1);
-    return this.t + base + Math.random() * spread;
+    return this.t + base + this.random() * spread;
   }
 
   _applyAttackTactics(a, phaseActor) {
@@ -552,7 +553,7 @@ export class SimEngine {
         a.decisionUntil =
           this.t +
           clamp(0.9 - (tempo - 3) * 0.06, 0.7, 1.15) +
-          Math.random() * 0.7;
+          this.random() * 0.7;
         this._decideOnBall(a);
       }
       // 执行上次意图（盘带/护球朝目标带球；传/射在 decide 内瞬时触发）
@@ -570,7 +571,7 @@ export class SimEngine {
         a.attackThinkUntil =
           this.t +
           clamp(0.62 - (tempo - 3) * 0.055, 0.42, 0.82) +
-          Math.random() * 0.5;
+          this.random() * 0.5;
         this._thinkAttackOffBall(a, phaseActor);
         this._applyAttackTactics(a, phaseActor);
       }
@@ -594,7 +595,7 @@ export class SimEngine {
     // —— 门将持球：护球够久再开球（避免与前锋贴脸「传球互动」）——
     if (b.owner === a.id) {
       if (this.t >= a.decisionUntil) {
-        a.decisionUntil = this.t + 0.55 + Math.random() * 0.35;
+        a.decisionUntil = this.t + 0.55 + this.random() * 0.35;
         this._gkDistribute(a);
       }
       // 持球时钉在门区，不跟着前锋挪
@@ -707,9 +708,9 @@ export class SimEngine {
     }
     if (!receiver) {
       // 无人可瞄：开向中路偏一侧的安全通道（绝不到旧实现的 22/78 贴边）
-      const sideBias = (b.x >= 50 ? 1 : -1) * (0.45 + Math.random() * 0.4);
-      targetX = clamp(50 + sideBias * (8 + Math.random() * 10), 32, 68);
-      targetY = clamp(50 + dir * -(5 + Math.random() * 8), 40, 60);
+      const sideBias = (b.x >= 50 ? 1 : -1) * (0.45 + this.random() * 0.4);
+      targetX = clamp(50 + sideBias * (8 + this.random() * 10), 32, 68);
+      targetY = clamp(50 + dir * -(5 + this.random() * 8), 40, 60);
     }
 
     const dx = targetX - b.x;
@@ -720,8 +721,8 @@ export class SimEngine {
     // d≈40 → ~19–22；上限 26，远低于旧大脚 30–44
     const power = clamp(d * 0.46 + 2, 15, 26) * (0.92 + 0.1 * kick);
     const err = (1 - kick) * 2.8;
-    const nx = (Math.random() - 0.5) * err;
-    const ny = (Math.random() - 0.5) * err;
+    const nx = (this.random() - 0.5) * err;
+    const ny = (this.random() - 0.5) * err;
 
     // 先清旧传球/越位快照，再写入本脚大脚落点（门将开球依法不受越位限制）
     this._clearBallTarget();
@@ -794,8 +795,8 @@ export class SimEngine {
           value: 1,
           through: false,
           cross: true,
-          tx: clamp(50 + (Math.random() - 0.5) * 12, 38, 62),
-          ty: clamp(boxY + (Math.random() - 0.5) * 6, 8, 92),
+          tx: clamp(50 + (this.random() - 0.5) * 12, 38, 62),
+          ty: clamp(boxY + (this.random() - 0.5) * 6, 8, 92),
         });
       }
       b.state = "pass";
@@ -830,8 +831,8 @@ export class SimEngine {
               value: 1,
               through: false,
               cross: true,
-              tx: clamp(50 + (Math.random() - 0.5) * 12, 40, 60),
-              ty: clamp(fkBoxY + (Math.random() - 0.5) * 6, 8, 92),
+              tx: clamp(50 + (this.random() - 0.5) * 12, 40, 60),
+              ty: clamp(fkBoxY + (this.random() - 0.5) * 6, 8, 92),
             }
       );
       return;
@@ -923,7 +924,7 @@ export class SimEngine {
         (clearCloseChance ||
           (shootQuality > shootThresh &&
             shootQuality >= passQuality * (core ? 0.7 : isWing ? 0.78 : 0.85))) &&
-        Math.random() < shootDecisionP
+        this.random() < shootDecisionP
       ) {
         a.shotCdUntil = this.t + (core ? 0.9 : isWing ? 1.1 : isMid ? 1.6 : 1.2);
         this._shoot(a);
@@ -937,11 +938,11 @@ export class SimEngine {
       // 在禁区边缘形成僵持平衡（残余僵持的根因）。真实球员会起球传中或回做。
       if (this.t < (this._teamShotUntil[a.team] || 0) && pressure > 0.55) {
         const cross = this._bestCross(a);
-        if (cross && Math.random() < 0.5) {
+        if (cross && this.random() < 0.5) {
           this._pass(a, cross);
           return;
         }
-        if (passTo && Math.random() < 0.6) {
+        if (passTo && this.random() < 0.6) {
           this._pass(a, passTo);
           return;
         }
@@ -963,7 +964,7 @@ export class SimEngine {
       const burst = 0.55 * a.attr.dribbling + 0.45 * a.attr.pace;
       if (pressure < 0.72 && burst > 0.35 && this.t >= (a.cutInCdUntil || 0)) {
         // 偶尔立刻起脚横传/传中；多数情况内切
-        const wantCrossNow = pressure > 0.55 && Math.random() < 0.28;
+        const wantCrossNow = pressure > 0.55 && this.random() < 0.28;
         if (wantCrossNow) {
           const cross = this._bestCross(a);
           if (cross) {
@@ -987,7 +988,7 @@ export class SimEngine {
     // ——————————— 边后卫高位：优先传中/回做 —— 
     if (isFb && dGoal < 42 && (a.baseX < 30 || a.baseX > 70)) {
       const cross = this._bestCross(a);
-      if (cross && this.t >= (a.crossCdUntil || 0) && Math.random() < 0.55 + a.attr.passing * 0.25) {
+      if (cross && this.t >= (a.crossCdUntil || 0) && this.random() < 0.55 + a.attr.passing * 0.25) {
         a.crossCdUntil = this.t + 2.5;
         this._pass(a, cross);
         return;
@@ -1078,7 +1079,7 @@ export class SimEngine {
         0.012,
         0.16
       );
-      if (Math.random() < longConsiderP) {
+      if (this.random() < longConsiderP) {
         let longW =
           (0.06 + 0.5 * a.attr.shooting + 0.18 * a.attr.finishing + 0.12 * a.attr.pace) *
           angF *
@@ -1094,7 +1095,7 @@ export class SimEngine {
     options.push({ key: { act: "hold" }, w: 0.12 + pressure * 0.2 + (core ? 0.05 : 0) });
 
     // 核心决策更果断（温度更低 → 更偏高分动作，但盘带/射门分已抬高）
-    const choice = weightedPick(options, core ? 0.28 : isWing ? 0.3 : 0.35) || { act: "hold" };
+    const choice = weightedPick(options, core ? 0.28 : isWing ? 0.3 : 0.35, this.random) || { act: "hold" };
     if (choice.act === "pass") {
       this._pass(a, choice.target);
     } else if (choice.act === "longshot") {
@@ -1154,8 +1155,8 @@ export class SimEngine {
         roleB *
         coreB;
       // 落点：禁区内前点/中点，不是脚下
-      const tx = clamp(m.x * 0.55 + 50 * 0.45 + (Math.random() - 0.5) * 6, 28, 72);
-      const ty = clamp(goalY - dir * (8 + Math.random() * 6), 4, 96);
+      const tx = clamp(m.x * 0.55 + 50 * 0.45 + (this.random() - 0.5) * 6, 28, 72);
+      const ty = clamp(goalY - dir * (8 + this.random() * 6), 4, 96);
       if (!best || value > best.value) {
         best = { agent: m, value, through: true, tx, ty, cross: true };
       }
@@ -1269,10 +1270,10 @@ export class SimEngine {
         lineGap < 11 &&
         receiverGoalDist < 44 &&
         safety > 0.28 &&
-        Math.random() < 0.025 + a.attr.vision * 0.055 &&
+        this.random() < 0.025 + a.attr.vision * 0.055 &&
         this.t >= (this._teamThroughUntil[a.team] || 0)
       ) {
-        const leadY = clamp(ty + dir * (6 + Math.random() * 4), 3, 97);
+        const leadY = clamp(ty + dir * (6 + this.random() * 4), 3, 97);
         // 落点未越过越位线太多才算可行直塞
         const okOffside =
           offY == null ||
@@ -1339,8 +1340,8 @@ export class SimEngine {
     const passSpeed = clamp(18 + d * 0.7, 18, 42) * (0.85 + 0.15 * a.attr.passing);
     // 精度噪声：passing 越低越偏
     const err = (1 - a.attr.passing) * 6;
-    const nx = (Math.random() - 0.5) * err;
-    const ny = (Math.random() - 0.5) * err;
+    const nx = (this.random() - 0.5) * err;
+    const ny = (this.random() - 0.5) * err;
     b.owner = null;
     b.vx = (dx / d) * passSpeed + nx;
     b.vy = (dy / d) * passSpeed + ny;
@@ -1356,12 +1357,12 @@ export class SimEngine {
       // 角球到落点时应已降到可争顶高度；固定 14–18 的旧 loft 会让球越过落点后
       // 仍在所有人头顶，继续飘出另一侧底线。
       const flightTime = clamp(d / Math.max(1, passSpeed), 0.35, 1.8);
-      const targetZ = 1.65 + Math.random() * 0.45;
+      const targetZ = 1.65 + this.random() * 0.45;
       loft = clamp((targetZ - 0.2 + 9 * flightTime * flightTime) / flightTime, 8, 13.5);
-    } else if (isCross) loft = 14 + Math.random() * 4;
-    else if (isThrough) loft = 6 + Math.random() * 3;
+    } else if (isCross) loft = 14 + this.random() * 4;
+    else if (isThrough) loft = 6 + this.random() * 3;
     else if (d > 28) loft = 9 + (d - 28) * 0.12;
-    else if (d > 18) loft = 3.5 + Math.random() * 2.5;
+    else if (d > 18) loft = 3.5 + this.random() * 2.5;
     b.z = 0.2;
     b.vz = loft;
     b.lastKicker = a.id;
@@ -1420,7 +1421,7 @@ export class SimEngine {
     const long = dGoal > 22;
     // 球队级节奏上限：强队长期围攻时也不能每几十秒起脚一次。
     // 这是模拟时间的进攻周期，不是表现层的墙钟等待。
-    this._teamShotUntil[a.team] = this.t + 420 + Math.random() * 230;
+    this._teamShotUntil[a.team] = this.t + 420 + this.random() * 230;
     // 近：finishing；远：shooting。远射噪声更大，容易打飞/被扑
     const skill = long
       ? 0.35 * a.attr.finishing + 0.65 * a.attr.shooting
@@ -1452,7 +1453,7 @@ export class SimEngine {
         err *= 0.78;
       }
     }
-    const aimX = 50 + (Math.random() - 0.5) * err;
+    const aimX = 50 + (this.random() - 0.5) * err;
     const dx = aimX - b.x;
     const dy = goalY - b.y;
     const d = Math.hypot(dx, dy) || 1;
@@ -1481,7 +1482,7 @@ export class SimEngine {
     const verticalSpread =
       (long ? 4.4 : 3.8) + (1 - skill) * (long ? 2.8 : 2.2) +
       (long ? Math.max(0, dGoal - 25) * 0.05 : 0);
-    const targetZ = Math.max(0.08, 1.0 + (Math.random() - 0.5) * verticalSpread);
+    const targetZ = Math.max(0.08, 1.0 + (this.random() - 0.5) * verticalSpread);
     b.z = 0.25;
     b.vz = (targetZ - b.z + 9 * flightTime * flightTime) / flightTime;
     b.lastKicker = a.id;
@@ -1554,12 +1555,12 @@ export class SimEngine {
       if (owner && owner.team === a.team && owner !== a) {
         const side = a.x < owner.x ? -1 : 1;
         // 时而回撤到球后接应，时而前插要直塞
-        if (prog < 0.55 || Math.random() < 0.4) {
-          a.tx = clamp(owner.x + side * (6 + Math.random() * 5), 8, 92);
-          a.ty = clamp(owner.y + dir * (4 + Math.random() * 6), 5, 95);
+        if (prog < 0.55 || this.random() < 0.4) {
+          a.tx = clamp(owner.x + side * (6 + this.random() * 5), 8, 92);
+          a.ty = clamp(owner.y + dir * (4 + this.random() * 6), 5, 95);
         } else {
           a.tx = clamp(owner.x + (50 - owner.x) * 0.2 + side * 4, 10, 90);
-          a.ty = clamp(owner.y + dir * (12 + Math.random() * 8), 6, 94);
+          a.ty = clamp(owner.y + dir * (12 + this.random() * 8), 6, 94);
         }
         a.fsm = "support";
         this._clampOffside(a);
@@ -1577,7 +1578,7 @@ export class SimEngine {
         prog < 0.72 &&
         (dBall < 42 ||
           core ||
-          Math.random() < 0.32 + (prog < 0.48 ? 0.22 : 0) + a.attr.dribbling * 0.15);
+          this.random() < 0.32 + (prog < 0.48 ? 0.22 : 0) + a.attr.dribbling * 0.15);
       if (drop) {
         // 组织阶段保持左右固定通道；旧逻辑围绕球只偏 8~12，双翼会一起挤进中路。
         const wideAnchor = wingSide < 0 ? 17 : 83;
@@ -1589,8 +1590,8 @@ export class SimEngine {
           12,
           88
         );
-        const dropDepth = 8 + Math.random() * 10;
-        a.tx = clamp(softIn + (Math.random() - 0.5) * 4, 10, 90);
+        const dropDepth = 8 + this.random() * 10;
+        a.tx = clamp(softIn + (this.random() - 0.5) * 4, 10, 90);
         a.ty = clamp(b.y + dir * dropDepth, 8, 92);
         a.fsm = "support";
         this._clampOffside(a);
@@ -1598,9 +1599,9 @@ export class SimEngine {
       }
       // 已过半场：肋部内切跑位（不是死钉边线）
       if (prog > 0.48) {
-        const cutX = clamp(50 + wingSide * (14 + Math.random() * 10), 18, 82);
+        const cutX = clamp(50 + wingSide * (14 + this.random() * 10), 18, 82);
         a.tx = clamp(cutX + (b.x - 50) * 0.08, 12, 88);
-        a.ty = clamp(b.y + dir * (10 + Math.random() * 10), 5, 95);
+        a.ty = clamp(b.y + dir * (10 + this.random() * 10), 5, 95);
         a.fsm = "support";
         this._clampOffside(a);
         return;
@@ -1621,12 +1622,12 @@ export class SimEngine {
         prog < 0.68 &&
         (nearest ||
           core ||
-          Math.random() < 0.22 + (prog < 0.45 ? 0.18 : 0));
+          this.random() < 0.22 + (prog < 0.45 ? 0.18 : 0));
       if (drop) {
         const side = a.baseX < 48 ? -1 : a.baseX > 52 ? 1 : a.x < b.x ? -1 : 1;
         // 回撤深度：到球与中场之间，而不是一直顶在越位线
-        const dropDepth = nearest || core ? 10 + Math.random() * 8 : 14 + Math.random() * 6;
-        a.tx = clamp(b.x + side * (6 + Math.random() * 8), 8, 92);
+        const dropDepth = nearest || core ? 10 + this.random() * 8 : 14 + this.random() * 6;
+        a.tx = clamp(b.x + side * (6 + this.random() * 8), 8, 92);
         a.ty = clamp(b.y + dir * dropDepth, 8, 92);
         a.fsm = "support";
         return;
@@ -1646,7 +1647,7 @@ export class SimEngine {
       const wantRun =
         prog > 0.42 &&
         (advanced || burst > 0.48 || core) &&
-        (dBall > 16 || Math.random() < 0.28 + burst * 0.35);
+        (dBall > 16 || this.random() < 0.28 + burst * 0.35);
 
       if (wantRun && dBall > 12) {
         const side =
@@ -1659,7 +1660,7 @@ export class SimEngine {
                 : 0.45;
         const depth = 11 + burst * 10 + (advanced ? 4 : 0) + (core ? 3 : 0);
         a.tx = clamp(
-          b.x + side * (12 + Math.random() * 6) + (a.baseX - 50) * 0.12,
+          b.x + side * (12 + this.random() * 6) + (a.baseX - 50) * 0.12,
           8,
           92
         );
@@ -1678,8 +1679,8 @@ export class SimEngine {
               : (a.num || 0) % 2
                 ? -0.5
                 : 0.5;
-        a.tx = clamp(b.x + side * (11 + Math.random() * 6), 5, 95);
-        a.ty = clamp(b.y + dir * (7 + Math.random() * 5), 3, 97);
+        a.tx = clamp(b.x + side * (11 + this.random() * 6), 5, 95);
+        a.ty = clamp(b.y + dir * (7 + this.random() * 5), 3, 97);
         a.fsm = "support";
       } else {
         a.tx = clamp(a.baseX + (b.x - 50) * 0.18, 5, 95);
@@ -1696,12 +1697,12 @@ export class SimEngine {
       // 本队控球且球已过半场：有概率沿边路前插
       const bombOn =
         prog > 0.38 &&
-        (prog > 0.55 || Math.random() < 0.32 + a.attr.pace * 0.25) &&
+        (prog > 0.55 || this.random() < 0.32 + a.attr.pace * 0.25) &&
         dBall < 55;
       if (bombOn) {
         // 套边：贴边线 + 推到球的平行甚至更前，准备传中
-        a.tx = clamp(wide < 0 ? 8 + Math.random() * 6 : 86 + Math.random() * 6, 4, 96);
-        a.ty = clamp(b.y + dir * (8 + Math.random() * 12 + prog * 8), 8, 92);
+        a.tx = clamp(wide < 0 ? 8 + this.random() * 6 : 86 + this.random() * 6, 4, 96);
+        a.ty = clamp(b.y + dir * (8 + this.random() * 12 + prog * 8), 8, 92);
         a.fsm = "support";
         this._clampOffside(a);
         return;
@@ -1717,7 +1718,7 @@ export class SimEngine {
     // —— 中卫：近球少接应，否则回位略前压 ——
     if (dBall < 22) {
       const side = a.x < b.x ? -1 : 1;
-      a.tx = clamp(b.x + side * (10 + Math.random() * 4), 5, 95);
+      a.tx = clamp(b.x + side * (10 + this.random() * 4), 5, 95);
       a.ty = clamp(b.y + dir * 3, 3, 97);
       a.fsm = "support";
     } else {
@@ -1779,7 +1780,7 @@ export class SimEngine {
       effectiveBuffer = a.offsideRunBuffer;
     } else {
       effectiveBuffer =
-        Math.random() < mistimeChance ? -(0.45 + (1 - awareness) * 0.9) : roleBuffer;
+        this.random() < mistimeChance ? -(0.45 + (1 - awareness) * 0.9) : roleBuffer;
       a.offsideRunBuffer = effectiveBuffer;
       a.offsideBufferUntil = this.t + 0.2;
     }
@@ -1876,7 +1877,7 @@ export class SimEngine {
 
     plan.jobs = jobs;
     plan.until =
-      this.t + clamp(0.88 - (pressing - 3) * 0.08, 0.58, 1.08) + Math.random() * 0.28;
+      this.t + clamp(0.88 - (pressing - 3) * 0.08, 0.58, 1.08) + this.random() * 0.28;
     return plan;
   }
 
@@ -2328,10 +2329,10 @@ export class SimEngine {
         gk.y = clamp(gk.y + (cy - gk.y) * 0.4, 2, 98);
         gk.heading = Math.atan2(cy - gk.y, cx - gk.x);
 
-        if (Math.random() < pSave) {
+        if (this.random() < pSave) {
           // 可反应时间越长越容易抱稳；近距离扑救更多托出/击出。
           const holdP = 0.18 + 0.12 * hand + reactionRead * 0.16;
-          const hold = Math.random() < holdP;
+          const hold = this.random() < holdP;
           if (hold) {
             b.owner = gk.id;
             b.x = cx;
@@ -2348,22 +2349,22 @@ export class SimEngine {
           } else {
             // 托出：约 40% 托过底线得角球（现实中门将扑救最主要的角球来源），
             // 其余弹向边路/角区、不落到前锋脚下。
-            const side = diveDir || (Math.random() < 0.5 ? 1 : -1);
+            const side = diveDir || (this.random() < 0.5 ? 1 : -1);
             const bylineDir = gk.team === "home" ? 1 : -1; // 己方底线方向：home 朝 +y(≈100)
-            const tipOver = Math.random() < 0.8;
+            const tipOver = this.random() < 0.8;
             b.owner = null;
             b.x = cx;
             b.y = cy;
-            b.vx = side * (tipOver ? 20 + Math.random() * 8 : 10 + Math.random() * 8);
+            b.vx = side * (tipOver ? 20 + this.random() * 8 : 10 + this.random() * 8);
             // tipOver：朝底线外送足够速度越线 → _resolveBounds 判角球给进攻方；
             // 否则朝场内边路托出，回到运动战。
             b.vy = tipOver
-              ? bylineDir * (10 + Math.random() * 6)
-              : -bylineDir * (6 + Math.random() * 5);
+              ? bylineDir * (10 + this.random() * 6)
+              : -bylineDir * (6 + this.random() * 5);
             // 托过横梁必须在过线时高于 2.44；否则门框内的托救会先被判成乌龙，
             // 永远走不到下方角球分支。
-            b.z = tipOver ? 2.7 + Math.random() * 0.5 : 0.6 + Math.random() * 0.8;
-            b.vz = tipOver ? 3 + Math.random() * 2 : 4 + Math.random() * 3;
+            b.z = tipOver ? 2.7 + this.random() * 0.5 : 0.6 + this.random() * 0.8;
+            b.vz = tipOver ? 3 + this.random() * 2 : 4 + this.random() * 3;
             b.state = "loose";
             b.lastKicker = gk.id;
             b.kickTeam = gk.team;
@@ -2378,8 +2379,8 @@ export class SimEngine {
           return;
         }
         // 未扑住：球继续飞，仅轻微蹭偏
-        if (Math.random() < 0.18) {
-          b.vx += diveDir * (1.5 + Math.random() * 2);
+        if (this.random() < 0.18) {
+          b.vx += diveDir * (1.5 + this.random() * 2);
           b.vy *= 0.96;
         }
         break; // 已判定本脚，不再换门将
@@ -2404,16 +2405,16 @@ export class SimEngine {
         checked.add(o.id);
         const blockSkill = 0.55 * o.attr.positioning + 0.45 * o.attr.tackling;
         const pBlock = clamp(0.12 + blockSkill * 0.38 - speed / 240, 0.08, 0.42);
-        if (Math.random() >= pBlock) continue;
+        if (this.random() >= pBlock) continue;
         const side = o.x <= b.x ? 1 : -1;
         // 约半数封堵挡过自己的底线得角球；否则弹回场内。
         const bylineDir = o.team === "home" ? 1 : -1; // 己方底线：home 在 +y
-        const blockOut = Math.random() < 0.52;
-        b.vx = side * (6 + Math.random() * 7) + b.vx * 0.12;
-        b.vy = blockOut ? bylineDir * (9 + Math.random() * 6) : b.vy * -0.12;
+        const blockOut = this.random() < 0.52;
+        b.vx = side * (6 + this.random() * 7) + b.vx * 0.12;
+        b.vy = blockOut ? bylineDir * (9 + this.random() * 6) : b.vy * -0.12;
         // 明确挡过底线的球抬到横梁上方，避免门框范围内先误判成防守方乌龙。
-        b.z = blockOut ? 2.65 + Math.random() * 0.45 : Math.max(0.1, b.z || 0);
-        b.vz = blockOut ? 3 + Math.random() * 2 : 2 + Math.random() * 3;
+        b.z = blockOut ? 2.65 + this.random() * 0.45 : Math.max(0.1, b.z || 0);
+        b.vz = blockOut ? 3 + this.random() * 2 : 2 + this.random() * 3;
         b.state = "loose";
         if (blockOut) {
           b.lastKicker = o.id;
@@ -2451,10 +2452,10 @@ export class SimEngine {
           // 拦截半径：比脚下控球略大（伸脚/身体挡），越靠近越易成
           if (d < SIM.CONTROL_RADIUS + 1.6) {
             o.tackleCdUntil = this.t + 2;
-            this._teamInterceptUntil[interceptTeam] = this.t + 75 + Math.random() * 30;
+            this._teamInterceptUntil[interceptTeam] = this.t + 75 + this.random() * 30;
             const pick = 0.45 * o.attr.tackling + 0.35 * o.attr.positioning + 0.2 * o.attr.pace;
             const p = clamp(0.22 + pick * 0.45 - speed / 150, 0.08, 0.62);
-            if (Math.random() < p) {
+            if (this.random() < p) {
               b.owner = o.id;
               b.vx = 0; b.vy = 0;
               b.state = "held";
@@ -2496,8 +2497,8 @@ export class SimEngine {
         if (this.t < (o.tackleCdUntil || 0)) continue;
         const d = dist(o.x, o.y, b.x, b.y);
         if (d < SIM.CONTROL_RADIUS + 0.25) {
-          o.tackleCdUntil = this.t + 50 + Math.random() * 10;
-          this._teamTackleUntil[defendingTeam] = this.t + 44 + Math.random() * 10;
+          o.tackleCdUntil = this.t + 50 + this.random() * 10;
+          this._teamTackleUntil[defendingTeam] = this.t + 44 + this.random() * 10;
           // 抢断成功率：tackling vs 持球者 dribbling+strength（单次尝试，不再乘 tick）
           const atk = 0.5 * owner.attr.dribbling + 0.3 * owner.attr.strength;
           const def = 0.6 * o.attr.tackling + 0.2 * o.attr.marking;
@@ -2505,7 +2506,7 @@ export class SimEngine {
           const ownerSpeed = Math.hypot(owner.vx, owner.vy);
           const moveVuln = clamp(ownerSpeed / SIM.MAX_PLAYER_SPEED, 0, 1) * 0.1;
           const p = clamp(0.22 + (def - atk) * 0.45 + moveVuln, 0.07, 0.48);
-          if (Math.random() < p) {
+          if (this.random() < p) {
             b.owner = o.id;
             b.vx = 0;
             b.vy = 0;
@@ -2632,7 +2633,7 @@ export class SimEngine {
       let ctl = 0.55 + 0.4 * best.attr.dribbling;
       if (best.role === "GK") ctl = 0.75 + 0.22 * (best.attr.handling || 0.5);
       const p = clamp(ctl - speed / 90, 0.15, 0.98);
-      if (Math.random() < p) {
+      if (this.random() < p) {
         b.owner = best.id;
         b.vx = 0;
         b.vy = 0;
@@ -2655,8 +2656,8 @@ export class SimEngine {
         // 没控住：把球磕开，避免原地互抢
         const away = best.role === "GK" ? 1 : -1;
         const dir = this.attackDir(best.team);
-        b.vx = (Math.random() - 0.5) * 8;
-        b.vy = dir * away * (4 + Math.random() * 5);
+        b.vx = (this.random() - 0.5) * 8;
+        b.vy = dir * away * (4 + this.random() * 5);
         b.state = "loose";
         this._clearBallTarget();
       }
@@ -2784,8 +2785,8 @@ export class SimEngine {
     this._emit("stall_clear", o || null);
     if (o) {
       const dir = this.attackDir(o.team);
-      const tx = clamp(o.x < 50 ? 62 + Math.random() * 24 : 14 + Math.random() * 24, 6, 94);
-      const ty = clamp(o.y + dir * (28 + Math.random() * 14), 6, 94);
+      const tx = clamp(o.x < 50 ? 62 + this.random() * 24 : 14 + this.random() * 24, 6, 94);
+      const ty = clamp(o.y + dir * (28 + this.random() * 14), 6, 94);
       const d = Math.max(1, dist(o.x, o.y, tx, ty));
       const sp = 26;
       b.vx = ((tx - o.x) / d) * sp;
@@ -2834,7 +2835,7 @@ export class SimEngine {
     const fit = worstFit / 100;
     const mul = this.injuryMul?.[worst.team] ?? 1;
     const p = clamp(0.0006 + (0.7 - fit) * 0.004, 0.0003, 0.006) * mul;
-    if (Math.random() < p) this._commitInjury(worst, "fatigue");
+    if (this.random() < p) this._commitInjury(worst, "fatigue");
   }
 
   /**
@@ -2865,13 +2866,13 @@ export class SimEngine {
     );
     // 后卫在禁区内会收脚，但不应把点球压低两个数量级。
     if (inBox) pFoul *= 0.08;
-    if (Math.random() >= pFoul) return false;
+    if (this.random() >= pFoul) return false;
 
     // 被侵犯方获得球权重启
     const attackTeam = victim.team;
 
     // 卡片严重度（相对犯规数的真实比例）：黄 ~15%，直红 ~0.3%。
-    const roll = Math.random();
+    const roll = this.random();
     let card = "none";
     // 直红（暴力/最后一人）：很小概率
     if (roll < 0.003 + (pressing - 3) * 0.0008) {
@@ -2881,7 +2882,7 @@ export class SimEngine {
       if (prev >= 1) {
         // 已有黄牌者会格外谨慎、裁判对第二黄也偏宽容：仅 ~22% 真的变红，
         // 否则本次逃过（不吃牌）。杜绝第二黄红牌泛滥（真实红牌约每 8-10 场一张）。
-        if (Math.random() < 0.22) card = "red2";
+        if (this.random() < 0.22) card = "red2";
       } else {
         card = "yellow";
         defender._yellows = prev + 1;
@@ -2906,7 +2907,7 @@ export class SimEngine {
     const injMul = this.injuryMul?.[victim.team] ?? 1;
     const pInj =
       card === "red" ? 0.2 : card === "yellow" || card === "red2" ? 0.06 : 0.01;
-    if (Math.random() < pInj * injMul) this._commitInjury(victim, "contact");
+    if (this.random() < pInj * injMul) this._commitInjury(victim, "contact");
 
     if (inBox) {
       this._penaltyKick(attackTeam);
@@ -2949,8 +2950,8 @@ export class SimEngine {
       if (a === taker || a === gk) continue;
       // 站到弧顶外（远离罚球点）
       const backY = team === "home" ? 26 : 74;
-      a.y = clamp(backY + (Math.random() - 0.5) * 6, 4, 96);
-      a.x = clamp(30 + Math.random() * 40, 6, 94);
+      a.y = clamp(backY + (this.random() - 0.5) * 6, 4, 96);
+      a.x = clamp(30 + this.random() * 40, 6, 94);
       a.tx = a.x;
       a.ty = a.y;
       a.decisionUntil = this.t + 1.2;
@@ -2976,7 +2977,7 @@ export class SimEngine {
     const finish = taker.attr.finishing;
     const save = gk ? 0.5 * gk.attr.reflexes + 0.3 * gk.attr.handling : 0.2;
     const pScore = clamp(0.78 + (finish - 0.6) * 0.35 - save * 0.28, 0.5, 0.9);
-    const r = Math.random();
+    const r = this.random();
     // 球先摆到点上（供直播看到）
     b.x = 50;
     b.y = spotY;
@@ -3003,7 +3004,7 @@ export class SimEngine {
       this._emit("shot", taker, penShotMeta);
       // 门将扑出：球托向边路，转运动战
       this._emit("save", gk, { hold: false, penalty: true });
-      const side = Math.random() < 0.5 ? 1 : -1;
+      const side = this.random() < 0.5 ? 1 : -1;
       b.x = 50 + side * 8;
       b.y = spotY + dir * 3;
       b.vx = side * 12;
@@ -3312,7 +3313,7 @@ export class SimEngine {
             a.x = a.baseX;
             a.y = a.baseY;
           } else {
-            a.x = clamp(50 + (Math.random() - 0.5) * 4, 44, 56);
+            a.x = clamp(50 + (this.random() - 0.5) * 4, 44, 56);
             a.y = defGkY;
           }
         } else if (a === cornerTaker) {
@@ -3425,7 +3426,7 @@ export class SimEngine {
       }
       if (type === "freekick" && fkSetPiece) {
         // 主罚计划在摆位时定死（射/传中），_decideOnBall 到时执行
-        taker._fkPlan = Math.random() < fkShootP ? "shoot" : "cross";
+        taker._fkPlan = this.random() < fkShootP ? "shoot" : "cross";
         taker._fkPlanUntil = this.t + 6;
       }
     }
@@ -3532,8 +3533,8 @@ export class SimEngine {
       } else {
         // 失球方：垂头丧气往中场/本半场走
         a.fsm = "home";
-        a.tx = clamp(a.baseX * 0.55 + 50 * 0.45 + (Math.random() - 0.5) * 8, 8, 92);
-        a.ty = clamp(a.baseY * 0.65 + 50 * 0.35 + (Math.random() - 0.5) * 6, 10, 90);
+        a.tx = clamp(a.baseX * 0.55 + 50 * 0.45 + (this.random() - 0.5) * 8, 8, 92);
+        a.ty = clamp(a.baseY * 0.65 + 50 * 0.35 + (this.random() - 0.5) * 6, 10, 90);
       }
     }
   }

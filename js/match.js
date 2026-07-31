@@ -36,6 +36,7 @@ import {
 } from "./staff.js";
 import { trainingInjuryMod, matchdayIncome, stadiumInfo } from "./facilities.js";
 import { recordMatchdayFinance } from "./club-finance.js";
+import { ensureMatchSeed, matchRandom } from "./random.js";
 import {
   applyMatchPrepBonus,
   resetMatchPrepCounter,
@@ -71,8 +72,9 @@ import {
   buildHighlightSegments,
 } from "./sim/adapt.js";
 
+let activeRandom = Math.random;
 function rng() {
-  return Math.random();
+  return activeRandom();
 }
 function chance(p) {
   return rng() < p;
@@ -94,8 +96,8 @@ export const WEATHERS = [
   { key: "heat", name: "酷热", icon: "🔥", atk: 0.98, def: 0.97, pace: 0.88, error: 1.08, injury: 1.15 },
 ];
 
-export function pickWeather() {
-  const r = rng();
+export function pickWeather(random = rng) {
+  const r = random();
   if (r < 0.42) return WEATHERS[0];
   if (r < 0.62) return WEATHERS[1];
   if (r < 0.76) return WEATHERS[2];
@@ -104,8 +106,8 @@ export function pickWeather() {
 }
 
 /** 按 key 取天气；未知则重新抽取 */
-export function weatherByKey(key) {
-  return WEATHERS.find((w) => w.key === key) || pickWeather();
+export function weatherByKey(key, random = rng) {
+  return WEATHERS.find((w) => w.key === key) || pickWeather(random);
 }
 
 function averageAttrs(player, keys) {
@@ -162,8 +164,18 @@ function fixtureImportance(world, fixture) {
  * 赛前锁定天气（简报与开赛一致）
  * @returns {typeof WEATHERS[0]}
  */
-export function ensureFixtureWeather(fixture) {
-  if (!fixture) return pickWeather();
+export function ensureFixtureWeather(fixture, random = rng) {
+  // Consume one roll even when a previous preview already locked the weather,
+  // keeping every replay's subsequent simulation rolls aligned.
+  const roll = random();
+  const select = () => {
+    if (roll < 0.42) return WEATHERS[0];
+    if (roll < 0.62) return WEATHERS[1];
+    if (roll < 0.76) return WEATHERS[2];
+    if (roll < 0.9) return WEATHERS[3];
+    return WEATHERS[4];
+  };
+  if (!fixture) return select();
   if (fixture.preWeather && typeof fixture.preWeather === "object" && fixture.preWeather.key) {
     return weatherByKey(fixture.preWeather.key);
   }
@@ -172,7 +184,7 @@ export function ensureFixtureWeather(fixture) {
     fixture.preWeather = { key: w.key, name: w.name, icon: w.icon };
     return w;
   }
-  const w = pickWeather();
+  const w = select();
   fixture.preWeather = { key: w.key, name: w.name, icon: w.icon };
   return w;
 }
@@ -524,6 +536,10 @@ export function createMatchSession(world, fixture) {
   ensureStaff(away);
   ensureTactics(home);
   ensureTactics(away);
+  const matchSeed = ensureMatchSeed(world, fixture);
+  const previousRandom = activeRandom;
+  const random = matchRandom(world, fixture);
+  activeRandom = random;
   const importance = fixtureImportance(world, fixture);
   if (home.id !== world.userClubId) aiTuneTactics(home, away, world);
   if (away.id !== world.userClubId) aiTuneTactics(away, home, world);
@@ -543,7 +559,7 @@ export function createMatchSession(world, fixture) {
   // 旧代码中的 isCup 表示“不计入国内联赛数据”。
   const isCup = !isLeague;
   // 与赛前简报同一天气（已锁定则复用）
-  const weather = ensureFixtureWeather(fixture);
+  const weather = ensureFixtureWeather(fixture, random);
   const derby = isDerby(home, away);
   const bigMatch = isBigMatch(world, home, away, isCup);
 
@@ -561,6 +577,9 @@ export function createMatchSession(world, fixture) {
     isKnockout,
     competitionType,
     weather,
+    matchSeed,
+    previousRandom,
+    random,
     derby,
     bigMatch,
     events: [],
@@ -2239,6 +2258,7 @@ function buildReport(state) {
   // 评分应在 finalize 里先算；若提前 buildReport 则 narrative 不含 MOTM
   const narrative = buildMatchNarrative(state);
   return {
+    matchSeed: state.matchSeed,
     score: `${state.hg} - ${state.ag}`,
     homeGoals: state.hg,
     awayGoals: state.ag,
@@ -2618,7 +2638,7 @@ export function finalizeMatch(state) {
   }
 
   // 主场收入属于实际主队，AI 与用户使用相同球场、上座和比赛情境数据。
-  const gate = matchdayIncome(home, { ...homeGateContext, detail: true });
+  const gate = matchdayIncome(home, { ...homeGateContext, detail: true, random: rng });
   const gateIncome = recordMatchdayFinance(home, gate, world.day);
   if (fixture.home === world.userClubId) {
     state.ticketIncome = gateIncome;
@@ -2651,7 +2671,7 @@ export function finalizeMatch(state) {
 
   // 纪律：黄牌累计 / 红牌停赛 / 停赛天数 -1（双方都处理）
   for (const club of [home, away]) {
-    const { news: discNews } = processClubMatchDiscipline(club, events);
+    const { news: discNews } = processClubMatchDiscipline(club, events, { random: rng });
     for (const text of discNews) {
       if (club.id === world.userClubId) {
         world.news.unshift({ day: world.day, text });
@@ -2768,12 +2788,14 @@ export function finalizeMatch(state) {
     }
   }
 
-  return {
+  const result = {
     homeGoals: hg,
     awayGoals: ag,
     events,
     report,
   };
+  activeRandom = state.previousRandom || Math.random;
+  return result;
 }
 
 /*

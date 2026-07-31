@@ -4,7 +4,13 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v169**（世界财政公平 · 运营储备 · 多赛季生态审计）
+> 缓存：**vcfm-v170**（比赛固定种子 · 可复现赛果 · 世界财政公平）
+
+## v170 比赛可复现种子（2026-07-31）
+
+- 每场 fixture 自动保存 `matchSeed`；概率模拟、空间模拟、天气、伤病、纪律、门票和高光共用同一确定性随机流
+- 同一存档、同一 fixture、同一 seed 可复现完整比分、事件、球员和报告；显式修改 `matchSeed` 可生成可控对照样本
+- 新增 `scripts/match-seed-audit.mjs`；统一验证入口覆盖固定种子审计；缓存 `vcfm-v170`
 > 本地：`pwsh -File start-local.ps1` → http://127.0.0.1:8765/
 
 ## v169 世界财政公平与长期生态（2026-07-31）
