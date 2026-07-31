@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v179** · 报名名单、本土培养与赛事资格 |
+| 当前版本 | **v180** · 空间事件比赛分析 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -48,6 +48,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **三种观看方式**：直播保留完整高光节奏；快速高光跳过平淡时段但细看真实进球与扑救；一键完赛不播放球场动画，直接进入赛后报告。
 - **真实战术因果**：主客队运行同一套 AI；阵型、角色、能力、状态、体能、士气和战术共同影响场上表现，没有只为界面结果服务的隐藏球队加权。
 - **可读的转播表现**：俯视球场、真空间录帧、倍速、暂停、中场调整、进球回放、庆祝、球轨迹、xG、控球和射门统计。
+- **v180 空间事件比赛分析**：赛后战报从同一批空间事件派生出脚前 xG、射门图、推进、压迫、行动热区和完成传球网络；分析随比赛报告保存，可回看且不使用赛后结果修饰机会质量。
 - **v165 真实性校准**：远射意愿随距离衰减，射门高度与门将反应时间进入结算；抢断、点球、角球和开球站位经过固定种子批量审计。
 - **v166 赛前票房因果**：上座与门票系数只读取开赛前状态，不再受本场赛果倒灌；战报和财政概览展示杯赛、德比、争冠、联赛层级等收入系数。
 - **后台比赛保持轻量**：非用户场次使用快速概率引擎，避免推进赛程时为整轮比赛运行空间模拟。
@@ -129,7 +130,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v179** · squad registration, homegrown status, and competition eligibility |
+| Current version | **v180** · spatial-event match analysis |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -161,6 +162,7 @@ Repository: https://github.com/as7er/vcfm
 - **Three viewing modes**: Live keeps the full highlight rhythm; Quick Highlights skips quiet periods while showing real goals and saves; Instant Finish goes straight to the report.
 - **Shared tactical causality**: both teams run the same AI. Formation, roles, ability, form, fitness, morale, and tactics drive performance without UI-only team weighting.
 - **Broadcast presentation**: top-down pitch, recorded spatial frames, speed controls, pause, half-time changes, replays, celebrations, ball trails, xG, possession, and shot statistics.
+- **v180 spatial-event match analysis**: post-match reports derive pre-shot xG, shot maps, progression, pressing, action heatmaps, and completed-pass networks from the same event stream. The saved analysis remains available in archived reports and never uses the shot outcome to rewrite chance quality.
 - **v165 realism calibration**: long-shot intent decays with distance; shot height and goalkeeper reaction time affect outcomes; tackles, penalties, corners, and kickoff positions are covered by seeded batch audits.
 - **v166 pre-match gate causality**: attendance and gate modifiers now use only information known before kickoff; match reports and the finance overview expose cup, derby, title-race, league-tier, and other income factors.
 - **Fast background simulation**: non-user fixtures retain the probabilistic engine so advancing a full round remains quick.

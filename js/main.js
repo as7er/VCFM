@@ -30,8 +30,8 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { getMatchView, destroyMatchView } from "./matchview.js?v=179";
-import { nationFlagHtml } from "./flags.js?v=179";
+import { getMatchView, destroyMatchView } from "./matchview.js?v=180";
+import { nationFlagHtml } from "./flags.js?v=180";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -300,7 +300,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=179";
+} from "./avatar.js?v=180";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -1216,6 +1216,21 @@ function bindMainOnce() {
     if (Number.isFinite(idx)) replayStoredGoal(idx);
   });
   $("#match-report")?.addEventListener("click", (e) => {
+    const analysisTab = e.target.closest("[data-analysis-tab]");
+    if (analysisTab) {
+      e.preventDefault();
+      const root = analysisTab.closest(".match-analysis");
+      const tab = analysisTab.dataset.analysisTab;
+      for (const button of root?.querySelectorAll("[data-analysis-tab]") || []) {
+        const active = button.dataset.analysisTab === tab;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+      }
+      for (const panel of root?.querySelectorAll("[data-analysis-panel]") || []) {
+        panel.classList.toggle("hidden", panel.dataset.analysisPanel !== tab);
+      }
+      return;
+    }
     const btn = e.target.closest("[data-goal-replay]");
     if (!btn) return;
     e.preventDefault();
@@ -8903,6 +8918,292 @@ function hideMatchReport() {
   }
 }
 
+function reportAnalysisLabels() {
+  const en = getLang() === "en";
+  return en
+    ? {
+        title: "Tactical analysis",
+        overview: "Overview",
+        shots: "Shot map",
+        progression: "Progression",
+        pressing: "Pressing",
+        heatmap: "Action zones",
+        network: "Pass network",
+        xg: "xG",
+        openPlayXg: "Open-play xG",
+        avgXg: "xG / shot",
+        passCompletion: "Pass completion",
+        progressivePasses: "Progressive passes",
+        finalThirdEntries: "Final-third entries",
+        boxEntries: "Box entries",
+        pressures: "Pressures",
+        pressureSuccess: "Pressure success",
+        highPressures: "High pressures",
+        regains: "Regains",
+        highRegains: "High regains",
+        averageHeight: "Average action height",
+        left: "Left",
+        center: "Centre",
+        right: "Right",
+        completed: "completed",
+        goal: "Goal",
+        saved: "Saved",
+        blocked: "Blocked",
+        offTarget: "Off target",
+        noShots: "No shots",
+        noNetwork: "No completed passing links",
+      }
+    : {
+        title: "战术分析",
+        overview: "复盘",
+        shots: "射门图",
+        progression: "推进",
+        pressing: "压迫",
+        heatmap: "行动热区",
+        network: "传球网络",
+        xg: "期望进球",
+        openPlayXg: "运动战 xG",
+        avgXg: "每次射门 xG",
+        passCompletion: "传球成功率",
+        progressivePasses: "推进传球",
+        finalThirdEntries: "进入进攻三区",
+        boxEntries: "传入禁区",
+        pressures: "压迫尝试",
+        pressureSuccess: "压迫成功率",
+        highPressures: "前场压迫",
+        regains: "夺回球权",
+        highRegains: "前场夺回",
+        averageHeight: "平均行动高度",
+        left: "左路",
+        center: "中路",
+        right: "右路",
+        completed: "成功",
+        goal: "进球",
+        saved: "扑出",
+        blocked: "封堵",
+        offTarget: "偏出",
+        noShots: "没有射门",
+        noNetwork: "没有完成传球线路",
+      };
+}
+
+function analysisCompareRow(label, homeValue, awayValue, suffix = "") {
+  return `<div class="analysis-compare-row">
+    <strong>${escapeHtml(String(homeValue))}${suffix}</strong>
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(String(awayValue))}${suffix}</strong>
+  </div>`;
+}
+
+function analysisPitchBase() {
+  return `<rect class="analysis-pitch-grass" x="1" y="1" width="98" height="108" rx="2" />
+    <path class="analysis-pitch-line" d="M4 5H96V105H4Z M4 55H96 M50 50a5 5 0 1 0 0 10a5 5 0 1 0 0-10 M28 5V22H72V5 M39 5V11H61V5 M28 105V88H72V105 M39 105V99H61V105" />`;
+}
+
+function shotMapSvg(side, labels) {
+  if (!side?.shots?.length) return `<p class="muted analysis-empty">${escapeHtml(labels.noShots)}</p>`;
+  const dots = side.shots
+    .map((shot) => {
+      const cx = Math.max(4, Math.min(96, Number(shot.x) || 50));
+      const cy = 105 - Math.max(0, Math.min(100, Number(shot.y) || 0));
+      const radius = Math.max(2.2, Math.min(5.8, 2 + (Number(shot.xg) || 0) * 7));
+      const title = `${shot.minute}' ${shot.playerName || ""} · xG ${Number(shot.xg || 0).toFixed(2)} · ${labels[shot.outcome] || shot.outcome}`;
+      return `<circle class="analysis-shot ${escapeHtml(shot.outcome || "offTarget")}" cx="${cx}" cy="${cy}" r="${radius}"><title>${escapeHtml(title)}</title></circle>`;
+    })
+    .join("");
+  return `<svg class="analysis-pitch analysis-shot-map" viewBox="0 0 100 110" role="img" aria-label="${escapeHtml(labels.shots)}">
+    ${analysisPitchBase()}${dots}
+  </svg>`;
+}
+
+function heatmapSvg(side, labels) {
+  const heatmap = side?.heatmap;
+  const cells = heatmap?.cells || [];
+  const max = Number(heatmap?.max) || 1;
+  const cols = heatmap?.cols || 6;
+  const rows = heatmap?.rows || 10;
+  const rects = [];
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const value = Number(cells[row * cols + col]) || 0;
+      if (!value) continue;
+      const opacity = Math.max(0.12, Math.min(0.88, value / max));
+      const width = 92 / cols;
+      const height = 100 / rows;
+      const x = 4 + col * width;
+      const y = 5 + (rows - row - 1) * height;
+      rects.push(`<rect class="analysis-heat-cell" x="${x}" y="${y}" width="${width}" height="${height}" style="opacity:${opacity.toFixed(2)}"><title>${value}</title></rect>`);
+    }
+  }
+  return `<svg class="analysis-pitch" viewBox="0 0 100 110" role="img" aria-label="${escapeHtml(labels.heatmap)}">
+    ${analysisPitchBase()}${rects.join("")}
+  </svg>`;
+}
+
+function passNetworkSvg(side, labels) {
+  const nodes = side?.network?.nodes || [];
+  const edges = side?.network?.edges || [];
+  if (!nodes.length) return `<p class="muted analysis-empty">${escapeHtml(labels.noNetwork)}</p>`;
+  const byId = new Map(nodes.map((node) => [node.playerId, node]));
+  const maxEdge = Math.max(1, ...edges.map((edge) => Number(edge.count) || 0));
+  const lines = edges
+    .map((edge) => {
+      const from = byId.get(edge.fromId);
+      const to = byId.get(edge.toId);
+      if (!from || !to) return "";
+      const width = 0.5 + ((Number(edge.count) || 0) / maxEdge) * 2.6;
+      return `<line class="analysis-pass-edge" x1="${from.x}" y1="${105 - from.y}" x2="${to.x}" y2="${105 - to.y}" style="stroke-width:${width.toFixed(2)}"><title>${escapeHtml(`${from.name} → ${to.name}: ${edge.count}`)}</title></line>`;
+    })
+    .join("");
+  const nodeShapes = nodes.map((node) => ({
+    node,
+    cx: Number(node.x),
+    cy: 105 - Number(node.y),
+    radius: Math.max(2.7, Math.min(5, 2.5 + (Number(node.passes) + Number(node.received)) / 12)),
+    short: String(node.name || "?").trim().split(/\s+/).slice(-1)[0].slice(0, 8),
+  }));
+  const circleBoxes = nodeShapes.map((shape) => ({
+    left: shape.cx - shape.radius - 0.6,
+    right: shape.cx + shape.radius + 0.6,
+    top: shape.cy - shape.radius - 0.6,
+    bottom: shape.cy + shape.radius + 0.6,
+  }));
+  const labelBoxes = [];
+  const overlaps = (a, b) =>
+    a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+  const labelFor = (shape, index) => {
+    const width = Math.max(5.5, shape.short.length * 1.9);
+    const height = 3.8;
+    const gap = 1.2;
+    const candidates = [
+      { x: shape.cx, y: shape.cy - shape.radius - gap, anchor: "middle", side: "above" },
+      { x: shape.cx, y: shape.cy + shape.radius + gap + height, anchor: "middle", side: "below" },
+      { x: shape.cx + shape.radius + gap, y: shape.cy + height / 3, anchor: "start", side: "right" },
+      { x: shape.cx - shape.radius - gap, y: shape.cy + height / 3, anchor: "end", side: "left" },
+    ];
+    const rotated = candidates.slice(index % candidates.length).concat(candidates.slice(0, index % candidates.length));
+    for (const candidate of rotated) {
+      const left = candidate.anchor === "middle" ? candidate.x - width / 2 : candidate.anchor === "start" ? candidate.x : candidate.x - width;
+      const box = { left, right: left + width, top: candidate.y - height, bottom: candidate.y + 0.6 };
+      if (box.left < 4 || box.right > 96 || box.top < 5 || box.bottom > 105) continue;
+      if (circleBoxes.some((circle, circleIndex) => circleIndex !== index && overlaps(box, circle))) continue;
+      if (labelBoxes.some((placed) => overlaps(box, placed))) continue;
+      labelBoxes.push(box);
+      return candidate;
+    }
+    return null;
+  };
+  const circles = nodeShapes
+    .map((shape, index) => {
+      const label = labelFor(shape, index);
+      const text = label
+        ? `<text x="${label.x}" y="${label.y}" text-anchor="${label.anchor}" data-label-side="${label.side}">${escapeHtml(shape.short)}</text>`
+        : "";
+      return `<g class="analysis-pass-node"><circle cx="${shape.cx}" cy="${shape.cy}" r="${shape.radius}" />${text}<title>${escapeHtml(`${shape.node.name} · ${shape.node.passes} ${labels.completed}`)}</title></g>`;
+    })
+    .join("");
+  return `<svg class="analysis-pitch" viewBox="0 0 100 110" role="img" aria-label="${escapeHtml(labels.network)}">
+    ${analysisPitchBase()}${lines}${circles}
+  </svg>`;
+}
+
+function tacticalInsights(analysis, report, labels) {
+  const en = getLang() === "en";
+  const home = analysis.home;
+  const away = analysis.away;
+  const hn = report.home.short || report.home.name;
+  const an = report.away.short || report.away.name;
+  const lines = [];
+  const hAvg = home.shots.length ? home.xg / home.shots.length : 0;
+  const aAvg = away.shots.length ? away.xg / away.shots.length : 0;
+  const chanceSide = Math.abs(hAvg - aAvg) >= 0.025 ? (hAvg > aAvg ? [hn, home, hAvg] : [an, away, aAvg]) : null;
+  if (chanceSide) {
+    lines.push(en
+      ? `${chanceSide[0]} created the cleaner average chance (${chanceSide[2].toFixed(2)} xG per shot from ${chanceSide[1].shots.length} attempts).`
+      : `${chanceSide[0]}的平均机会质量更高（${chanceSide[1].shots.length} 次射门，每次 ${chanceSide[2].toFixed(2)} xG）。`);
+  } else {
+    lines.push(en
+      ? `Average chance quality was similar (${hAvg.toFixed(2)}-${aAvg.toFixed(2)} xG per shot).`
+      : `双方平均机会质量接近（每次射门 xG ${hAvg.toFixed(2)}-${aAvg.toFixed(2)}）。`);
+  }
+
+  const hp = home.progression;
+  const ap = away.progression;
+  const advanceName = hp.progressivePasses + hp.finalThirdEntries >= ap.progressivePasses + ap.finalThirdEntries ? hn : an;
+  const advance = advanceName === hn ? hp : ap;
+  lines.push(en
+    ? `${advanceName} led ball progression with ${advance.progressivePasses} progressive passes and ${advance.finalThirdEntries} final-third entries.`
+    : `${advanceName}以 ${advance.progressivePasses} 次推进传球和 ${advance.finalThirdEntries} 次进入进攻三区主导向前推进。`);
+
+  const hPress = home.pressing.highRegains;
+  const aPress = away.pressing.highRegains;
+  if (hPress + aPress > 0) {
+    const pressName = hPress >= aPress ? hn : an;
+    const press = hPress >= aPress ? home.pressing : away.pressing;
+    lines.push(en
+      ? `${pressName} recovered the ball ${press.highRegains} times high up the pitch; ${press.pressureSuccessPct}% of recorded pressures led quickly to a regain.`
+      : `${pressName}在前场 ${press.highRegains} 次夺回球权；记录到的压迫中有 ${press.pressureSuccessPct}% 很快转化为夺回。`);
+  } else {
+    lines.push(en ? "Neither side produced a high regain." : "双方都没有形成前场夺回球权。 ");
+  }
+
+  const hubSide = (home.network.hub?.passes || 0) + (home.network.hub?.received || 0) >=
+    (away.network.hub?.passes || 0) + (away.network.hub?.received || 0) ? [hn, home.network.hub] : [an, away.network.hub];
+  if (hubSide[1]) {
+    lines.push(en
+      ? `${hubSide[1].name} was ${hubSide[0]}'s main passing hub (${hubSide[1].passes} completed passes, ${hubSide[1].received} received).`
+      : `${hubSide[1].name}是${hubSide[0]}的主要传球枢纽（完成 ${hubSide[1].passes} 次传球，接到 ${hubSide[1].received} 次）。`);
+  }
+  return lines;
+}
+
+function matchAnalysisHtml(analysis, report) {
+  if (!analysis?.home || !analysis?.away) return "";
+  const labels = reportAnalysisLabels();
+  const home = analysis.home;
+  const away = analysis.away;
+  const homeName = report.home.short || report.home.name;
+  const awayName = report.away.short || report.away.name;
+  const sidePlots = (render) => `<div class="analysis-side-grid">
+    <section><h5>${escapeHtml(homeName)}</h5>${render(home)}</section>
+    <section><h5>${escapeHtml(awayName)}</h5>${render(away)}</section>
+  </div>`;
+  const tabs = ["overview", "shots", "progression", "pressing", "heatmap", "network"];
+  const tabHtml = tabs.map((key, index) => `<button type="button" class="analysis-tab${index ? "" : " active"}" role="tab" aria-selected="${index ? "false" : "true"}" data-analysis-tab="${key}">${escapeHtml(labels[key])}</button>`).join("");
+  const overviewRows = [
+    analysisCompareRow(labels.xg, Number(home.xg).toFixed(2), Number(away.xg).toFixed(2)),
+    analysisCompareRow(labels.openPlayXg, Number(home.openPlayXg).toFixed(2), Number(away.openPlayXg).toFixed(2)),
+    analysisCompareRow(labels.avgXg, home.shots.length ? (home.xg / home.shots.length).toFixed(2) : "0.00", away.shots.length ? (away.xg / away.shots.length).toFixed(2) : "0.00"),
+    analysisCompareRow(labels.passCompletion, home.progression.passCompletionPct, away.progression.passCompletionPct, "%"),
+    analysisCompareRow(labels.averageHeight, home.shape.averageActionHeight, away.shape.averageActionHeight),
+  ].join("");
+  const progressionRows = [
+    analysisCompareRow(labels.passCompletion, home.progression.passCompletionPct, away.progression.passCompletionPct, "%"),
+    analysisCompareRow(labels.progressivePasses, home.progression.progressivePasses, away.progression.progressivePasses),
+    analysisCompareRow(labels.finalThirdEntries, home.progression.finalThirdEntries, away.progression.finalThirdEntries),
+    analysisCompareRow(labels.boxEntries, home.progression.boxEntries, away.progression.boxEntries),
+  ].join("");
+  const pressingRows = [
+    analysisCompareRow(labels.pressures, home.pressing.pressures, away.pressing.pressures),
+    analysisCompareRow(labels.pressureSuccess, home.pressing.pressureSuccessPct, away.pressing.pressureSuccessPct, "%"),
+    analysisCompareRow(labels.highPressures, home.pressing.highPressures, away.pressing.highPressures),
+    analysisCompareRow(labels.regains, home.pressing.regains, away.pressing.regains),
+    analysisCompareRow(labels.highRegains, home.pressing.highRegains, away.pressing.highRegains),
+  ].join("");
+  const insights = tacticalInsights(analysis, report, labels).map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+  const shotLegend = ["goal", "saved", "blocked", "offTarget"].map((key) => `<span><i class="analysis-legend-dot ${key}"></i>${escapeHtml(labels[key])}</span>`).join("");
+
+  return `<section class="match-analysis">
+    <div class="analysis-heading"><h4>${escapeHtml(labels.title)}</h4><div class="analysis-tabs" role="tablist">${tabHtml}</div></div>
+    <div class="analysis-panel" data-analysis-panel="overview"><ul class="analysis-insights">${insights}</ul><div class="analysis-compare">${overviewRows}</div></div>
+    <div class="analysis-panel hidden" data-analysis-panel="shots"><div class="analysis-legend">${shotLegend}</div>${sidePlots((side) => shotMapSvg(side, labels))}</div>
+    <div class="analysis-panel hidden" data-analysis-panel="progression"><div class="analysis-compare">${progressionRows}</div></div>
+    <div class="analysis-panel hidden" data-analysis-panel="pressing"><div class="analysis-compare">${pressingRows}</div></div>
+    <div class="analysis-panel hidden" data-analysis-panel="heatmap">${sidePlots((side) => heatmapSvg(side, labels))}</div>
+    <div class="analysis-panel hidden" data-analysis-panel="network">${sidePlots((side) => passNetworkSvg(side, labels))}</div>
+  </section>`;
+}
+
 /**
  * @param {object} report
  * @param {{ review?: boolean }} [opts]
@@ -9026,12 +9327,14 @@ function showMatchReport(report, opts = {}) {
     ? `<span class="report-review-badge">${escapeHtml(t("fix.viewReport") || (getLang() === "en" ? "Archive" : "历史战报"))}</span>`
     : "";
   const ticketFactors = ticketFactorsText(report.ticketFactors, getLang() === "en");
+  const analysisHtml = matchAnalysisHtml(report.analysis, report);
 
   el.innerHTML = `
     <h3>${t("match.report")}${reviewBadge}</h3>
     <div class="match-report-meta">${escapeHtml(t("match.reportMeta", { meta: meta || t("match.regular"), score: report.score }))}</div>
     ${motmCardHtml}
     ${narrativeHtml}
+    ${analysisHtml}
     <table class="report-table">
       <thead><tr>
         <th>${escapeHtml(h.short || h.name)}</th>

@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v179";
+const CACHE = "vcfm-v180";
 const ASSETS = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ const ASSETS = [
   "./js/main.js",
   "./js/engine.js",
   "./js/match.js",
+  "./js/match-analysis.js",
   "./js/random.js",
   "./js/finance-ledger.js",
   "./js/cash-reservations.js",

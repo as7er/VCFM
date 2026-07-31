@@ -22,6 +22,7 @@ import {
   ensureLineupRoles,
   ensureCorePlayer,
 } from "./../models.js";
+import { estimateShotXg } from "./../match-analysis.js";
 
 // ————————————————————————————————————————————————————————————
 // 常量与工具
@@ -55,23 +56,6 @@ function norm(v) {
   // 压缩两端仍保留强弱差异，同时给低级别球员基本职业能力下限。
   const raw = clamp((v ?? 10) / 20, 0.05, 1);
   return clamp(0.28 + raw * 0.64, 0.3, 0.92);
-}
-
-/**
- * 从空间射门事件估 xG（不另掷骰）。
- * 距离/空门/点球是主因；远射与禁区边缘自然降权。
- */
-function estimateShotXg(shot) {
-  if (!shot) return 0.05;
-  if (shot.penalty || shot.type === "penalty") return 0.76;
-  const d = Number(shot.distance);
-  const distM = Number.isFinite(d) ? d : shot.long ? 28 : 16;
-  // 粗略距离模型：近点 ~0.45，禁区外 ~0.08，超远再压
-  let xg = clamp(0.55 * Math.exp(-distM / 14), 0.03, 0.55);
-  if (shot.openGoal) xg = Math.max(xg, 0.42);
-  if (shot.long) xg *= 0.72;
-  if (shot.offTarget) xg *= 0.35;
-  return clamp(xg, 0.02, 0.85);
 }
 
 /**
@@ -1510,6 +1494,7 @@ export class SimEngine {
       x: a.x,
       y: a.y,
       distance: dGoal,
+      pressure: this._pressureOn(a),
       targetZ,
       flightTime,
       ...(extraMeta || {}),
@@ -2063,7 +2048,15 @@ export class SimEngine {
 
   /** 记录涌现事件（P5 由适配层翻译成现有 event 结构） */
   _emit(type, a, extra = {}) {
-    this.events.push({ t: this.t, type, team: a?.team, agentId: a?.id, ...extra });
+    this.events.push({
+      t: this.t,
+      type,
+      team: a?.team,
+      agentId: a?.id,
+      x: a?.x,
+      y: a?.y,
+      ...extra,
+    });
   }
 
   /**
@@ -2499,6 +2492,7 @@ export class SimEngine {
         if (d < SIM.CONTROL_RADIUS + 0.25) {
           o.tackleCdUntil = this.t + 50 + this.random() * 10;
           this._teamTackleUntil[defendingTeam] = this.t + 44 + this.random() * 10;
+          this._emit("pressure", o, { onId: owner.id });
           // 抢断成功率：tackling vs 持球者 dribbling+strength（单次尝试，不再乘 tick）
           const atk = 0.5 * owner.attr.dribbling + 0.3 * owner.attr.strength;
           const def = 0.6 * o.attr.tackling + 0.2 * o.attr.marking;
@@ -2634,6 +2628,9 @@ export class SimEngine {
       if (best.role === "GK") ctl = 0.75 + 0.22 * (best.attr.handling || 0.5);
       const p = clamp(ctl - speed / 90, 0.15, 0.98);
       if (this.random() < p) {
+        const wasPass = b.state === "pass";
+        const passFrom = b.lastKicker;
+        const intendedId = b.receiverId;
         b.owner = best.id;
         b.vx = 0;
         b.vy = 0;
@@ -2651,6 +2648,9 @@ export class SimEngine {
         if (best.role === "GK") {
           best.pose = "hold";
           best.poseUntil = this.t + 0.7;
+        }
+        if (wasPass && best.team === b.kickTeam) {
+          this._emit("receive", best, { from: passFrom, intendedId });
         }
       } else {
         // 没控住：把球磕开，避免原地互抢

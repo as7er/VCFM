@@ -72,6 +72,7 @@ import {
   buildHighlightSegments,
 } from "./sim/adapt.js";
 import { eligiblePlayerIds } from "./squad-registration.js";
+import { deriveMatchAnalysis } from "./match-analysis.js";
 
 let activeRandom = Math.random;
 function rng() {
@@ -2266,6 +2267,9 @@ function buildReport(state) {
   const as = state.stats.away;
   // 评分应在 finalize 里先算；若提前 buildReport 则 narrative 不含 MOTM
   const narrative = buildMatchNarrative(state);
+  const analysis = state.simEng
+    ? deriveMatchAnalysis(state.simEng.events, { home: state.home, away: state.away })
+    : null;
   return {
     matchSeed: state.matchSeed,
     score: `${state.hg} - ${state.ag}`,
@@ -2325,6 +2329,7 @@ function buildReport(state) {
         ownGoal: !!e.ownGoal,
       })),
     ratings: state.matchRatings || null,
+    analysis,
     narrative,
     ticketIncome: state.ticketIncome != null ? state.ticketIncome : null,
     ticketStadium: state.ticketStadium || null,
