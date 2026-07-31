@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  activeTransferCashCommitments,
   findActiveTransferNegotiation,
   processTransferNegotiationsDay,
   respondTransferNegotiation,
@@ -89,6 +90,82 @@ function setup() {
 function due(world, day) {
   world.day = day;
   return processTransferNegotiationsDay(world, { random: () => 0 });
+}
+
+// 多笔谈判不能重复占用同一现金；撤回后应立即释放额度。
+{
+  const { world, buyer, seller, target } = setup();
+  const secondSeller = club("seller2", 74);
+  const secondTarget = player("target2", "MID", 15);
+  secondTarget.clubId = secondSeller.id;
+  secondSeller.players.push(secondTarget);
+  world.clubs.push(secondSeller);
+  buyer.money = 3_000_000;
+
+  const first = submitTransferNegotiation(world, target.id, seller.id, {
+    fee: 2_500_000,
+    years: 3,
+    wage: 100_000,
+    random: () => 0,
+  });
+  assert.equal(first.ok, true);
+  assert.equal(activeTransferCashCommitments(world, buyer.id), 2_650_000);
+
+  const blocked = submitTransferNegotiation(world, secondTarget.id, secondSeller.id, {
+    fee: 400_000,
+    years: 3,
+    wage: 10_000,
+    random: () => 0,
+  });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.msg, /进行中谈判已占用/);
+
+  assert.equal(respondTransferNegotiation(world, first.negotiation.id, "withdraw").ok, true);
+  assert.equal(activeTransferCashCommitments(world, buyer.id), 0);
+  assert.equal(
+    submitTransferNegotiation(world, secondTarget.id, secondSeller.id, {
+      fee: 400_000,
+      years: 3,
+      wage: 10_000,
+      random: () => 0,
+    }).ok,
+    true
+  );
+}
+
+// 其他谈判仍占款时，接受球员还价也不能突破总现金。
+{
+  const { world, buyer, seller, target } = setup();
+  const secondSeller = club("seller3", 74);
+  const secondTarget = player("target3", "DEF", 15);
+  secondTarget.clubId = secondSeller.id;
+  secondSeller.players.push(secondTarget);
+  world.clubs.push(secondSeller);
+  buyer.money = 5_000_000;
+
+  const first = submitTransferNegotiation(world, target.id, seller.id, {
+    fee: 2_000_000,
+    years: 3,
+    wage: 10_000,
+    random: () => 0,
+  });
+  const second = submitTransferNegotiation(world, secondTarget.id, secondSeller.id, {
+    fee: 2_000_000,
+    years: 3,
+    wage: 10_000,
+    random: () => 0,
+  });
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+
+  first.negotiation.status = "player_counter";
+  first.negotiation.fee = 3_000_000;
+  const accepted = respondTransferNegotiation(world, first.negotiation.id, "accept");
+  assert.equal(accepted.ok, false);
+  assert.match(accepted.msg, /其他谈判已占用/);
+  assert.equal(first.negotiation.status, "cancelled");
+  assert.equal(seller.players.some((candidate) => candidate.id === target.id), true);
+  assert.equal(activeTransferCashCommitments(world, buyer.id), 2_015_000);
 }
 
 // 卖方还价 -> 信箱接受 -> 球员自动接受 -> 成交与财政落账。
@@ -202,4 +279,4 @@ function due(world, day) {
   assert.match(pending.negotiation.reason, /转会窗已关闭/);
 }
 
-console.log("transfer-negotiations audit passed: staged review, counters, inbox, finance, withdrawal, and window closure");
+console.log("transfer-negotiations audit passed: staged review, cash reservations, counters, inbox, finance, withdrawal, and window closure");

@@ -6,7 +6,11 @@ import { ensureFacilities, facilityWeeklyUpkeep, stadiumInfo, youthFacilityInfo 
 import { ensureLoans } from "./loans.js";
 import { ensureStaff, staffWageBill } from "./staff.js";
 import { ensureFinanceLedger, financeLedgerSummary, recordFinanceEntry, resetFinanceLedgerSeason } from "./finance-ledger.js";
-import { ensureTransferNegotiations, isActiveTransferNegotiation } from "./transfer-negotiations.js";
+import {
+  ensureTransferNegotiations,
+  isActiveTransferNegotiation,
+  transferNegotiationCashCost,
+} from "./transfer-negotiations.js";
 import { ensureContract } from "./contracts.js";
 
 export const CLUB_FINANCE_VERSION = 2;
@@ -186,12 +190,10 @@ export function clubFinanceCommitments(world, club) {
   const items = [];
   for (const negotiation of ensureTransferNegotiations(world)) {
     if (!isActiveTransferNegotiation(negotiation) || negotiation.buyerClubId !== club.id) continue;
-    const fee = number(negotiation.fee);
     const wage = number(negotiation.wage);
-    const bonus = Math.round(wage * Math.max(1, Math.min(5, number(negotiation.years) || 3)) * 0.5);
     items.push({
       kind: "transfer",
-      amount: fee + bonus,
+      amount: transferNegotiationCashCost(negotiation),
       weeklyWageIncrease: wage,
       label: "pending transfer",
       id: negotiation.id,

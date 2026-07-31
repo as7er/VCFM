@@ -109,11 +109,26 @@ export function listTransferNegotiations(world, { limit = 16 } = {}) {
     .slice(0, Math.max(1, limit));
 }
 
-function currentDealCost(negotiation) {
+export function transferNegotiationCashCost(negotiation) {
   return money(negotiation.fee) + signingBonus(negotiation.wage, negotiation.years);
 }
 
-function validateLiveDeal(world, negotiation, { checkFunds = true } = {}) {
+export function activeTransferCashCommitments(world, buyerClubId, { excludeId = null } = {}) {
+  return ensureTransferNegotiations(world)
+    .filter(
+      (negotiation) =>
+        isActiveTransferNegotiation(negotiation) &&
+        negotiation.buyerClubId === buyerClubId &&
+        negotiation.id !== excludeId
+    )
+    .reduce((sum, negotiation) => sum + transferNegotiationCashCost(negotiation), 0);
+}
+
+function validateLiveDeal(
+  world,
+  negotiation,
+  { checkFunds = true, checkReservedFunds = false } = {}
+) {
   if (!world || world.sacked) return { ok: false, reason: "经理当前无法处理俱乐部转会" };
   if (world.userClubId !== negotiation.buyerClubId) {
     return { ok: false, reason: "你已不再执教发起报价的俱乐部" };
@@ -135,8 +150,17 @@ function validateLiveDeal(world, negotiation, { checkFunds = true } = {}) {
   if ((seller.players || []).length <= MIN_SELLER_SQUAD) {
     return { ok: false, reason: "卖方一线队人数不足，无法继续出售" };
   }
-  if (checkFunds && (Number(buyer.money) || 0) < currentDealCost(negotiation)) {
-    return { ok: false, reason: `资金不足，需要 ${formatMoney(currentDealCost(negotiation))}` };
+  const dealCost = transferNegotiationCashCost(negotiation);
+  const reserved = checkReservedFunds
+    ? activeTransferCashCommitments(world, buyer.id, { excludeId: negotiation.id })
+    : 0;
+  if (checkFunds && (Number(buyer.money) || 0) - reserved < dealCost) {
+    return {
+      ok: false,
+      reason: checkReservedFunds && reserved > 0
+        ? `未承诺现金不足：其他谈判已占用 ${formatMoney(reserved)}，本交易需要 ${formatMoney(dealCost)}`
+        : `资金不足，需要 ${formatMoney(dealCost)}`,
+    };
   }
   return { ok: true, buyer, seller, player };
 }
@@ -175,10 +199,13 @@ export function submitTransferNegotiation(
   if (offeredFee <= 0) return { ok: false, msg: "转会费报价必须大于 0" };
   if (offeredWage <= 0) return { ok: false, msg: "合同周薪必须大于 0" };
   const bonus = signingBonus(offeredWage, contractYears);
-  if ((Number(buyer.money) || 0) < offeredFee + bonus) {
+  const reserved = activeTransferCashCommitments(world, buyer.id);
+  if ((Number(buyer.money) || 0) - reserved < offeredFee + bonus) {
     return {
       ok: false,
-      msg: `资金不足：报价与签约奖合计需要 ${formatMoney(offeredFee + bonus)}`,
+      msg: reserved > 0
+        ? `未承诺现金不足：进行中谈判已占用 ${formatMoney(reserved)}，新报价与签约奖还需 ${formatMoney(offeredFee + bonus)}`
+        : `资金不足：报价与签约奖合计需要 ${formatMoney(offeredFee + bonus)}`,
     };
   }
 
@@ -287,7 +314,7 @@ function playerContractDemand(buyer, seller, player, years) {
 }
 
 function completeNegotiation(world, negotiation) {
-  const live = validateLiveDeal(world, negotiation);
+  const live = validateLiveDeal(world, negotiation, { checkReservedFunds: true });
   if (!live.ok) {
     stopNegotiation(world, negotiation, "cancelled", live.reason);
     return { ok: false, msg: live.reason, negotiation };
@@ -424,7 +451,7 @@ export function respondTransferNegotiation(world, negotiationId, actionId, { ran
   }
   if (actionId !== "accept") return { ok: false, msg: "未知谈判操作" };
 
-  const live = validateLiveDeal(world, negotiation);
+  const live = validateLiveDeal(world, negotiation, { checkReservedFunds: true });
   if (!live.ok) {
     stopNegotiation(world, negotiation, "cancelled", live.reason);
     return { ok: false, msg: live.reason, negotiation };
