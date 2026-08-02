@@ -5045,14 +5045,14 @@ html[data-theme="light"] .avatar {
   position: absolute;
   right: 1px;
   bottom: 1px;
-  min-width: 0.95em;
-  height: 0.95em;
-  padding: 0 0.18em;
+  min-width: clamp(10px, calc(var(--avatar-size, 36px) * 0.24), 18px);
+  height: clamp(10px, calc(var(--avatar-size, 36px) * 0.24), 18px);
+  padding: 0 1px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.52em;
+  font-size: clamp(7px, calc(var(--avatar-size, 36px) * 0.11), 10px);
   font-weight: 800;
   line-height: 1;
   letter-spacing: 0;
@@ -5120,10 +5120,20 @@ html[data-theme="light"] .player-modal-head .avatar {
   width: 100%;
   height: 100%;
 }
-/* 高分辨率像素头像：非整数尺寸平滑缩小，减少大方块感 */
+/* 程序脸保持像素硬边；显示尺寸尽量使用 32 的整数倍。 */
 .avatar-px,
+.avatar-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+/* 非像素肖像若重新启用，仍使用浏览器平滑缩放。 */
 .avatar-art,
-.avatar img {
+.avatar img:not(.avatar-px) {
   display: block;
   width: 100%;
   height: 100%;

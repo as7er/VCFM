@@ -30,7 +30,7 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=183";
+import { nationFlagHtml } from "./flags.js?v=184";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -307,7 +307,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=183";
+} from "./avatar.js?v=184";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -395,7 +395,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=183").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=184").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1744,7 +1744,7 @@ function nationDetailHtml(code, competitionId = null, meta = null, record = null
               return `<tr>
                 <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(nationalTeam)}">${squadNumber ?? "—"}</span></td>
                 <td>${escapeHtml(player.pos || "—")}</td>
-                <td class="name-with-avatar">${playerAvatarHtml(player, nationalTeam, 26)} <span>${playerLinkHtml(
+                <td class="name-with-avatar">${playerAvatarHtml(player, nationalTeam, 32)} <span>${playerLinkHtml(
                   player.id,
                   player.name || "—",
                   "",
@@ -2823,7 +2823,7 @@ function renderStaff() {
             const diffCls = row.difficulty === "hard" ? "hard" : row.difficulty === "easy" ? "easy" : "";
             const hint = en ? row.hintEn || "" : row.hintZh || "";
             return `<tr class="${diffCls}" title="${escapeHtml(hint)}">
-              <td class="avatar-cell">${staffAvatarHtml(s, 28)} ${staffLinkHtml(s, from?.id, from?.id)}</td>
+              <td class="avatar-cell">${staffAvatarHtml(s, 32)} ${staffLinkHtml(s, from?.id, from?.id)}</td>
               <td>${en ? roleCopy[s.role]?.[0] || s.role : ROLES[s.role]?.label || s.role}</td>
               <td>${from ? clubLinkHtml(from.id, clubDisplayShortName(from)) : "—"} ${tags}</td>
               <td class="${ovrClass(s.rating)}"><strong>${s.rating}</strong></td>
@@ -2996,7 +2996,7 @@ function showStaffModal(staffId, context = {}) {
         : ""
     }
     <div class="staff-profile-head">
-      ${staffAvatarHtml(staff, 76)}
+      ${staffAvatarHtml(staff, 96)}
       <div>
         <div class="role">${escapeHtml(en ? roleCopy[staff.role]?.[0] || staff.role : staffRoleLabel(staff.role, false))}</div>
         <h2>${escapeHtml(staff.name)}</h2>
@@ -3090,7 +3090,7 @@ function renderTopbar() {
   $("#club-name").innerHTML = `<span class="kit-chip" style="${kitBadgeStyle(club)}" title="${kit.style}"></span> ${escapeHtml(clubDisplayName(club))}`;
   const mgrAv = avatarHtml(
     { id: `mgr_${world.userClubId}_${world.managerName}`, name: world.managerName, age: 42 },
-    { role: "manager", size: 28 }
+    { role: "manager", size: 32 }
   );
   $("#manager-name").innerHTML = `${mgrAv} <span>${escapeHtml(world.managerName)} · ${escapeHtml(t("div." + (club.division || 3)) || div?.short || "League")}</span>`;
   $("#season-label").textContent = t("top.season", { n: world.season });
@@ -3810,7 +3810,7 @@ function renderSquad() {
           : `${p.contractYears ?? "—"}${en ? "y" : "年"}`;
       return `<tr class="${xi.has(p.id) ? "me" : ""} ${!isAvailable(p) ? "row-unavailable" : ""} ${needsContractAttention(p) && !p.loan ? "row-contract" : ""}">
         <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${num}</span></td>
-        <td class="name-with-avatar">${playerAvatarHtml(p, club, 30)} <span>${playerLinkHtml(p.id, p.name)} ${statusBadges}</span></td>
+        <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)} <span>${playerLinkHtml(p.id, p.name)} ${statusBadges}</span></td>
         <td class="squad-detail">${nationLabel(p)}</td>
         <td><span class="badge ${p.pos}">${en ? p.pos : POS_LABEL[p.pos]}</span></td>
         <td class="squad-detail">${p.age}</td>
@@ -3969,7 +3969,7 @@ function showPlayerModal(playerId, context = {}) {
   $("#modal-body").innerHTML = `
     ${playerBrowseNavHtml(browseContext)}
     <div class="player-modal-head">
-      ${playerAvatarHtml(player, displayTeam, 64)}
+      ${playerAvatarHtml(player, displayTeam, 96)}
       ${displayTeam ? renderKitShirt(displayTeam, displayNumber, 56) : ""}
       <div>
     <h2 style="margin:0 0 0.25rem">${escapeHtml(player.name)}${displayNumber != null ? ` <span class="muted">#${displayNumber}</span>` : ""}</h2>
@@ -4692,7 +4692,7 @@ function renderYouth() {
           const num = p.number != null ? p.number : "—";
           return `<tr>
             <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${num}</span></td>
-            <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}</span></td>
+            <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)} <span>${playerLinkHtml(p.id, p.name)}</span></td>
             <td>${nationLabel(p)}</td>
             <td><span class="badge ${p.pos}">${en ? p.pos : POS_LABEL[p.pos]}</span></td>
             <td>${p.age}</td>
@@ -5486,7 +5486,7 @@ function globalPlayerSearchRow(item, { academy = false } = {}) {
   const age = getLang() === "en" ? `Age ${player.age}` : `${player.age} 岁`;
   const source = academy ? t("search.youth") : clubDisplayName(club);
   return `<button type="button" class="global-search-result" data-player-link="${escapeHtml(player.id)}">
-    ${playerAvatarHtml(player, club, 34)}
+    ${playerAvatarHtml(player, club, 32)}
     <span class="global-search-copy">
       <strong>${escapeHtml(player.name)}</strong>
       <span>${escapeHtml(source)} · ${escapeHtml(positionLabel(player.pos))} · ${escapeHtml(age)}</span>
@@ -5776,7 +5776,7 @@ function showClubModal(clubId) {
       const isGk = p.pos === "GK";
       return `<tr>
         <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${p.number ?? "—"}</span></td>
-        <td class="name-with-avatar">${playerAvatarHtml(p, club, 26)}
+        <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)}
           ${playerLinkHtml(p.id, p.name, "", { browseType: "club", browseId: club.id })}
         </td>
         <td><span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span></td>
@@ -6349,7 +6349,7 @@ function renderTransfer() {
           const p = c.players.find((x) => x.id === id);
           if (p) {
             rows.push(
-              `<div class="scout-watch-row">${playerAvatarHtml(p, c, 26)} ${playerLinkHtml(p.id, p.name)}
+              `<div class="scout-watch-row">${playerAvatarHtml(p, c, 32)} ${playerLinkHtml(p.id, p.name)}
                 <span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span>
                 <span class="muted">${escapeHtml(c.short || c.name)} · ${formatScoutOvr(world, p)} · ${formatScoutValue(world, p)}</span>
               </div>`
@@ -6445,7 +6445,7 @@ function renderTransfer() {
       const negotiating = activeNegotiationIds.has(p.id);
       const loanable = !p.loan && !buyDisabled && !negotiating && !activeDealIds.has(p.id);
       return `<tr>
-        <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}</span></td>
+        <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)} <span>${playerLinkHtml(p.id, p.name)}</span></td>
         <td>${nationLabel(p)}</td>
         <td><span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span></td>
         <td class="${ovrClass(p.ovr)}">${ovrTxt}</td>
@@ -6481,7 +6481,7 @@ function renderTransfer() {
       const saleNegotiation = findActiveSaleNegotiation(world, p.id);
       const dealNegotiation = findActiveDealNegotiation(world, p.id);
       return `<tr>
-      <td class="name-with-avatar">${playerAvatarHtml(p, club, 28)} <span>${playerLinkHtml(p.id, p.name)}${onLoan ? ` <span class="badge loan">${en ? "loan" : "租"}</span>` : ""}</span></td>
+      <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)} <span>${playerLinkHtml(p.id, p.name)}${onLoan ? ` <span class="badge loan">${en ? "loan" : "租"}</span>` : ""}</span></td>
       <td>${nationLabel(p)}</td>
       <td><span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span></td>
       <td class="${ovrClass(p.ovr)}">${p.ovr}</td>

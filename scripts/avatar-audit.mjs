@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   APPEARANCE_HAIR_STYLE_IDS,
   APPEARANCE_STYLE_AFRO,
@@ -10,6 +12,7 @@ import { hasFacialInjury, renderAvatarSvg } from "../js/avatar.js";
 import { generatePlayerAppearance as generateFromModels } from "../js/models.js";
 
 const nations = ["ENG", "FRA", "GER", "ESP", "ITA", "JPN", "NGA", "BRA", "USA", "MAR"];
+const repo = resolve(import.meta.dirname, "..");
 const players = Array.from({ length: 640 }, (_, index) => ({
   id: `avatar-audit-${index}`,
   name: `Player ${index}`,
@@ -68,4 +71,23 @@ const senior = renderAvatarSvg({ ...base, age: 55 });
 assert.notEqual(young, mature, "mature avatars should visibly age");
 assert.notEqual(mature, senior, "senior avatars should gain another age tier");
 
-console.log(JSON.stringify({ samples: players.length, hairstyles: styles.size, uniqueFaces: signatures.size }, null, 2));
+const mainSource = readFileSync(resolve(repo, "js/main.js"), "utf8");
+const smallAvatarSizes = [
+  ...mainSource.matchAll(/(?:playerAvatarHtml|staffAvatarHtml)\([^\n]*?,\s*(\d+)\)/g),
+].map((match) => Number(match[1])).filter((size) => size < 40);
+assert.ok(smallAvatarSizes.length > 0, "audit should find small avatar call sites");
+assert.ok(
+  smallAvatarSizes.every((size) => size === 32),
+  `small list avatars must use the 32px grid: ${[...new Set(smallAvatarSizes)].join(", ")}`
+);
+assert.match(mainSource, /playerAvatarHtml\(player, displayTeam, 96\)/, "player profile portrait must use 96px");
+const cssSource = readFileSync(resolve(repo, "css/style.css"), "utf8");
+assert.match(cssSource, /image-rendering:\s*pixelated/, "pixel avatars must retain hard edges");
+
+console.log(JSON.stringify({
+  samples: players.length,
+  hairstyles: styles.size,
+  uniqueFaces: signatures.size,
+  smallAvatarSize: 32,
+  profileAvatarSize: 96,
+}, null, 2));

@@ -806,7 +806,7 @@ export function avatarHtml(person, opts = {}) {
             : "";
   const label = (person.name || "") + moodTip;
   const cls = `avatar mood-${mood}${opts.className ? " " + opts.className : ""}`;
-  return `<span class="${cls}" style="width:${size}px;height:${size}px" title="${escapeAttr(
+  return `<span class="${cls}" style="width:${size}px;height:${size}px;--avatar-size:${size}px" title="${escapeAttr(
     label
   )}" role="img" aria-label="${escapeAttr(label)}">${inner}${moodOverlayHtml(mood)}</span>`;
 }
