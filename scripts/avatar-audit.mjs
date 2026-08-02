@@ -71,6 +71,15 @@ const senior = renderAvatarSvg({ ...base, age: 55 });
 assert.notEqual(young, mature, "mature avatars should visibly age");
 assert.notEqual(mature, senior, "senior avatars should gain another age tier");
 
+const compactPortrait = renderAvatarSvg({ ...base, age: 25, size: 32, detail: "compact" });
+const profilePortrait = renderAvatarSvg({ ...base, age: 25, size: 96, detail: "profile" });
+assert.match(compactPortrait, /data-grid="32" data-detail="compact"/, "list portrait must retain the 32-grid renderer");
+assert.match(profilePortrait, /data-grid="48" data-detail="profile"/, "profile portrait must use the native 48-grid renderer");
+assert.ok(
+  (profilePortrait.match(/<rect /g) || []).length > (compactPortrait.match(/<rect /g) || []).length,
+  "profile portrait must add native detail instead of only scaling the compact portrait"
+);
+
 const mainSource = readFileSync(resolve(repo, "js/main.js"), "utf8");
 const smallAvatarSizes = [
   ...mainSource.matchAll(/(?:playerAvatarHtml|staffAvatarHtml)\([^\n]*?,\s*(\d+)\)/g),
@@ -90,4 +99,5 @@ console.log(JSON.stringify({
   uniqueFaces: signatures.size,
   smallAvatarSize: 32,
   profileAvatarSize: 96,
+  profileGrid: 48,
 }, null, 2));

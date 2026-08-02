@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v184** · 清晰程序头像 |
+| 当前版本 | **v185** · 双精度像素肖像 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -72,6 +72,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **v182 球员路径**：出场承诺按可用比赛、首发、替补和实际分钟评估，连续违约会影响关系、士气与离队意愿；比赛结算修正为所有真实出场球员统一记出场与评分。
 - **v183 人物头像**：程序脸新增脸型、耳形、眼距、胡须和年龄层；生成与渲染共享同一外貌数据，只有头面部诊断才显示面部创伤。
 - **v184 头像清晰度**：名单头像统一到 32px 像素网格，资料肖像提升到 96px，并使用硬边像素缩放与自适应状态角标。
+- **v185 双精度肖像**：资料页使用同一人物外貌生成原生 48×48 高精度像素肖像，名单与战术板继续使用紧凑 32×32 版本。
 - **离线与性能**：Service Worker 按资源独立预缓存，单项失败不再清空整批离线资源；大型比赛视图只在进入比赛或战报时加载。
 - **统一验证**：核心审计由 `node scripts/verify.mjs` 统一执行，`--full` 追加 24 场真实性校准；GitHub Actions 覆盖 push、PR、手动与定时验证。
 
@@ -133,7 +134,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v184** · crisp procedural portraits |
+| Current version | **v185** · dual-detail pixel portraits |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -189,6 +190,7 @@ Repository: https://github.com/as7er/vcfm
 - **v182 player pathways**: playing-time promises use availability, starts, substitute appearances, and actual minutes; repeated breaches affect morale, relationships, and willingness to stay. Match settlement now credits every real participant with an appearance and rating.
 - **v183 portraits**: procedural faces add face shape, ears, eye spacing, facial hair, and age tiers. Creation and rendering share one appearance source, and only diagnosed head or facial injuries alter the face.
 - **v184 portrait clarity**: list portraits use a consistent 32px grid, profile portraits increase to 96px, and pixel art uses hard-edge scaling with adaptive status badges.
+- **v185 dual-detail portraits**: profiles render a native 48×48 high-detail portrait from the same identity, while lists and the tactics board retain the compact 32×32 version.
 - **Offline and performance**: Service Worker assets are precached independently so one failure cannot discard the batch; the large match view loads only when entering a match or archived report.
 - **Unified verification**: `node scripts/verify.mjs` runs the core audits, while `--full` adds the 24-match realism calibration. GitHub Actions covers pushes, pull requests, manual runs, and a schedule.
 

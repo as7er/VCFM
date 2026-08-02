@@ -28,6 +28,10 @@
     <div class="row" id="sizes"></div>
   </div>
   <div class="card">
+    <h3 style="margin:.2rem 0 .5rem">同一人物双精度</h3>
+    <div class="row" id="details"></div>
+  </div>
+  <div class="card">
     <h3 style="margin:.2rem 0 .5rem">同队同衣（sunset）</h3>
     <div class="row" id="same"></div>
   </div>
@@ -44,7 +48,7 @@
     <div class="row" id="injuries"></div>
   </div>
   <script type="module">
-    import { playerAvatarHtml, avatarHtml } from './js/avatar.js?v=184';
+    import { playerAvatarHtml, avatarHtml } from './js/avatar.js?v=185';
     import { ensurePlayerAppearance } from './js/models.js';
     const club = { id:'sunset', kit:{ primary:'#f97316', secondary:'#5b21b6' } };
     const nations = ['JPN','NGA','SWE','BRA','ENG','SEN','ITA','CHN','IRL','MAR'];
@@ -57,6 +61,12 @@
     const sizeBase = samples[0];
     document.getElementById('sizes').innerHTML = [26, 28, 32, 64, 96].map(size=>
       `<div class="cell">${playerAvatarHtml(sizeBase, club, size)}<div class="lb">${size}px</div></div>`
+    ).join('');
+    document.getElementById('details').innerHTML = [
+      ['32×32 名单', { size:96, detail:'compact' }],
+      ['48×48 资料', { size:96, detail:'profile' }],
+    ].map(([label, opts])=>
+      `<div class="cell">${avatarHtml(sizeBase, { ...opts, role:'player', kit:club.kit })}<div class="lb">${label}</div></div>`
     ).join('');
     document.getElementById('same').innerHTML = samples.slice(0,6).map(p=>
       `<div class="cell">${playerAvatarHtml(p, club, 52)}<div class="lb">${p.nationality}</div></div>`

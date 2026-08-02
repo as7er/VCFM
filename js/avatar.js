@@ -169,6 +169,7 @@ function lookFor(h, nation, age = 25, persisted = null) {
 // ============================================================
 
 const GRID = 32;
+const PROFILE_GRID = 48;
 const OUT = "#1b1613"; // 全局粗描边（热血式近黑）
 const EYE = "#1e1a17";
 const EYEWHITE = "#f4efe4";
@@ -656,6 +657,108 @@ function composeCells(opts = {}) {
   ];
 }
 
+function scaleCells(cells, fromGrid, toGrid) {
+  const scale = toGrid / fromGrid;
+  return cells.map((cell) => {
+    const x0 = Math.round(cell.x * scale);
+    const y0 = Math.round(cell.y * scale);
+    const x1 = Math.round((cell.x + cell.w) * scale);
+    const y1 = Math.round((cell.y + cell.h) * scale);
+    return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0), c: cell.c };
+  });
+}
+
+/** 48-grid portrait details reuse the compact face identity instead of inventing a second likeness. */
+function profileDetailCells(opts = {}) {
+  const seed = opts.seed || opts.id || opts.name || "anon";
+  const h = appearanceHash(seed);
+  const age = opts.age || 25;
+  const mood = opts.mood || "neutral";
+  const persisted = opts.skinTone || opts.hairColor || opts.hairStyle != null
+    ? { skinTone: opts.skinTone || null, hairColor: opts.hairColor || null, hairStyle: opts.hairStyle }
+    : null;
+  const look = lookFor(h, opts.nation || null, age, persisted);
+  const face = look.face || {};
+  const skinLight = mixHex(look.skin, "#fff7ed", 0.24);
+  const skinMid = mixHex(look.skin, look.skinShade, 0.35);
+  const hairLight = shiftHex(look.hairHex, 38);
+  const hairDark = shiftHex(look.hairHex, -28);
+  const parts = [];
+
+  // Fine hair strands make the large portrait read as pixel art rather than a scaled thumbnail.
+  if (look.styleId !== 8) {
+    const strandSets = [
+      [[14, 5], [18, 4], [23, 5], [28, 4], [33, 6]],
+      [[13, 7], [17, 5], [22, 4], [27, 4], [32, 5], [36, 7]],
+      [[15, 5], [20, 3], [25, 4], [30, 3], [34, 6]],
+      [[16, 8], [20, 7], [25, 7], [30, 7]],
+    ];
+    for (const [x, y] of strandSets[look.styleId % strandSets.length]) parts.push(P(x, y, hairLight));
+    parts.push(P(12, 10, hairDark), P(36, 11, hairDark), P(15, 12, hairDark), P(33, 12, hairDark));
+  } else {
+    parts.push(P(20, 8, skinLight), P(21, 8, skinLight), P(18, 9, skinLight));
+  }
+
+  // Extra facial modelling follows the compact face's stable eye spacing, gaze and nose style.
+  const spacing = face.eyeSpacing || 0;
+  const leftX = 17 + spacing;
+  const rightX = 30 - spacing;
+  if (!(mood === "injured" && opts.facialInjury)) {
+    parts.push(P(leftX, 18, EYEWHITE), P(rightX, 18, EYEWHITE));
+    if (mood !== "tired") {
+      const gaze = face.gaze || 0;
+      parts.push(P(leftX + gaze, 19, EYE), P(rightX + gaze, 19, EYE));
+      parts.push(P(leftX + gaze, 18, "#ffffff"), P(rightX + gaze, 18, "#ffffff"));
+    }
+  }
+  parts.push(P(22, 21, skinLight), P(23, 22, skinLight));
+  if (face.noseStyle === 1) parts.push(P(24, 23, look.skinShade), P(25, 24, look.skinShade));
+  else if (face.noseStyle === 2) parts.push(P(23, 23, look.skinShade), P(22, 24, look.skinShade));
+  else parts.push(P(24, 24, look.skinShade));
+  parts.push(P(12, 17, skinLight), P(13, 16, skinLight), P(35, 19, skinMid));
+
+  // One-pixel lip and chin accents preserve the mood while adding definition at 96px.
+  if (mood === "happy") {
+    parts.push(R(21, 27, 28, "#fdf6ea"), R(22, 26, 29, MOUTH));
+  } else if (mood === "sad" || mood === "injured") {
+    parts.push(R(22, 26, 27, MOUTH), P(21, 28, MOUTH), P(27, 28, MOUTH));
+  } else {
+    parts.push(R(22, 26, 28, MOUTH), P(24, 29, skinMid));
+  }
+
+  if (age >= 32) parts.push(P(15, 22, skinMid), P(33, 22, skinMid));
+  if (age >= 40) {
+    parts.push(R(15, 19, 15, skinMid), R(29, 33, 15, skinMid));
+    parts.push(P(16, 21, skinMid), P(32, 21, skinMid));
+  }
+  if (age >= 50) parts.push(R(21, 27, 9, skinMid), P(19, 25, skinMid), P(29, 25, skinMid));
+
+  // Shirt seams and collar are visible only in the profile portrait.
+  const kitPrimary = kitDisplayColor(opts.kitPrimary || "#3d8bfd");
+  const kitSecondary = opts.kitSecondary || shiftHex(kitPrimary, -42);
+  if ((opts.role || "player") === "player") {
+    parts.push(R(8, 17, 37, shiftHex(kitPrimary, 24)), R(30, 39, 37, shiftHex(kitPrimary, 24)));
+    parts.push(P(22, 37, kitSecondary), P(25, 37, kitSecondary), R(23, 24, 38, kitSecondary));
+  } else {
+    parts.push(R(8, 18, 37, "#3f4b5d"), R(29, 39, 37, "#3f4b5d"));
+  }
+  return parts;
+}
+
+function composeProfileCells(opts = {}) {
+  return [
+    ...scaleCells(composeCells(opts), GRID, PROFILE_GRID),
+    ...profileDetailCells(opts),
+  ];
+}
+
+function avatarCellSource(opts = {}) {
+  const detail = opts.detail === "profile" ? "profile" : "compact";
+  return detail === "profile"
+    ? { cells: composeProfileCells(opts), grid: PROFILE_GRID, detail }
+    : { cells: composeCells(opts), grid: GRID, detail };
+}
+
 /**
  * 渲染像素头像 SVG（热血风）。预览页 / 无 DOM 环境（node 校验）用；
  * 游戏内 avatarHtml 走 canvas-PNG（清晰度不受浏览器合成影响）。
@@ -666,17 +769,16 @@ function composeCells(opts = {}) {
 export function renderAvatarSvg(opts = {}) {
   const size = opts.size || 36;
   const mood = opts.mood || "neutral";
-  const cells = composeCells(opts);
-  // 32 格 × 2 显示单位 = 64 viewBox（旧 16×3=48 的同比例放大）
+  const { cells, grid, detail } = avatarCellSource(opts);
   const CELL = 2;
-  const VB = GRID * CELL;
+  const VB = grid * CELL;
   const rects = cells
     .map(
       (r) =>
         `<rect x="${r.x * CELL}" y="${r.y * CELL}" width="${r.w * CELL}" height="${r.h * CELL}" fill="${r.c}"/>`
     )
     .join("");
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" width="${size}" height="${size}" class="avatar-svg avatar-pixel" shape-rendering="crispEdges" data-mood="${mood}" data-ini="${escapeAttr(initials(opts.name))}" aria-hidden="true">${rects}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB} ${VB}" width="${size}" height="${size}" class="avatar-svg avatar-pixel" shape-rendering="crispEdges" data-grid="${grid}" data-detail="${detail}" data-mood="${mood}" data-ini="${escapeAttr(initials(opts.name))}" aria-hidden="true">${rects}</svg>`;
 }
 
 /** PNG 缓存：同一 (种子|心情|球衣|尺寸|DPR) 只画一次 canvas */
@@ -702,6 +804,7 @@ export function renderAvatarPngUri(opts = {}) {
     opts.hairStyle ?? "",
     opts.mood || "neutral",
     opts.facialInjury ? "face-injury" : "body-injury",
+    opts.detail || "compact",
     opts.kitPrimary || "",
     opts.kitSecondary || "",
     size,
@@ -712,14 +815,15 @@ export function renderAvatarPngUri(opts = {}) {
 
   // 至少生成 64px 源图再交给浏览器缩小：小头像的单格轮廓不会因 28/30px
   // 这类非整数比例被放大成不均匀方块，高分屏仍按整数 cell 绘制。
-  const k = Math.max(2, Math.ceil((size * dpr) / GRID));
-  const px = GRID * k;
+  const { cells, grid } = avatarCellSource(opts);
+  const k = Math.max(1, Math.ceil((size * dpr) / grid));
+  const px = grid * k;
   const canvas = document.createElement("canvas");
   canvas.width = px;
   canvas.height = px;
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
-  for (const r of composeCells(opts)) {
+  for (const r of cells) {
     ctx.fillStyle = r.c;
     ctx.fillRect(r.x * k, r.y * k, r.w * k, r.h * k);
   }
@@ -759,6 +863,7 @@ export function avatarHtml(person, opts = {}) {
   const size = opts.size || 36;
   const kitPrimary = opts.kitPrimary || opts.kit?.primary;
   const kitSecondary = opts.kitSecondary || opts.kit?.secondary;
+  const detail = opts.detail || (size >= 80 ? "profile" : "compact");
   let mood = opts.mood;
   if (!mood && role === "player") mood = moodFromPlayer(person);
   if (!mood) mood = "neutral";
@@ -782,6 +887,7 @@ export function avatarHtml(person, opts = {}) {
     size,
     mood,
     facialInjury: role === "player" && hasFacialInjury(person),
+    detail,
   };
   // 全场景统一：热血程序脸 2.1
   const pngUri = renderAvatarPngUri(renderOpts);
@@ -805,7 +911,7 @@ export function avatarHtml(person, opts = {}) {
             ? " · 疲惫"
             : "";
   const label = (person.name || "") + moodTip;
-  const cls = `avatar mood-${mood}${opts.className ? " " + opts.className : ""}`;
+  const cls = `avatar avatar-${detail} mood-${mood}${opts.className ? " " + opts.className : ""}`;
   return `<span class="${cls}" style="width:${size}px;height:${size}px;--avatar-size:${size}px" title="${escapeAttr(
     label
   )}" role="img" aria-label="${escapeAttr(label)}">${inner}${moodOverlayHtml(mood)}</span>`;
