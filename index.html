@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=187" />
+  <link rel="stylesheet" href="css/style.css?v=188" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -489,6 +489,9 @@
         <!-- 职员 -->
         <div id="tab-staff" class="tab-panel">
           <div class="grid-2">
+            <div class="card span-2">
+              <div id="delegation-center"></div>
+            </div>
             <div class="card span-2">
               <h2 data-i18n="staff.title">教练团队</h2>
               <p class="hint" data-i18n="staff.hint">职员有合同年限；解约进自由市场。窗内可接触他队在职职员（付补偿金），窗外仅自由身或合同将尽者。</p>
@@ -1346,12 +1349,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=187"></script>
+  <script type="module" src="js/main.js?v=188"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v187";
+        var CURRENT_CACHE = "vcfm-v188";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1362,7 +1365,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=187").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=188").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1371,8 +1374,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v187")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v187", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v188")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v188", "1");
               location.reload();
             }
           } catch (e) {

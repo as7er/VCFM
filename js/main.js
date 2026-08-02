@@ -30,7 +30,7 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=187";
+import { nationFlagHtml } from "./flags.js?v=188";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -264,6 +264,14 @@ import {
   setTrainingMode,
 } from "./training-boost.js";
 import {
+  applyDelegatedLineup,
+  applyDelegatedTactics,
+  applyDelegatedTraining,
+  ensureDelegation,
+  ensureWorldDelegation,
+  setManagementMode,
+} from "./delegation.js";
+import {
   ensureInternational,
   listInternationalCompetitions,
   internationalMatches,
@@ -307,7 +315,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=187";
+} from "./avatar.js?v=188";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -395,7 +403,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=187").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=188").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1009,6 +1017,7 @@ function repairWorldFields(w) {
   ensureTransferWindow(w);
   ensureManagerCareer(w);
   ensureWorldFinances(w);
+  ensureWorldDelegation(w);
   if (!Array.isArray(w.poachBids)) w.poachBids = [];
   if (w.board && w.board.sackWarnings == null) w.board.sackWarnings = 0;
   for (const c of w.clubs || []) {
@@ -2411,6 +2420,7 @@ function renderTraining() {
   const club = getUserClub(world);
   if (!club) return;
   const en = getLang() === "en";
+  const coachControlled = world.managementMode === "club_director";
   const t = ensureTraining(club);
   const sum = trainingSummary(club);
   const focusCopy = {
@@ -2439,6 +2449,7 @@ function renderTraining() {
       )
       .join("");
     focusBox.querySelectorAll("[data-focus]").forEach((btn) => {
+      btn.disabled = coachControlled;
       btn.onclick = () => {
         setTraining(club, { focus: btn.dataset.focus });
         autosave("training-focus");
@@ -2460,6 +2471,7 @@ function renderTraining() {
       )
       .join("");
     intBox.querySelectorAll("[data-intensity]").forEach((btn) => {
+      btn.disabled = coachControlled;
       btn.onclick = () => {
         setTraining(club, { intensity: btn.dataset.intensity });
         autosave("training-intensity");
@@ -2523,7 +2535,10 @@ function renderTraining() {
   const delegate = $("#btn-delegate-training");
   if (delegate) {
     const coach = club.staff?.coach;
-    delegate.textContent = en ? "Delegate to assistant" : "委托助理教练安排";
+    delegate.textContent = coachControlled
+      ? (en ? "Managed by head coach" : "由主教练持续安排")
+      : (en ? "Delegate to assistant" : "委托助理教练安排");
+    delegate.disabled = coachControlled;
     delegate.title = coach
       ? (en ? `${coach.name} · Ability ${coach.rating}` : `${coach.name} · 能力 ${coach.rating}`)
       : "";
@@ -2572,6 +2587,7 @@ function renderTrainingPrep(club, en) {
       )
       .join("");
     modeBox.querySelectorAll("[data-prep-mode]").forEach((btn) => {
+      btn.disabled = world.managementMode === "club_director";
       btn.onclick = () => {
         const r = setTrainingMode(club, btn.dataset.prepMode, world.day);
         const msg = en ? r.msgEn || r.msg : r.msg;
@@ -2633,11 +2649,161 @@ function renderTrainingPrep(club, en) {
     <span class="muted">${escapeHtml(cdLine)}${oppLine ? ` · ${escapeHtml(oppLine)}` : ""}</span>`;
 }
 
+function renderDelegationCenter(club, en) {
+  const box = $("#delegation-center");
+  if (!box) return;
+  const delegation = ensureDelegation(world, club);
+  const coach = club.staff?.coach;
+  const directorMode = world.managementMode === "club_director";
+  const responsibilityOptions = {
+    training: [
+      ["player", en ? "Player controlled" : "玩家负责"],
+      ["staff", en ? "Staff continuously manage" : "教练团队持续代管"],
+    ],
+    lineup: [
+      ["player", en ? "Player controlled" : "玩家负责"],
+      ["confirm", en ? "Staff suggestion, confirm" : "教练建议，确认后应用"],
+      ["staff", en ? "Staff fully manage" : "教练团队完全代管"],
+    ],
+    tactics: [
+      ["player", en ? "Player controlled" : "玩家负责"],
+      ["confirm", en ? "Staff suggestion, confirm" : "教练建议，确认后应用"],
+      ["staff", en ? "Staff fully manage" : "教练团队完全代管"],
+    ],
+    matchday: [
+      ["player", en ? "Player controlled" : "玩家负责"],
+      ["emergency", en ? "Emergency injury cover" : "仅伤退紧急代管"],
+      ["staff", en ? "Staff fully manage" : "教练团队完全代管"],
+    ],
+    development: [
+      ["player", en ? "Player principles" : "玩家制定原则"],
+      ["staff", en ? "Staff execute principles" : "教练团队执行原则"],
+    ],
+  };
+  const labels = {
+    training: en ? "Training" : "训练安排",
+    lineup: en ? "Starting XI" : "首发阵容",
+    tactics: en ? "Pre-match tactics" : "赛前战术",
+    matchday: en ? "Matchday changes" : "临场换人",
+    development: en ? "Player development" : "年轻球员培养",
+  };
+  const selectHtml = (key) => `<label class="delegation-field"><span>${labels[key]}</span>
+    <select data-delegation-key="${key}"${directorMode ? " disabled" : ""}>
+      ${responsibilityOptions[key].map(([value, label]) => `<option value="${value}"${delegation[key] === value ? " selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+    </select></label>`;
+  const locked = new Set(delegation.locks.playerIds);
+  const playerOptions = [...(club.players || [])]
+    .sort((a, b) => (b.ovr || 0) - (a.ovr || 0))
+    .map((player) => `<option value="${escapeHtml(player.id)}"${locked.has(player.id) ? " selected" : ""}>${escapeHtml(player.name)} · ${positionLabel(player.pos)} · ${player.ovr}</option>`)
+    .join("");
+  const coreOptions = (club.players || [])
+    .filter((player) => player.pos !== "GK")
+    .sort((a, b) => (b.ovr || 0) - (a.ovr || 0))
+    .map((player) => `<option value="${escapeHtml(player.id)}"${delegation.locks.corePlayerId === player.id ? " selected" : ""}>${escapeHtml(player.name)} · ${player.ovr}</option>`)
+    .join("");
+  box.innerHTML = `<div class="row-between delegation-heading">
+      <div><h2>${en ? "Responsibilities" : "职责委托中心"}</h2>
+      <p class="hint">${en ? "Staff decisions use the actual squad, fitness, form, schedule and coach ability. Delegation adds no hidden match bonus." : "自动决策读取真实阵容、体能、状态、赛程与教练能力，不添加隐藏比赛加成。"}</p></div>
+      <label class="delegation-mode"><span>${en ? "Your role" : "玩家身份"}</span>
+        <select id="management-mode-select">
+          <option value="head_coach"${directorMode ? "" : " selected"}>${en ? "Head coach" : "主教练模式"}</option>
+          <option value="club_director"${directorMode ? " selected" : ""}>${en ? "Club director" : "俱乐部经营模式"}</option>
+        </select>
+      </label>
+    </div>
+    <div class="delegation-status">${coach
+      ? `${en ? (directorMode ? "Head coach" : "Coaching team") : (directorMode ? "聘用主教练" : "执行教练")}：<strong>${escapeHtml(coach.name)}</strong> · ${en ? "Ability" : "能力"} ${coach.rating}`
+      : (en ? "No head coach available; full delegation is unavailable." : "当前没有可执行职责的主教练，无法完全委托。")}</div>
+    <div class="delegation-grid">${Object.keys(responsibilityOptions).map(selectHtml).join("")}</div>
+    ${directorMode ? `<p class="hint delegation-director-note">${en ? "The employed head coach now controls training, selection, tactics and matchday decisions. You retain transfers, contracts, finance, facilities, youth intake and staff hiring." : "聘用主教练现负责训练、选人、战术与临场；你继续负责转会、合同、财政、设施、青训和聘帅。"}</p>` : ""}
+    <div class="delegation-principles">
+      <label><span>${en ? "Rotation" : "轮换原则"}</span><select data-principle="rotation">
+        <option value="balanced"${delegation.principles.rotation === "balanced" ? " selected" : ""}>${en ? "Balanced" : "均衡"}</option>
+        <option value="fitness"${delegation.principles.rotation === "fitness" ? " selected" : ""}>${en ? "Protect fitness" : "体能优先"}</option>
+        <option value="strongest"${delegation.principles.rotation === "strongest" ? " selected" : ""}>${en ? "Strongest available" : "最强可用"}</option>
+      </select></label>
+      <label><span>${en ? "Youth principle" : "培养原则"}</span><select data-principle="youthPriority">
+        <option value="normal"${delegation.principles.youthPriority === "normal" ? " selected" : ""}>${en ? "Merit first" : "实力优先"}</option>
+        <option value="high"${delegation.principles.youthPriority === "high" ? " selected" : ""}>${en ? "Prefer youth when close" : "实力接近时优先年轻球员"}</option>
+      </select></label>
+      <label class="delegation-check"><input type="checkbox" id="delegation-lock-formation"${delegation.locks.formation ? " checked" : ""}> ${en ? `Lock formation (${club.tactics.formation})` : `锁定当前阵型（${club.tactics.formation}）`}</label>
+      <label><span>${en ? "Key attacking player" : "锁定进攻核心"}</span><select id="delegation-core-player"><option value="">${en ? "Staff decides" : "由教练决定"}</option>${coreOptions}</select></label>
+      <label class="delegation-player-lock"><span>${en ? "Must-start players (Ctrl to select multiple)" : "关键首发（按 Ctrl 可多选）"}</span><select id="delegation-locked-players" multiple size="5">${playerOptions}</select></label>
+    </div>
+    <div class="staff-card-actions delegation-actions">
+      <button class="btn small" id="btn-delegation-training">${en ? "Apply training now" : "立即应用训练建议"}</button>
+      <button class="btn small" id="btn-delegation-lineup">${en ? "Apply XI suggestion" : "应用首发建议"}</button>
+      <button class="btn small" id="btn-delegation-tactics">${en ? "Apply tactics suggestion" : "应用战术建议"}</button>
+    </div>`;
+
+  $("#management-mode-select").onchange = (event) => {
+    const result = setManagementMode(world, club, event.target.value);
+    toast(result.ok
+      ? (en ? "Management mode updated" : "管理模式已更新")
+      : result.msg);
+    if (result.ok) {
+      autosave("management-mode");
+      refreshAll();
+    } else {
+      renderStaff();
+    }
+  };
+  box.querySelectorAll("[data-delegation-key]").forEach((select) => {
+    select.onchange = () => {
+      delegation[select.dataset.delegationKey] = select.value;
+      autosave("delegation-responsibility");
+      renderStaff();
+    };
+  });
+  box.querySelectorAll("[data-principle]").forEach((select) => {
+    select.onchange = () => {
+      delegation.principles[select.dataset.principle] = select.value;
+      autosave("delegation-principle");
+    };
+  });
+  $("#delegation-lock-formation").onchange = (event) => {
+    delegation.locks.formation = event.target.checked;
+    autosave("delegation-formation-lock");
+    renderStaff();
+  };
+  $("#delegation-core-player").onchange = (event) => {
+    delegation.locks.corePlayerId = event.target.value || null;
+    autosave("delegation-core-lock");
+  };
+  $("#delegation-locked-players").onchange = (event) => {
+    delegation.locks.playerIds = [...event.target.selectedOptions].map((option) => option.value);
+    autosave("delegation-player-locks");
+  };
+  $("#btn-delegation-training").onclick = () => {
+    const previous = delegation.training;
+    delegation.training = "staff";
+    const result = applyDelegatedTraining(world, club);
+    delegation.training = previous;
+    toast(result.ok ? (en ? "Training recommendation applied" : "已应用教练训练建议") : (result.msg || "无法应用"));
+    autosave("delegation-training-suggestion");
+    renderTraining();
+  };
+  $("#btn-delegation-lineup").onclick = () => {
+    const result = applyDelegatedLineup(world, club, { force: true, eligibleIds: nextMatchEligibility(club).ids });
+    toast(result.ok ? (en ? "Starting XI recommendation applied" : "已应用教练首发建议") : (result.msg || "无法应用"));
+    autosave("delegation-lineup-suggestion");
+    renderTactics();
+    renderSquad();
+  };
+  $("#btn-delegation-tactics").onclick = () => {
+    const result = applyDelegatedTactics(world, club, getNextUserMatch(world), { force: true });
+    toast(result.ok ? (en ? "Tactical recommendation applied" : "已应用教练战术建议") : (result.msg || "无法应用"));
+    autosave("delegation-tactics-suggestion");
+    renderTactics();
+  };
+}
+
 function renderStaff() {
   const club = getUserClub(world);
   const en = getLang() === "en";
   if (!club) return;
   ensureStaff(club);
+  ensureDelegation(world, club);
   try {
     ensureWorldStaff(world);
   } catch (_) {
@@ -2650,6 +2816,8 @@ function renderStaff() {
     scout: ["Scout", "Improves scouting knowledge and reports"],
     doctor: ["Doctor", "Reduces injury risk and recovery time"],
   };
+
+  renderDelegationCenter(club, en);
 
   // 待处理：别人挖本队职员
   const approachBox = $("#staff-approaches");
@@ -4889,6 +5057,7 @@ function nextMatchEligibility(club) {
 }
 
 function bindTacticsDragDrop() {
+  if (world?.managementMode === "club_director") return;
   const pitch = $("#pitch");
   const bench = $("#tac-bench");
   if (!pitch || pitch._tacBound) return;
@@ -5131,14 +5300,18 @@ function renderTactics() {
   const club = getUserClub(world);
   ensureTactics(club);
   const tac = club.tactics;
+  const coachControlled = world.managementMode === "club_director";
   renderTacPresets();
   const formSel = $("#formation-select");
   if (formSel) formSel.value = tac.formation;
+  if (formSel) formSel.disabled = coachControlled;
   const styleSel = $("#style-select");
   if (styleSel) styleSel.value = tac.style;
+  if (styleSel) styleSel.disabled = coachControlled;
   const setSlider = (id, valId, key, n) => {
     const el = $(id);
     if (el) el.value = n;
+    if (el) el.disabled = coachControlled;
     const v = $(valId);
     if (v) v.textContent = tacValText(key, n);
   };
@@ -5297,6 +5470,11 @@ function renderTactics() {
   bindTacticsDragDrop();
   bindTacticsRoleSelects();
   bindTacticsCoreButtons();
+  const autoXiButton = $("#btn-auto-xi");
+  if (autoXiButton) autoXiButton.disabled = coachControlled;
+  const presetBox = $("#tac-presets");
+  presetBox?.querySelectorAll("button").forEach((button) => { button.disabled = coachControlled; });
+  pitch.classList.toggle("delegation-readonly", coachControlled);
   applyTacPickHighlight();
   renderTacticsSummary();
 }
@@ -5306,6 +5484,7 @@ function bindTacticsCoreButtons() {
   const pitch = $("#pitch");
   if (!pitch) return;
   pitch.querySelectorAll("[data-core-id]").forEach((btn) => {
+    btn.disabled = world?.managementMode === "club_director";
     btn.addEventListener("mousedown", (e) => e.stopPropagation());
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -5335,6 +5514,7 @@ function bindTacticsRoleSelects() {
   const pitch = $("#pitch");
   if (!pitch) return;
   pitch.querySelectorAll("[data-slot-role]").forEach((sel) => {
+    sel.disabled = world?.managementMode === "club_director";
     sel.addEventListener("mousedown", (e) => e.stopPropagation());
     sel.addEventListener("click", (e) => e.stopPropagation());
     sel.addEventListener("change", (e) => {

@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v187** · 精修高精度肖像 |
+| 当前版本 | **v188** · 职责委托与经营模式 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -75,6 +75,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **v185 双精度肖像**：资料页使用同一人物外貌生成原生 48×48 高精度像素肖像，名单与战术板继续使用紧凑 32×32 版本。
 - **v186 肖像修正**：资料头像改为单一原生 48×48 坐标系，消除分数缩放造成的五官错位；无效高精度结果会安全回退。
 - **v187 脸部精修**：资料头像采用更清晰的统一眼型与瞳孔高光、连续对称下颌，并将普通胡茬改为自然的稀疏纹理。
+- **v188 职责委托**：训练、首发、战术、临场与培养职责可交由教练团队；支持阵型、关键球员和培养原则锁定，并可切换由聘用主教练全权带队的俱乐部经营模式。自动决策不提供隐藏比赛加成。
 - **离线与性能**：Service Worker 按资源独立预缓存，单项失败不再清空整批离线资源；大型比赛视图只在进入比赛或战报时加载。
 - **统一验证**：核心审计由 `node scripts/verify.mjs` 统一执行，`--full` 追加 24 场真实性校准；GitHub Actions 覆盖 push、PR、手动与定时验证。
 
@@ -136,7 +137,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v187** · refined high-detail portraits |
+| Current version | **v188** · delegation and club-director mode |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -195,6 +196,7 @@ Repository: https://github.com/as7er/vcfm
 - **v185 dual-detail portraits**: profiles render a native 48×48 high-detail portrait from the same identity, while lists and the tactics board retain the compact 32×32 version.
 - **v186 portrait fix**: profile portraits now use one native 48×48 coordinate system, eliminating facial misalignment from fractional scaling, with safe fallback for invalid output.
 - **v187 facial polish**: profile portraits use clearer consistent eyes with pupil highlights, continuous symmetric jawlines, and sparse natural stubble.
+- **v188 delegation**: coaching staff can handle training, selection, tactics, matchday changes, and development. Formation, key-player, and development principles can be locked, while club-director mode gives the employed head coach sporting control without hidden match bonuses.
 - **Offline and performance**: Service Worker assets are precached independently so one failure cannot discard the batch; the large match view loads only when entering a match or archived report.
 - **Unified verification**: `node scripts/verify.mjs` runs the core audits, while `--full` adds the 24-match realism calibration. GitHub Actions covers pushes, pull requests, manual runs, and a schedule.
 

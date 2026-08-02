@@ -74,6 +74,10 @@ import {
 import { eligiblePlayerIds } from "./squad-registration.js";
 import { deriveMatchAnalysis } from "./match-analysis.js";
 import { recordMatchPlayingTime } from "./player-pathway.js";
+import {
+  applyPreMatchDelegation,
+  shouldStaffHandleMatchday,
+} from "./delegation.js";
 
 let activeRandom = Math.random;
 function rng() {
@@ -548,6 +552,13 @@ export function createMatchSession(world, fixture) {
   if (away.id !== world.userClubId) aiTuneTactics(away, home, world);
   const homeEligibleIds = eligiblePlayerIds(world, home, fixture);
   const awayEligibleIds = eligiblePlayerIds(world, away, fixture);
+  const userClub = home.id === world.userClubId ? home : away.id === world.userClubId ? away : null;
+  if (userClub) {
+    applyPreMatchDelegation(world, userClub, fixture, {
+      importance,
+      eligibleIds: userClub === home ? homeEligibleIds : awayEligibleIds,
+    });
+  }
   // 用户保留手动/上次首发；AI 强制重排
   ensureMatchLineup(home, { forceAuto: home.id !== world.userClubId, day: world.day, importance, eligibleIds: homeEligibleIds });
   ensureMatchLineup(away, { forceAuto: away.id !== world.userClubId, day: world.day, importance, eligibleIds: awayEligibleIds });
@@ -569,9 +580,6 @@ export function createMatchSession(world, fixture) {
   const bigMatch = isBigMatch(world, home, away, isCup);
 
   // 备份战术（半场改完可保留到终场）
-  const userClub =
-    home.id === world.userClubId ? home : away.id === world.userClubId ? away : null;
-
   const state = {
     world,
     fixture,
@@ -1596,7 +1604,10 @@ function tryInjury(state, minute) {
   recomputeSides(state);
 
   // AI 自动用尽换人名额补人
-  if (state.subsUsed[sk] < state.maxSubs && club.id !== state.world.userClubId) {
+  if (
+    state.subsUsed[sk] < state.maxSubs &&
+    (club.id !== state.world.userClubId || shouldStaffHandleMatchday(state.world, club, { emergency: true }))
+  ) {
     aiAutoSub(state, club, p.id, minute);
   }
 }
@@ -1752,7 +1763,7 @@ function midMatchCoachPrompt(state, minute) {
 /** AI 中场微调 + 可能换人 */
 export function aiHalfTime(state) {
   for (const club of [state.home, state.away]) {
-    if (club.id === state.world.userClubId) continue;
+    if (club.id === state.world.userClubId && !shouldStaffHandleMatchday(state.world, club)) continue;
     ensureTactics(club);
     const opp = club === state.home ? state.away : state.home;
     const myG = club === state.home ? state.hg : state.ag;
@@ -1788,6 +1799,9 @@ export function aiHalfTime(state) {
 export function applyUserHalfTime(state, orders = {}) {
   const club = state.userClub;
   if (!club) return { ok: false, msg: "无用户球队" };
+  if (shouldStaffHandleMatchday(state.world, club)) {
+    return { ok: false, msg: "临场决策已委托主教练" };
+  }
   ensureTactics(club);
   const t = club.tactics;
   const prevForm = t.formation;

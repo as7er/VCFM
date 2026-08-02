@@ -6745,3 +6745,82 @@ summary:focus-visible {
 .form-pill,
 .contract-cell,
 .stats-league-cell { font-size: max(0.75rem, 12px); }
+.delegation-heading {
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.delegation-heading h2 {
+  margin-bottom: 0.3rem;
+}
+
+.delegation-mode,
+.delegation-field,
+.delegation-principles label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.delegation-mode {
+  min-width: 12rem;
+}
+
+.delegation-status,
+.delegation-director-note {
+  margin: 0.65rem 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--surface-inset) 78%, transparent);
+}
+
+.delegation-grid,
+.delegation-principles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.7rem;
+  margin-top: 0.7rem;
+}
+
+.delegation-principles {
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+.delegation-principles .delegation-check {
+  flex-direction: row;
+  align-items: center;
+  align-self: end;
+  min-height: 2.45rem;
+}
+
+.delegation-player-lock {
+  grid-column: span 2;
+}
+
+.delegation-player-lock select {
+  min-height: 7.5rem;
+}
+
+.delegation-actions {
+  margin-top: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.pitch.delegation-readonly .tac-slot {
+  cursor: default;
+}
+
+@media (max-width: 720px) {
+  .delegation-heading {
+    flex-direction: column;
+  }
+
+  .delegation-mode,
+  .delegation-player-lock {
+    width: 100%;
+    grid-column: auto;
+  }
+}

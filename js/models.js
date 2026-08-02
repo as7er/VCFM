@@ -1414,6 +1414,17 @@ function xiSortScore(p, options = {}) {
     : 0;
   if (recentStarts >= 3) score *= 1 - Math.min(0.12, (recentStarts - 2) * 0.05);
   if ((p.returnToPlayDays || 0) > 0) score *= Math.max(0.82, 1 - p.returnToPlayDays * 0.025);
+  // 培养原则只在实力接近时给年轻高潜球员一个温和的选人优势，成长仍由训练和出场产生。
+  if (
+    options.youthPriority === "high" &&
+    Number(p.age || 99) <= 21 &&
+    Number(p.potential || p.ovr || 0) >= Number(p.ovr || 0) + 2
+  ) {
+    score *= 1.035;
+  }
+  if (options.rotation === "fitness") {
+    score *= 0.82 + Math.max(0, Math.min(100, Number(p.fitness ?? 70))) / 550;
+  }
   return score;
 }
 
@@ -1421,9 +1432,27 @@ export function autoLineup(club, options = {}) {
   ensureTactics(club);
   const formation = FORMATIONS[club.tactics.formation] || FORMATIONS["4-3-3"];
   const used = new Set();
-  const lineup = [];
+  const lineup = Array(formation.slots.length).fill(null);
   const eligibleIds = options.eligibleIds instanceof Set ? options.eligibleIds : null;
-  for (const slot of formation.slots) {
+  const lockedIds = new Set(Array.isArray(options.lockedPlayerIds) ? options.lockedPlayerIds : []);
+  const lockedPlayers = club.players
+    .filter((p) => lockedIds.has(p.id) && playerSelectable(p) && (!eligibleIds || eligibleIds.has(p.id)))
+    .sort((a, b) => xiSortScore(b, options) - xiSortScore(a, options));
+
+  // 先把可用的锁定球员安置到同位置槽；不得已才使用非门将空槽。
+  for (const player of lockedPlayers) {
+    let slotIndex = formation.slots.findIndex((slot, index) => !lineup[index] && slot.pos === player.pos);
+    if (slotIndex < 0 && player.pos !== "GK") {
+      slotIndex = formation.slots.findIndex((slot, index) => !lineup[index] && slot.pos !== "GK");
+    }
+    if (slotIndex < 0) continue;
+    lineup[slotIndex] = player.id;
+    used.add(player.id);
+  }
+
+  for (let slotIndex = 0; slotIndex < formation.slots.length; slotIndex++) {
+    if (lineup[slotIndex]) continue;
+    const slot = formation.slots[slotIndex];
     const candidates = club.players
       .filter((p) => p.pos === slot.pos && !used.has(p.id) && playerSelectable(p) && (!eligibleIds || eligibleIds.has(p.id)))
       .sort((a, b) => xiSortScore(b, options) - xiSortScore(a, options));
@@ -1435,12 +1464,12 @@ export function autoLineup(club, options = {}) {
     }
     if (pickP) {
       used.add(pickP.id);
-      lineup.push(pickP.id);
+      lineup[slotIndex] = pickP.id;
     }
   }
-  club.tactics.lineup = lineup;
+  club.tactics.lineup = lineup.filter(Boolean);
   ensureLineupRoles(club, { reset: true });
-  return lineup;
+  return club.tactics.lineup;
 }
 
 /**

@@ -122,6 +122,7 @@ import {
   TRAINING_FOCUSES,
   TRAINING_INTENSITIES,
 } from "./training.js";
+import { applyDelegatedTraining, ensureWorldDelegation } from "./delegation.js";
 import {
   ensureTransferWindow,
   isTransferWindowOpen,
@@ -674,6 +675,8 @@ export function advanceDay(world) {
   }
 
   // 训练日程：体能 / 伤愈 / 士气 / 周成长（替代原先统一恢复）
+  ensureWorldDelegation(world);
+  applyDelegatedTraining(world, userClub);
   processTrainingDay(world);
 
   // 青训
