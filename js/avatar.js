@@ -170,6 +170,7 @@ function lookFor(h, nation, age = 25, persisted = null) {
 
 const GRID = 32;
 const PROFILE_GRID = 48;
+const PROFILE_ART_VERSION = 2;
 const OUT = "#1b1613"; // 全局粗描边（热血式近黑）
 const EYE = "#1e1a17";
 const EYEWHITE = "#f4efe4";
@@ -657,106 +658,210 @@ function composeCells(opts = {}) {
   ];
 }
 
-function scaleCells(cells, fromGrid, toGrid) {
-  const scale = toGrid / fromGrid;
-  return cells.map((cell) => {
-    const x0 = Math.round(cell.x * scale);
-    const y0 = Math.round(cell.y * scale);
-    const x1 = Math.round((cell.x + cell.w) * scale);
-    const y1 = Math.round((cell.y + cell.h) * scale);
-    return { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0), c: cell.c };
-  });
+function profileBgCells(mood) {
+  const [a, b] = MOOD_BG[mood] || MOOD_BG.neutral;
+  const parts = [Box(0, 47, 0, 47, a)];
+  for (let by = 0; by < 4; by++) {
+    for (let bx = 0; bx < 4; bx++) {
+      if ((bx + by) % 2) parts.push(Box(bx * 12, bx * 12 + 11, by * 12, by * 12 + 11, b));
+    }
+  }
+  return parts;
 }
 
-/** 48-grid portrait details reuse the compact face identity instead of inventing a second likeness. */
-function profileDetailCells(opts = {}) {
+function profileHeadCells(look, age) {
+  const S = look.skin;
+  const Sd = look.skinShade;
+  const Sh = mixHex(S, "#fff7ed", 0.2);
+  const shape = look.face?.shape || 0;
+  const parts = [
+    R(15, 32, 5, OUT), R(12, 35, 6, OUT),
+    R(10, 37, 8, OUT), C(9, 9, 27, OUT), C(38, 9, 27, OUT),
+    C(7, 17, 24, OUT), C(40, 17, 24, OUT),
+    Box(10, 37, 8, 27, S), R(11, 36, 28, S), R(12, 35, 29, S),
+    C(8, 18, 23, S), C(39, 18, 23, S), P(8, 21, Sd), P(39, 21, Sd),
+    R(11, 13, 27, Sd), R(34, 36, 27, Sd), R(13, 15, 29, Sd), R(32, 34, 29, Sd),
+    R(13, 19, 9, Sh), R(12, 16, 10, Sh),
+  ];
+  if (shape === 1) {
+    parts.push(R(13, 34, 30, S), R(15, 32, 31, S), R(19, 28, 32, S), R(20, 27, 33, S));
+    parts.push(C(10, 27, 28, OUT), P(11, 29, OUT), P(12, 30, OUT), R(13, 14, 31, OUT), R(15, 18, 32, OUT), P(19, 33, OUT), R(20, 27, 34, OUT), P(28, 33, OUT), R(29, 32, 32, OUT), R(33, 34, 31, OUT), P(35, 30, OUT), P(36, 29, OUT), C(37, 27, 28, OUT));
+  } else if (shape === 2) {
+    parts.push(R(11, 36, 30, S), R(12, 35, 31, S), R(16, 31, 32, S), R(17, 30, 33, S));
+    parts.push(C(10, 27, 30, OUT), R(11, 15, 31, OUT), P(16, 32, OUT), R(17, 30, 33, OUT), P(31, 32, OUT), R(32, 36, 31, OUT), C(37, 27, 30, OUT));
+  } else if (shape === 3) {
+    parts.push(R(13, 34, 30, S), R(14, 33, 31, S), R(16, 31, 32, S), R(19, 28, 33, S), R(20, 27, 34, S));
+    parts.push(C(10, 27, 28, OUT), P(11, 29, OUT), P(12, 30, OUT), P(13, 31, OUT), R(14, 15, 32, OUT), R(16, 18, 33, OUT), P(19, 34, OUT), R(20, 27, 35, OUT), P(28, 34, OUT), R(29, 31, 33, OUT), R(32, 33, 32, OUT), P(34, 31, OUT), P(35, 30, OUT), P(36, 29, OUT), C(37, 27, 28, OUT));
+  } else {
+    parts.push(R(13, 34, 30, S), R(15, 32, 31, S), R(17, 30, 32, S), R(18, 29, 33, S));
+    parts.push(C(10, 27, 28, OUT), P(11, 29, OUT), P(12, 30, OUT), R(13, 14, 31, OUT), R(15, 16, 32, OUT), P(17, 33, OUT), R(18, 29, 34, OUT), P(30, 33, OUT), R(31, 32, 32, OUT), R(33, 34, 31, OUT), P(35, 30, OUT), P(36, 29, OUT), C(37, 27, 28, OUT));
+  }
+  if (look.face?.earStyle === 1) parts.push(P(7, 16, S), P(40, 16, S), P(7, 25, S), P(40, 25, S));
+  if (age >= 32) parts.push(P(14, 23, Sd), P(33, 23, Sd));
+  if (age >= 40) parts.push(R(14, 19, 14, Sd), R(28, 33, 14, Sd));
+  if (age >= 50) parts.push(R(20, 27, 10, Sd), P(17, 25, Sd), P(30, 25, Sd));
+  return parts;
+}
+
+function profileHairCells(styleId, look) {
+  const H = look.hairHex;
+  const Hd = shiftHex(H, -28);
+  const Hh = shiftHex(H, 38);
+  const crown = [R(13, 34, 3, OUT), R(10, 37, 5, OUT), Box(10, 37, 6, 11, H), R(11, 36, 12, Hd)];
+  switch (styleId) {
+    case 0: return [...crown, Box(12, 35, 2, 6, H), R(15, 24, 3, Hh), R(10, 14, 13, H), R(33, 37, 13, H)];
+    case 1: return [R(22, 38, 1, OUT), R(12, 39, 3, OUT), Box(11, 38, 4, 11, H), R(24, 39, 2, H), R(28, 37, 3, Hh), R(12, 20, 5, Hh), R(11, 36, 12, Hd)];
+    case 2: return [P(13, 1, OUT), P(20, 0, OUT), P(27, 1, OUT), P(34, 0, OUT), R(10, 37, 5, OUT), Box(11, 36, 6, 11, H), P(14, 3, H), P(21, 2, H), P(28, 3, H), P(34, 2, H), R(11, 36, 12, Hd)];
+    case 3: return [R(14, 33, 6, OUT), R(11, 36, 8, Hd), R(10, 37, 9, H), R(12, 35, 10, Hh), R(11, 36, 11, Hd)];
+    case 4: return [...crown, R(13, 25, 4, Hh), R(11, 20, 5, Hh), C(36, 8, 15, H), R(10, 15, 13, H)];
+    case 5: return [R(14, 33, 2, OUT), R(10, 37, 4, OUT), Box(9, 38, 5, 12, H), R(10, 37, 13, Hd), R(12, 19, 6, Hh), C(10, 13, 16, H), C(37, 13, 16, H)];
+    case 6: return [R(14, 33, 0, H), R(8, 39, 2, H), Box(5, 42, 5, 12, H), C(6, 13, 17, H), C(41, 13, 17, H), P(12, 3, Hh), P(20, 1, Hh), P(29, 4, Hh), P(37, 3, Hh), P(8, 9, Hd), P(39, 10, Hd)];
+    case 7: return [R(14, 19, 2, H), R(22, 27, 1, H), R(30, 35, 3, H), Box(10, 37, 5, 11, H), P(13, 5, Hh), P(21, 4, Hh), P(29, 6, Hh), P(35, 4, Hh), R(11, 36, 12, Hd)];
+    case 8: return [R(15, 32, 7, Hd), R(12, 35, 8, H), R(11, 36, 10, mixHex(H, look.skin, 0.45)), R(18, 25, 8, mixHex(look.skin, "#ffffff", 0.25))];
+    case 9: return [...crown, Box(8, 11, 10, 27, H), Box(36, 39, 10, 27, H), R(9, 12, 28, Hd), R(35, 38, 28, Hd), R(13, 20, 5, Hh)];
+    case 10: return [Box(21, 26, 0, 10, H), R(20, 27, 2, OUT), R(21, 26, 5, Hh), R(12, 18, 10, Hd), R(29, 35, 10, Hd)];
+    case 11: return [...crown, Box(8, 11, 9, 27, H), Box(36, 39, 9, 27, H), R(9, 12, 28, Hd), R(35, 38, 28, Hd), R(14, 22, 5, Hh)];
+    case 12: return [Box(11, 36, 5, 10, H), R(9, 38, 11, "#e11d48"), R(10, 37, 12, "#be123c"), R(14, 20, 6, Hh), R(11, 36, 10, Hd)];
+    case 13: return [Box(13, 34, 6, 11, H), Box(20, 27, 0, 6, H), R(19, 28, 2, OUT), R(21, 25, 1, Hh), R(12, 35, 12, Hd)];
+    default: return crown;
+  }
+}
+
+function profileFaceCells(mood, look, facialInjury) {
+  const expression = mood === "injured" && !facialInjury ? "sad" : mood;
+  const face = look.face || {};
+  const brow = mixHex(look.hairHex, OUT, look.darkSkin ? 0.3 : 0.55);
+  const spacing = face.eyeSpacing || 0;
+  const left = 13 + spacing;
+  const right = 28 - spacing;
+  const parts = [];
+  if (expression === "sad") {
+    parts.push(P(left, 16, brow), R(left + 1, left + 5, 15, brow), R(right, right + 4, 15, brow), P(right + 5, 16, brow));
+  } else if (expression === "tired") {
+    parts.push(R(left, left + 6, 16, brow), R(right, right + 6, 16, brow));
+  } else if (face.browStyle === 1) {
+    parts.push(R(left, left + 4, 15, brow), R(left + 5, left + 6, 16, brow), R(right, right + 1, 16, brow), R(right + 2, right + 6, 15, brow));
+  } else {
+    parts.push(R(left, left + 6, 15, brow), R(right, right + 6, 15, brow));
+  }
+
+  const eyes = (start) => {
+    const gaze = Math.max(1, Math.min(4, 2 + (face.gaze || 0)));
+    if (face.eyeStyle === 2) {
+      parts.push(R(start, start + 6, 19, EYE), R(start + 1, start + 5, 20, EYEWHITE));
+      parts.push(Box(start + gaze, start + gaze + 1, 19, 20, EYE), P(start + gaze, 19, "#ffffff"));
+    } else {
+      parts.push(R(start + 1, start + 5, 18, EYE), P(start, 19, EYE), P(start + 6, 19, EYE));
+      parts.push(P(start, 20, EYE), P(start + 6, 20, EYE), R(start + 1, start + 5, 21, EYE));
+      parts.push(Box(start + 1, start + 5, 19, 20, EYEWHITE));
+      parts.push(Box(start + gaze, start + gaze + 1, 19, 20, EYE), P(start + gaze, 19, "#ffffff"));
+    }
+  };
+  if (expression === "injured") {
+    parts.push(R(left, left + 6, 20, EYE), P(left + 1, 19, EYE));
+    eyes(right);
+    parts.push(P(right + 5, 22, "#a15b50"), P(right + 6, 22, "#8f4a48"));
+  } else if (expression === "tired") {
+    parts.push(R(left, left + 6, 20, EYE), R(right, right + 6, 20, EYE), P(37, 14, "#8fd7f2"), P(38, 15, "#5db6dc"));
+  } else if (expression === "happy" && face.eyeStyle % 2 === 0) {
+    parts.push(P(left, 20, EYE), R(left + 1, left + 5, 21, EYE), P(left + 6, 20, EYE));
+    parts.push(P(right, 20, EYE), R(right + 1, right + 5, 21, EYE), P(right + 6, 20, EYE));
+  } else {
+    eyes(left); eyes(right);
+  }
+
+  if (face.noseStyle === 1) parts.push(C(23, 21, 24, look.skinShade), R(23, 25, 25, look.skinShade));
+  else if (face.noseStyle === 2) parts.push(C(24, 21, 24, look.skinShade), R(22, 24, 25, look.skinShade));
+  else parts.push(C(23, 22, 24, look.skinShade), P(24, 25, look.skinShade));
+
+  if (expression === "happy") {
+    parts.push(P(18, 27, OUT), R(19, 28, 28, OUT), P(29, 27, OUT), R(20, 27, 28, "#fdf6ea"), R(21, 26, 29, MOUTH));
+  } else if (expression === "sad" || expression === "injured") {
+    parts.push(R(21, 26, 27, MOUTH), P(20, 28, MOUTH), P(27, 28, MOUTH));
+  } else if (face.mouthStyle === 1) {
+    parts.push(P(20, 28, MOUTH), R(21, 26, 29, MOUTH), P(27, 28, MOUTH));
+  } else {
+    parts.push(R(21, 26, 28, MOUTH));
+  }
+
+  if (facialInjury && expression === "injured") {
+    parts.push(R(12, 35, 10, "#e8e4da"), R(14, 33, 11, "#d4cfc2"));
+  }
+  const acc = look.accessories || {};
+  if (acc.freckles) parts.push(P(16, 23, look.skinShade), P(18, 24, look.skinShade), P(30, 23, look.skinShade), P(32, 24, look.skinShade));
+  if (acc.scar && !facialInjury) parts.push(P(31, 16, "#a15b50"), P(32, 17, "#8f4a48"), P(33, 18, "#a15b50"));
+  if (acc.stubble || acc.beard) {
+    const beard = mixHex(look.hairHex, look.skinShade, 0.3);
+    parts.push(P(17, 29, beard), P(20, 30, beard), P(23, 31, beard), P(26, 30, beard), P(30, 29, beard));
+    if (acc.beard) parts.push(R(19, 28, 31, beard), R(21, 26, 32, beard));
+  }
+  return parts;
+}
+
+function profileTorsoCells(role, pos, look, kitPrimary, kitSecondary) {
+  const parts = [Box(19, 28, 32, 35, look.skin), R(18, 29, 35, OUT)];
+  if (role === "player") {
+    parts.push(R(8, 39, 36, OUT), R(5, 42, 38, OUT), Box(4, 43, 39, 47, kitPrimary));
+    parts.push(Box(4, 10, 40, 47, kitSecondary), Box(37, 43, 40, 47, kitSecondary));
+    parts.push(R(18, 29, 36, kitSecondary), R(20, 27, 37, kitSecondary), R(22, 25, 38, kitSecondary));
+    parts.push(R(9, 17, 40, shiftHex(kitPrimary, 24)), R(30, 38, 40, shiftHex(kitPrimary, 24)));
+    if (pos === "GK") parts.push(R(13, 34, 44, mixHex(kitPrimary, "#ffffff", 0.5)));
+  } else if (role === "doctor") {
+    parts.push(R(8, 39, 36, OUT), Box(5, 42, 38, 47, "#eef2f6"), Box(22, 25, 37, 47, "#d7dde5"), R(22, 25, 43, "#d84343"));
+  } else if (role === "scout") {
+    parts.push(R(8, 39, 36, OUT), Box(5, 42, 38, 47, "#57503c"), Box(12, 14, 39, 47, "#403a2c"), Box(33, 35, 39, 47, "#403a2c"));
+  } else {
+    parts.push(R(8, 39, 36, OUT), Box(5, 42, 38, 47, "#2a3442"), R(18, 29, 37, "#e8ecf2"), Box(22, 25, 39, 45, "#3d8bfd"));
+  }
+  return parts;
+}
+
+function profileScoutCapCells() {
+  return [Box(12, 35, 2, 5, "#6b6350"), R(9, 38, 6, "#57503c"), R(28, 40, 7, "#4a4433"), R(15, 24, 3, "#7d755f")];
+}
+
+function composeProfileCells(opts = {}) {
   const seed = opts.seed || opts.id || opts.name || "anon";
   const h = appearanceHash(seed);
+  const role = opts.role || "player";
   const age = opts.age || 25;
   const mood = opts.mood || "neutral";
   const persisted = opts.skinTone || opts.hairColor || opts.hairStyle != null
     ? { skinTone: opts.skinTone || null, hairColor: opts.hairColor || null, hairStyle: opts.hairStyle }
     : null;
   const look = lookFor(h, opts.nation || null, age, persisted);
-  const face = look.face || {};
-  const skinLight = mixHex(look.skin, "#fff7ed", 0.24);
-  const skinMid = mixHex(look.skin, look.skinShade, 0.35);
-  const hairLight = shiftHex(look.hairHex, 38);
-  const hairDark = shiftHex(look.hairHex, -28);
-  const parts = [];
-
-  // Fine hair strands make the large portrait read as pixel art rather than a scaled thumbnail.
-  if (look.styleId !== 8) {
-    const strandSets = [
-      [[14, 5], [18, 4], [23, 5], [28, 4], [33, 6]],
-      [[13, 7], [17, 5], [22, 4], [27, 4], [32, 5], [36, 7]],
-      [[15, 5], [20, 3], [25, 4], [30, 3], [34, 6]],
-      [[16, 8], [20, 7], [25, 7], [30, 7]],
-    ];
-    for (const [x, y] of strandSets[look.styleId % strandSets.length]) parts.push(P(x, y, hairLight));
-    parts.push(P(12, 10, hairDark), P(36, 11, hairDark), P(15, 12, hairDark), P(33, 12, hairDark));
-  } else {
-    parts.push(P(20, 8, skinLight), P(21, 8, skinLight), P(18, 9, skinLight));
+  const bgLum = luminance(MOOD_BG[mood]?.[0] || MOOD_BG.neutral[0]);
+  const kitPrimary = kitDisplayColor(opts.kitPrimary || "#3d8bfd", bgLum);
+  let kitSecondary = opts.kitSecondary || shiftHex(kitPrimary, -42);
+  if (Math.abs(luminance(kitPrimary) - luminance(kitSecondary)) < 0.08) {
+    kitSecondary = luminance(kitPrimary) > 0.45 ? shiftHex(kitPrimary, -80) : mixHex(kitPrimary, "#ffffff", 0.55);
   }
-
-  // Extra facial modelling follows the compact face's stable eye spacing, gaze and nose style.
-  const spacing = face.eyeSpacing || 0;
-  const leftX = 17 + spacing;
-  const rightX = 30 - spacing;
-  if (!(mood === "injured" && opts.facialInjury)) {
-    parts.push(P(leftX, 18, EYEWHITE), P(rightX, 18, EYEWHITE));
-    if (mood !== "tired") {
-      const gaze = face.gaze || 0;
-      parts.push(P(leftX + gaze, 19, EYE), P(rightX + gaze, 19, EYE));
-      parts.push(P(leftX + gaze, 18, "#ffffff"), P(rightX + gaze, 18, "#ffffff"));
-    }
-  }
-  parts.push(P(22, 21, skinLight), P(23, 22, skinLight));
-  if (face.noseStyle === 1) parts.push(P(24, 23, look.skinShade), P(25, 24, look.skinShade));
-  else if (face.noseStyle === 2) parts.push(P(23, 23, look.skinShade), P(22, 24, look.skinShade));
-  else parts.push(P(24, 24, look.skinShade));
-  parts.push(P(12, 17, skinLight), P(13, 16, skinLight), P(35, 19, skinMid));
-
-  // One-pixel lip and chin accents preserve the mood while adding definition at 96px.
-  if (mood === "happy") {
-    parts.push(R(21, 27, 28, "#fdf6ea"), R(22, 26, 29, MOUTH));
-  } else if (mood === "sad" || mood === "injured") {
-    parts.push(R(22, 26, 27, MOUTH), P(21, 28, MOUTH), P(27, 28, MOUTH));
-  } else {
-    parts.push(R(22, 26, 28, MOUTH), P(24, 29, skinMid));
-  }
-
-  if (age >= 32) parts.push(P(15, 22, skinMid), P(33, 22, skinMid));
-  if (age >= 40) {
-    parts.push(R(15, 19, 15, skinMid), R(29, 33, 15, skinMid));
-    parts.push(P(16, 21, skinMid), P(32, 21, skinMid));
-  }
-  if (age >= 50) parts.push(R(21, 27, 9, skinMid), P(19, 25, skinMid), P(29, 25, skinMid));
-
-  // Shirt seams and collar are visible only in the profile portrait.
-  const kitPrimary = kitDisplayColor(opts.kitPrimary || "#3d8bfd");
-  const kitSecondary = opts.kitSecondary || shiftHex(kitPrimary, -42);
-  if ((opts.role || "player") === "player") {
-    parts.push(R(8, 17, 37, shiftHex(kitPrimary, 24)), R(30, 39, 37, shiftHex(kitPrimary, 24)));
-    parts.push(P(22, 37, kitSecondary), P(25, 37, kitSecondary), R(23, 24, 38, kitSecondary));
-  } else {
-    parts.push(R(8, 18, 37, "#3f4b5d"), R(29, 39, 37, "#3f4b5d"));
-  }
-  return parts;
+  const hair = role === "scout" ? profileScoutCapCells() : profileHairCells(look.styleId, look);
+  return [
+    ...profileBgCells(mood),
+    ...profileTorsoCells(role, opts.pos || "", look, kitPrimary, kitSecondary),
+    ...profileHeadCells(look, age),
+    ...hair,
+    ...profileFaceCells(mood, look, !!opts.facialInjury),
+  ];
 }
 
-function composeProfileCells(opts = {}) {
-  return [
-    ...scaleCells(composeCells(opts), GRID, PROFILE_GRID),
-    ...profileDetailCells(opts),
-  ];
+function validAvatarCells(cells, grid) {
+  return Array.isArray(cells) && cells.length > 0 && cells.every((cell) =>
+    Number.isFinite(cell.x) && Number.isFinite(cell.y) && Number.isFinite(cell.w) && Number.isFinite(cell.h) &&
+    cell.w > 0 && cell.h > 0 && cell.x >= 0 && cell.y >= 0 &&
+    cell.x + cell.w <= grid && cell.y + cell.h <= grid && typeof cell.c === "string"
+  );
 }
 
 function avatarCellSource(opts = {}) {
   const detail = opts.detail === "profile" ? "profile" : "compact";
-  return detail === "profile"
-    ? { cells: composeProfileCells(opts), grid: PROFILE_GRID, detail }
-    : { cells: composeCells(opts), grid: GRID, detail };
+  if (detail === "profile") {
+    const cells = composeProfileCells(opts);
+    if (validAvatarCells(cells, PROFILE_GRID)) return { cells, grid: PROFILE_GRID, detail };
+    return { cells: composeCells(opts), grid: GRID, detail: "compact-fallback" };
+  }
+  return { cells: composeCells(opts), grid: GRID, detail };
 }
 
 /**
@@ -805,6 +910,7 @@ export function renderAvatarPngUri(opts = {}) {
     opts.mood || "neutral",
     opts.facialInjury ? "face-injury" : "body-injury",
     opts.detail || "compact",
+    opts.detail === "profile" ? PROFILE_ART_VERSION : 1,
     opts.kitPrimary || "",
     opts.kitSecondary || "",
     size,

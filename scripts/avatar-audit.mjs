@@ -75,10 +75,9 @@ const compactPortrait = renderAvatarSvg({ ...base, age: 25, size: 32, detail: "c
 const profilePortrait = renderAvatarSvg({ ...base, age: 25, size: 96, detail: "profile" });
 assert.match(compactPortrait, /data-grid="32" data-detail="compact"/, "list portrait must retain the 32-grid renderer");
 assert.match(profilePortrait, /data-grid="48" data-detail="profile"/, "profile portrait must use the native 48-grid renderer");
-assert.ok(
-  (profilePortrait.match(/<rect /g) || []).length > (compactPortrait.match(/<rect /g) || []).length,
-  "profile portrait must add native detail instead of only scaling the compact portrait"
-);
+for (const attr of profilePortrait.matchAll(/(?:x|y|width|height)="(\d+)"/g)) {
+  assert.ok(Number(attr[1]) <= 96, `profile portrait coordinate must stay inside its 48-grid viewBox: ${attr[0]}`);
+}
 
 const mainSource = readFileSync(resolve(repo, "js/main.js"), "utf8");
 const smallAvatarSizes = [
@@ -92,6 +91,14 @@ assert.ok(
 assert.match(mainSource, /playerAvatarHtml\(player, displayTeam, 96\)/, "player profile portrait must use 96px");
 const cssSource = readFileSync(resolve(repo, "css/style.css"), "utf8");
 assert.match(cssSource, /image-rendering:\s*pixelated/, "pixel avatars must retain hard edges");
+const avatarSource = readFileSync(resolve(repo, "js/avatar.js"), "utf8");
+assert.doesNotMatch(avatarSource, /function scaleCells\(/, "profile portraits must not use fractional compact-grid scaling");
+assert.match(avatarSource, /function profileHeadCells\(/, "profile portraits need a native head component");
+assert.match(avatarSource, /function profileFaceCells\(/, "profile portraits need one native facial anchor system");
+assert.match(avatarSource, /detail: "compact-fallback"/, "invalid profile cells must safely fall back to compact rendering");
+assert.match(avatarSource, /const PROFILE_ART_VERSION = 2;/, "profile art changes must invalidate the browser PNG cache");
+assert.match(avatarSource, /Box\(start \+ gaze, start \+ gaze \+ 1, 19, 20, EYE\)/, "profile eyes should use readable 2x2 pupils");
+assert.doesNotMatch(avatarSource, /R\(17, 30, 30, beard\)/, "ordinary stubble must not form a solid jaw band");
 
 console.log(JSON.stringify({
   samples: players.length,
