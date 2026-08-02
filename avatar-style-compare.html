@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>VCFM 热血程序脸 2.0</title>
+  <title>VCFM 热血程序脸 2.1</title>
   <style>
     :root { color-scheme: dark; }
     body { margin:0; padding:24px; font-family:system-ui,sans-serif; background:#0b1220; color:#e2e8f0; }
@@ -17,7 +17,7 @@
   </style>
 </head>
 <body>
-  <h1>全场景统一：热血程序脸 2.0</h1>
+  <h1>全场景统一：热血程序脸 2.1</h1>
   <p class="note">名单 / 资料卡 / 战术板 / 职员 全部使用 <code>js/avatar.js</code> 程序脸。无正式肖像分支。</p>
   <div class="card">
     <h3 style="margin:.2rem 0 .5rem">多国籍样本</h3>
@@ -31,8 +31,16 @@
     <h3 style="margin:.2rem 0 .5rem">状态</h3>
     <div class="row" id="moods"></div>
   </div>
+  <div class="card">
+    <h3 style="margin:.2rem 0 .5rem">年龄与脸型</h3>
+    <div class="row" id="ages"></div>
+  </div>
+  <div class="card">
+    <h3 style="margin:.2rem 0 .5rem">伤病部位</h3>
+    <div class="row" id="injuries"></div>
+  </div>
   <script type="module">
-    import { playerAvatarHtml, avatarHtml } from './js/avatar.js?v=136';
+    import { playerAvatarHtml, avatarHtml } from './js/avatar.js?v=183';
     import { ensurePlayerAppearance } from './js/models.js';
     const club = { id:'sunset', kit:{ primary:'#f97316', secondary:'#5b21b6' } };
     const nations = ['JPN','NGA','SWE','BRA','ENG','SEN','ITA','CHN','IRL','MAR'];
@@ -55,6 +63,16 @@
     ];
     document.getElementById('moods').innerHTML = moods.map(([label, patch])=>
       `<div class="cell">${playerAvatarHtml({...base, ...patch, name:label}, club, 52)}<div class="lb">${label}</div></div>`
+    ).join('');
+    document.getElementById('ages').innerHTML = [18, 28, 38, 48, 58].map(age=>
+      `<div class="cell">${playerAvatarHtml({...base, age}, club, 64)}<div class="lb">${age} 岁</div></div>`
+    ).join('');
+    const injuries = [
+      ['腿后肌拉伤', { key:'hamstring', label:'腿后肌拉伤', labelEn:'Hamstring strain' }],
+      ['面部挫伤', { key:'facial-knock', label:'面部挫伤', labelEn:'Facial bruise' }],
+    ];
+    document.getElementById('injuries').innerHTML = injuries.map(([label, injury])=>
+      `<div class="cell">${playerAvatarHtml({...base, injured:5, injury}, club, 64)}<div class="lb">${label}</div></div>`
     ).join('');
   </script>
 </body>

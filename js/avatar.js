@@ -1,24 +1,27 @@
 /**
- * 热血像素头像 2.0（Kunio-style procedural）
+ * 热血像素头像 2.1（Kunio-style procedural）
  * 全场景统一：名单 / 资料卡 / 战术板 / 职员 都走本文件程序生成。
  * 同队球衣由 kit 主副色直接绘制，天然同款同色。
  */
 
 /** @typedef {'neutral'|'happy'|'injured'|'sad'|'tired'} AvatarMood */
 
+import {
+  APPEARANCE_HAIR_STYLE_IDS,
+  APPEARANCE_REGION_OF,
+  APPEARANCE_REGION_PROFILES,
+  APPEARANCE_STYLE_AFRO,
+  APPEARANCE_STYLE_DEFAULT,
+  appearanceHash,
+  appearanceWpick,
+  normalizeHairColor,
+  normalizeHairStyleId,
+  normalizeSkinTone,
+} from "./appearance.js";
+
 // ============================================================
 // 基础工具
 // ============================================================
-
-function hashStr(s) {
-  let h = 2166136261;
-  const str = String(s || "x");
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
 
 /** 稳定外貌身份键：appearanceSeed → id → name */
 export function playerAppearanceKey(player) {
@@ -86,17 +89,6 @@ function kitDisplayColor(hex, bgLum = 0.12) {
   return c;
 }
 
-/** 加权抽取：pairs = [[value, weight], ...]，哈希流稳定 */
-function wpick(h, salt, pairs) {
-  let total = 0;
-  for (const [, w] of pairs) total += w;
-  let r = ((h ^ Math.imul(salt + 1, 2654435761)) >>> 0) % Math.max(1, total);
-  for (const [v, w] of pairs) {
-    if ((r -= w) < 0) return v;
-  }
-  return pairs[0][0];
-}
-
 // ============================================================
 // 地区画像：肤色 / 发色 / 发型按国籍合理分配
 // ============================================================
@@ -124,144 +116,41 @@ const HAIR_COLORS = {
   white: "#dfe3e8",
 };
 
-/**
- * 发型 id（2.0）：
- * 0 平顶 1 飞机头 2 刺猬 3 寸头 4 侧分
- * 5 锅盖 6 爆炸头 7 短卷 8 光头渐层 9 长发
- * 10 莫霍克 11 鲻鱼头 12 头带短发 13 顶髻/束发
- */
-const STYLE_DEFAULT = [
-  [2, 14], [4, 14], [3, 12], [0, 11], [7, 9], [1, 9],
-  [9, 7], [5, 6], [12, 6], [10, 5], [11, 4], [8, 4], [13, 3], [6, 2],
-];
-const STYLE_EASIA = [
-  [5, 16], [4, 15], [2, 14], [1, 12], [3, 11], [0, 9],
-  [13, 7], [12, 6], [9, 5], [7, 4], [10, 2],
-];
-const STYLE_AFRO = [
-  [3, 20], [7, 18], [6, 14], [8, 14], [0, 10], [2, 8], [12, 8], [10, 5], [13, 3],
-];
-
-/** 地区画像：skin/hair 为加权表；style 缺省用 STYLE_DEFAULT */
-const REGION_PROFILES = {
-  nordic: {
-    skin: [["pale", 55], ["fair", 30], ["light", 9], ["brown", 3], ["deep", 3]],
-    hair: [["blond", 38], ["ltbrown", 25], ["brown", 20], ["red", 9], ["black", 8]],
-  },
-  brit: {
-    skin: [["pale", 38], ["fair", 30], ["light", 13], ["tan", 5], ["brown", 8], ["deep", 6]],
-    hair: [["brown", 33], ["dkbrown", 25], ["ltbrown", 14], ["blond", 10], ["red", 12], ["black", 6]],
-  },
-  weur: {
-    skin: [["fair", 36], ["pale", 22], ["light", 17], ["tan", 8], ["brown", 10], ["deep", 7]],
-    hair: [["dkbrown", 30], ["brown", 27], ["black", 15], ["blond", 15], ["ltbrown", 9], ["red", 4]],
-  },
-  fra: {
-    skin: [["fair", 28], ["light", 18], ["tan", 12], ["olive", 8], ["brown", 17], ["deep", 13], ["dark", 4]],
-    hair: [["black", 34], ["dkbrown", 30], ["brown", 21], ["blond", 8], ["ltbrown", 7]],
-  },
-  seur: {
-    skin: [["light", 30], ["fair", 22], ["tan", 25], ["olive", 15], ["brown", 5], ["deep", 3]],
-    hair: [["black", 44], ["dkbrown", 31], ["brown", 18], ["blond", 4], ["ltbrown", 3]],
-  },
-  eeur: {
-    skin: [["pale", 35], ["fair", 35], ["light", 20], ["tan", 6], ["brown", 4]],
-    hair: [["brown", 27], ["dkbrown", 25], ["blond", 20], ["ltbrown", 15], ["black", 11], ["red", 2]],
-  },
-  tur: {
-    skin: [["tan", 32], ["olive", 27], ["light", 22], ["fair", 10], ["brown", 9]],
-    hair: [["black", 62], ["dkbrown", 28], ["brown", 10]],
-  },
-  easia: {
-    skin: [["light", 38], ["fair", 30], ["tan", 22], ["pale", 10]],
-    hair: [["black", 82], ["dkbrown", 15], ["brown", 3]],
-    style: STYLE_EASIA,
-  },
-  wafr: {
-    skin: [["deep", 34], ["dark", 30], ["brown", 26], ["tan", 8], ["olive", 2]],
-    hair: [["black", 85], ["dkbrown", 15]],
-    style: STYLE_AFRO,
-  },
-  nafr: {
-    skin: [["tan", 30], ["olive", 26], ["light", 20], ["brown", 16], ["deep", 6], ["fair", 2]],
-    hair: [["black", 70], ["dkbrown", 24], ["brown", 6]],
-  },
-  latM: {
-    skin: [["tan", 22], ["light", 20], ["fair", 12], ["olive", 14], ["brown", 16], ["deep", 12], ["dark", 4]],
-    hair: [["black", 50], ["dkbrown", 30], ["brown", 14], ["blond", 4], ["ltbrown", 2]],
-  },
-  latE: {
-    skin: [["fair", 30], ["light", 28], ["tan", 20], ["olive", 10], ["brown", 8], ["deep", 4]],
-    hair: [["dkbrown", 32], ["black", 30], ["brown", 22], ["blond", 10], ["ltbrown", 6]],
-  },
-  mex: {
-    skin: [["tan", 32], ["olive", 24], ["brown", 18], ["light", 16], ["fair", 6], ["deep", 4]],
-    hair: [["black", 68], ["dkbrown", 24], ["brown", 8]],
-  },
-  usa: {
-    skin: [["fair", 26], ["light", 18], ["pale", 12], ["tan", 10], ["brown", 16], ["deep", 14], ["dark", 4]],
-    hair: [["dkbrown", 28], ["brown", 24], ["black", 26], ["blond", 14], ["red", 4], ["ltbrown", 4]],
-  },
-  aus: {
-    skin: [["fair", 34], ["pale", 24], ["light", 18], ["tan", 10], ["brown", 8], ["deep", 6]],
-    hair: [["brown", 30], ["dkbrown", 24], ["blond", 22], ["ltbrown", 12], ["black", 8], ["red", 4]],
-  },
-};
-
-const REGION_OF = {
-  ENG: "brit", SCO: "brit", WAL: "brit", IRL: "brit",
-  GER: "weur", NED: "weur", BEL: "weur", AUT: "weur", SUI: "weur",
-  FRA: "fra",
-  ESP: "seur", ITA: "seur", POR: "seur", CRO: "seur", SRB: "seur",
-  POL: "eeur", UKR: "eeur",
-  DEN: "nordic", SWE: "nordic", NOR: "nordic",
-  TUR: "tur",
-  JPN: "easia", KOR: "easia", CHN: "easia",
-  NGA: "wafr", SEN: "wafr", GHA: "wafr", CIV: "wafr",
-  MAR: "nafr",
-  BRA: "latM", COL: "latM",
-  ARG: "latE", URU: "latE",
-  MEX: "mex",
-  USA: "usa",
-  AUS: "aus",
-};
-
 /** 由国籍 + 哈希得到稳定的外貌；face 保存与状态无关的天生五官差异。 */
 function lookFor(h, nation, age = 25, persisted = null) {
-  const prof = REGION_PROFILES[REGION_OF[nation] || ""] || REGION_PROFILES.weur;
-  let skinKey = persisted?.skinTone && SKIN_TONES[persisted.skinTone]
-    ? persisted.skinTone
-    : wpick(h, 11, prof.skin);
+  const prof = APPEARANCE_REGION_PROFILES[APPEARANCE_REGION_OF[nation] || ""] || APPEARANCE_REGION_PROFILES.weur;
+  let skinKey = normalizeSkinTone(persisted?.skinTone) || appearanceWpick(h, 11, prof.skin);
   if (!SKIN_TONES[skinKey]) skinKey = "fair";
   const [skin, skinShade] = SKIN_TONES[skinKey];
   // 深肤色 → 黑/深棕发（自然合理）；发型偏向短寸/短卷/爆炸头
   const darkSkin = skinKey === "deep" || skinKey === "dark";
-  let hairKey = persisted?.hairColor && HAIR_COLORS[persisted.hairColor]
-    ? persisted.hairColor
+  let hairKey = normalizeHairColor(persisted?.hairColor)
+    ? normalizeHairColor(persisted.hairColor)
     : (darkSkin
-      ? wpick(h, 12, [["black", 80], ["dkbrown", 20]])
-      : wpick(h, 12, prof.hair));
+      ? appearanceWpick(h, 12, [["black", 80], ["dkbrown", 20]])
+      : appearanceWpick(h, 12, prof.hair));
   if (!HAIR_COLORS[hairKey]) hairKey = "dkbrown";
   let hairHex = HAIR_COLORS[hairKey];
   // 年龄灰白（仅在无显式灰/白发时）
   if (hairKey !== "grey" && hairKey !== "white") {
     if (age >= 40) {
-      hairHex = wpick(h, 13, [[HAIR_COLORS.grey, 55], [HAIR_COLORS.white, 25], [mixHex(hairHex, HAIR_COLORS.grey, 0.6), 20]]);
+      hairHex = appearanceWpick(h, 13, [[HAIR_COLORS.grey, 55], [HAIR_COLORS.white, 25], [mixHex(hairHex, HAIR_COLORS.grey, 0.6), 20]]);
     } else if (age >= 34 && (h & 3) === 0) {
       hairHex = mixHex(hairHex, HAIR_COLORS.grey, 0.45);
     }
   }
-  const styleW = darkSkin ? STYLE_AFRO : prof.style || STYLE_DEFAULT;
-  let styleId = Number.isFinite(Number(persisted?.hairStyle))
-    ? Math.round(Number(persisted.hairStyle))
-    : wpick(h, 14, styleW);
-  if (!(styleId >= 0 && styleId <= 13)) styleId = wpick(h, 14, styleW);
+  const styleW = darkSkin ? APPEARANCE_STYLE_AFRO : prof.style || APPEARANCE_STYLE_DEFAULT;
+  let styleId = normalizeHairStyleId(persisted?.hairStyle);
+  if (!APPEARANCE_HAIR_STYLE_IDS.includes(styleId)) styleId = appearanceWpick(h, 14, styleW);
   const face = {
     eyeStyle: (h >>> 3) % 4,
     browStyle: (h >>> 8) % 4,
     mouthStyle: (h >>> 13) % 4,
     noseStyle: (h >>> 18) % 3,
     gaze: ((h >>> 21) % 3) - 1,
+    shape: (h >>> 23) % 4,
+    earStyle: (h >>> 25) % 3,
+    eyeSpacing: ((h >>> 27) % 3) - 1,
   };
   // 2.0 小特征：稳定但不喧宾夺主
   const accessories = {
@@ -269,6 +158,7 @@ function lookFor(h, nation, age = 25, persisted = null) {
     scar: ((h >>> 11) % 11) === 0,
     headband: styleId === 12 || ((h >>> 15) % 17) === 0,
     freckles: !darkSkin && ((h >>> 17) % 13) === 0,
+    beard: age >= 25 && ((h >>> 19) % 8) === 0,
   };
   return { skin, skinShade, hairHex, styleId, darkSkin, face, skinKey, hairKey, accessories };
 }
@@ -443,23 +333,29 @@ function hairCells(styleId, H, Hh, S) {
 }
 
 /** 眉+眼+嘴（心情决定）；锅盖头(5)刘海压到眉线，一律用平眉防穿模 */
-function faceCells(mood, look, styleId) {
+function faceCells(mood, look, styleId, facialInjury = false) {
+  const expressionMood = mood === "injured" && !facialInjury ? "sad" : mood;
   const browColor = mixHex(look.hairHex, OUT, look.darkSkin ? 0.3 : 0.55);
   const cheek = mixHex(look.skin, "#b85c55", look.darkSkin ? 0.12 : 0.22);
-  const face = look.face || { eyeStyle: 0, browStyle: 0, mouthStyle: 0, noseStyle: 0, gaze: 0 };
+  const face = look.face || {
+    eyeStyle: 0, browStyle: 0, mouthStyle: 0, noseStyle: 0, gaze: 0, shape: 0, earStyle: 0, eyeSpacing: 0,
+  };
   const flatOnly = styleId === 5;
   const parts = [];
+  const spacing = face.eyeSpacing || 0;
+  const leftEyeStart = 9 + spacing;
+  const rightEyeStart = 18 - spacing;
 
   // —— 眉毛：状态负责情绪，种子负责普通状态下的天生眉形 ——
-  if (mood === "happy") {
+  if (expressionMood === "happy") {
     parts.push(R(10, 13, 9, browColor), R(18, 21, 9, browColor));
-  } else if (mood === "tired") {
+  } else if (expressionMood === "tired") {
     parts.push(R(9, 13, 11, browColor), R(18, 22, 11, browColor));
-  } else if (mood === "sad") {
+  } else if (expressionMood === "sad") {
     // 垂眉：外低内高
     parts.push(P(9, 10, browColor), R(10, 11, 9, browColor), R(12, 13, 8, browColor));
     parts.push(R(18, 19, 8, browColor), R(20, 21, 9, browColor), P(22, 10, browColor));
-  } else if (mood === "injured") {
+  } else if (expressionMood === "injured") {
     parts.push(R(9, 12, 10, browColor), R(19, 22, 9, browColor));
   } else if (flatOnly || face.browStyle === 0) {
     // 平静直眉
@@ -479,40 +375,38 @@ function faceCells(mood, look, styleId) {
 
   // 普通眼睛：四种眼型 + 三种目光方向；两眼始终同步，避免斜视感。
   const openEyes = () => {
-    const lp = Math.max(10, Math.min(12, 11 + face.gaze));
-    const rp = lp + 9;
+    const lp = Math.max(leftEyeStart + 1, Math.min(leftEyeStart + 3, leftEyeStart + 2 + face.gaze));
+    const rp = Math.max(rightEyeStart + 1, Math.min(rightEyeStart + 3, rightEyeStart + 2 + face.gaze));
     if (face.eyeStyle === 1) {
       // 圆眼
-      parts.push(R(10, 12, 11, EYE), P(9, 12, EYE), P(13, 12, EYE), R(10, 12, 13, EYE));
-      parts.push(R(19, 21, 11, EYE), P(18, 12, EYE), P(22, 12, EYE), R(19, 21, 13, EYE));
-      parts.push(R(10, 12, 12, EYEWHITE), R(19, 21, 12, EYEWHITE), P(lp, 12, EYE), P(rp, 12, EYE));
+      parts.push(R(leftEyeStart + 1, leftEyeStart + 3, 11, EYE), P(leftEyeStart, 12, EYE), P(leftEyeStart + 4, 12, EYE), R(leftEyeStart + 1, leftEyeStart + 3, 13, EYE));
+      parts.push(R(rightEyeStart + 1, rightEyeStart + 3, 11, EYE), P(rightEyeStart, 12, EYE), P(rightEyeStart + 4, 12, EYE), R(rightEyeStart + 1, rightEyeStart + 3, 13, EYE));
+      parts.push(R(leftEyeStart + 1, leftEyeStart + 3, 12, EYEWHITE), R(rightEyeStart + 1, rightEyeStart + 3, 12, EYEWHITE), P(lp, 12, EYE), P(rp, 12, EYE));
     } else if (face.eyeStyle === 2) {
       // 细长眼，但保持水平眼线，避免眯眼坏笑
-      parts.push(R(9, 13, 12, EYE), R(10, 12, 13, EYEWHITE), P(lp, 13, EYE));
-      parts.push(R(18, 22, 12, EYE), R(19, 21, 13, EYEWHITE), P(rp, 13, EYE));
+      parts.push(R(leftEyeStart, leftEyeStart + 4, 12, EYE), R(leftEyeStart + 1, leftEyeStart + 3, 13, EYEWHITE), P(lp, 13, EYE));
+      parts.push(R(rightEyeStart, rightEyeStart + 4, 12, EYE), R(rightEyeStart + 1, rightEyeStart + 3, 13, EYEWHITE), P(rp, 13, EYE));
     } else if (face.eyeStyle === 3) {
       // 柔和短眼
-      const lp2 = Math.max(10, Math.min(12, lp));
-      const rp2 = lp2 + 9;
-      parts.push(R(10, 13, 11, EYE), R(10, 12, 12, EYEWHITE), P(lp2, 12, EYE));
-      parts.push(R(18, 21, 11, EYE), R(19, 21, 12, EYEWHITE), P(rp2, 12, EYE));
+      parts.push(R(leftEyeStart + 1, leftEyeStart + 4, 11, EYE), R(leftEyeStart + 1, leftEyeStart + 3, 12, EYEWHITE), P(lp, 12, EYE));
+      parts.push(R(rightEyeStart, rightEyeStart + 3, 11, EYE), R(rightEyeStart + 1, rightEyeStart + 3, 12, EYEWHITE), P(rp, 12, EYE));
     } else {
       // 标准开眼
-      parts.push(R(9, 13, 11, EYE), R(10, 12, 12, EYEWHITE), P(lp, 12, EYE));
-      parts.push(R(18, 22, 11, EYE), R(19, 21, 12, EYEWHITE), P(rp, 12, EYE));
+      parts.push(R(leftEyeStart, leftEyeStart + 4, 11, EYE), R(leftEyeStart + 1, leftEyeStart + 3, 12, EYEWHITE), P(lp, 12, EYE));
+      parts.push(R(rightEyeStart, rightEyeStart + 4, 11, EYE), R(rightEyeStart + 1, rightEyeStart + 3, 12, EYEWHITE), P(rp, 12, EYE));
     }
   };
 
   // —— 眼睛：伤病 / 疲惫覆盖天生眼型，其余状态保留个人差异 ——
-  if (mood === "injured") {
+  if (expressionMood === "injured") {
     // 左眼闭合线 + 右眼正常 + 淤青
     parts.push(R(9, 13, 12, EYE), P(10, 11, EYE), P(12, 13, EYE));
     parts.push(R(18, 22, 12, EYE), R(19, 21, 13, EYEWHITE), P(19, 13, EYE));
     parts.push(P(21, 14, "#a15b50"), P(22, 14, "#8f4a48"));
-  } else if (mood === "tired") {
+  } else if (expressionMood === "tired") {
     parts.push(R(9, 13, 12, EYE), R(18, 22, 12, EYE));
     parts.push(P(24, 8, "#b7ecff"), P(24, 9, "#8fd7f2"), P(25, 10, "#5db6dc"));
-  } else if (mood === "happy" && face.eyeStyle % 2 === 0) {
+  } else if (expressionMood === "happy" && face.eyeStyle % 2 === 0) {
     // 一半球员开心时眯成上扬弧线，另一半仍保留开眼笑
     parts.push(P(9, 12, EYE), R(10, 12, 13, EYE), P(13, 12, EYE));
     parts.push(P(18, 12, EYE), R(19, 21, 13, EYE), P(22, 12, EYE));
@@ -530,7 +424,7 @@ function faceCells(mood, look, styleId) {
   }
 
   // —— 嘴：状态决定情绪，neutral 仍有四种自然嘴型 ——
-  if (mood === "happy") {
+  if (expressionMood === "happy") {
     if (face.mouthStyle % 2 === 0) {
       parts.push(P(11, 17, OUT), R(12, 19, 18, OUT), P(20, 17, OUT));
       parts.push(R(13, 18, 18, "#fdf6ea"), R(14, 17, 19, MOUTH));
@@ -538,7 +432,7 @@ function faceCells(mood, look, styleId) {
       parts.push(P(12, 18, MOUTH), R(13, 18, 19, MOUTH), P(19, 18, MOUTH));
     }
     parts.push(P(9, 16, cheek), P(22, 16, cheek));
-  } else if (mood === "sad" || mood === "injured") {
+  } else if (expressionMood === "sad" || expressionMood === "injured") {
     parts.push(R(14, 17, 17, MOUTH), P(13, 18, MOUTH), P(18, 18, MOUTH));
   } else if (face.mouthStyle === 1) {
     // 很轻的友善弧线
@@ -554,7 +448,7 @@ function faceCells(mood, look, styleId) {
   }
 
   // —— 受伤绷带 ——
-  if (mood === "injured") {
+  if (expressionMood === "injured") {
     parts.push(R(8, 23, 5, "#e8e4da"), R(10, 21, 6, "#d4cfc2"));
     parts.push(P(7, 6, "#e8e4da"), P(24, 5, "#d4cfc2"));
   }
@@ -564,12 +458,16 @@ function faceCells(mood, look, styleId) {
   if (acc.freckles) {
     parts.push(P(11, 14, cheek), P(12, 15, cheek), P(20, 14, cheek), P(19, 15, cheek));
   }
-  if (acc.scar && mood !== "injured") {
+  if (acc.scar && expressionMood !== "injured") {
     parts.push(P(20, 10, "#a15b50"), P(21, 11, "#8f4a48"), P(22, 12, "#a15b50"));
   }
-  if (acc.stubble && mood !== "happy") {
+  if (acc.stubble && expressionMood !== "happy") {
     const stub = mixHex(look.skinShade, look.hairHex, 0.35);
     parts.push(R(12, 19, 18, stub), P(11, 17, stub), P(20, 17, stub));
+  }
+  if (acc.beard && expressionMood !== "happy") {
+    const beard = mixHex(look.hairHex, look.skinShade, 0.18);
+    parts.push(R(11, 20, 19, beard), R(12, 19, 20, beard));
   }
   if (acc.headband && styleId !== 12) {
     parts.push(R(8, 23, 7, "#e11d48"), R(9, 22, 8, "#be123c"));
@@ -578,11 +476,12 @@ function faceCells(mood, look, styleId) {
 }
 
 /** 头部底盘：描边 + 脸 + 耳 + 下颚阴影 */
-function headCells(look) {
+function headCells(look, age = 25) {
   const S = look.skin;
   const Sd = look.skinShade;
   const Sh = mixHex(S, "#fff7ed", 0.18);
-  return [
+  const face = look.face || {};
+  const parts = [
     // 一格描边 + 阶梯式下颚，轮廓比旧版更圆润清楚
     R(9, 22, 3, OUT), R(7, 24, 4, OUT),
     P(6, 5, OUT), P(25, 5, OUT), C(6, 6, 18, OUT), C(25, 6, 18, OUT),
@@ -596,6 +495,31 @@ function headCells(look) {
     R(8, 10, 18, Sd), R(21, 23, 18, Sd), P(10, 19, Sd), P(21, 19, Sd),
     R(9, 13, 6, Sh), P(8, 7, Sh),
   ];
+  if (face.shape === 1) {
+    // Narrow jaw.
+    parts.push(P(8, 19, S), P(23, 19, S), P(10, 20, S), P(21, 20, S));
+  } else if (face.shape === 2) {
+    // Broad jaw and stronger chin.
+    parts.push(P(6, 19, OUT), P(25, 19, OUT), R(7, 10, 20, OUT), R(21, 24, 20, OUT), R(12, 19, 21, S));
+  } else if (face.shape === 3) {
+    // Longer, angular face.
+    parts.push(P(8, 20, OUT), P(23, 20, OUT), R(10, 21, 21, OUT), R(12, 19, 20, S));
+  }
+  if (face.earStyle === 1) {
+    parts.push(P(4, 11, S), P(27, 11, S), P(4, 16, S), P(27, 16, S));
+  } else if (face.earStyle === 2) {
+    parts.push(P(5, 13, Sd), P(26, 13, Sd), P(5, 15, Sd), P(26, 15, Sd));
+  }
+  if (age >= 32) {
+    const line = mixHex(Sd, S, 0.45);
+    parts.push(P(9, 15, line), P(22, 15, line));
+  }
+  if (age >= 40) {
+    const wrinkle = mixHex(Sd, S, 0.25);
+    parts.push(R(10, 13, 8, wrinkle), R(18, 21, 8, wrinkle));
+    if (age >= 50) parts.push(R(13, 18, 5, wrinkle));
+  }
+  return parts;
 }
 
 /** 球衣躯干（球员） */
@@ -682,7 +606,7 @@ function scoutCapCells() {
 /** 组装完整头像的单元格列表（绘制顺序即遮挡顺序） */
 function composeCells(opts = {}) {
   const seed = opts.seed || opts.id || opts.name || "anon";
-  const h = hashStr(seed);
+  const h = appearanceHash(seed);
   const role = opts.role || "player";
   const pos = opts.pos || "";
   const age = opts.age || 25;
@@ -725,9 +649,9 @@ function composeCells(opts = {}) {
 
   return [
     ...bgCells(mood),
-    ...headCells(look),
+    ...headCells(look, age),
     ...hairLayer,
-    ...faceCells(mood, look, look.styleId),
+    ...faceCells(mood, look, look.styleId, !!opts.facialInjury),
     ...torso,
   ];
 }
@@ -777,6 +701,7 @@ export function renderAvatarPngUri(opts = {}) {
     opts.hairColor || "",
     opts.hairStyle ?? "",
     opts.mood || "neutral",
+    opts.facialInjury ? "face-injury" : "body-injury",
     opts.kitPrimary || "",
     opts.kitSecondary || "",
     size,
@@ -820,6 +745,14 @@ export function moodFromPlayer(player) {
   return "neutral";
 }
 
+/** Only a diagnosed head or facial injury should alter the player's face. */
+export function hasFacialInjury(player) {
+  if (!player || (player.injured || 0) <= 0) return false;
+  const injury = player.injury || {};
+  const text = `${injury.key || ""} ${injury.label || ""} ${injury.labelEn || ""}`.toLowerCase();
+  return /head|face|facial|concussion|eye|nose|jaw|cheek|头|面|脑震荡|眼|鼻|颌|下巴/.test(text);
+}
+
 export function avatarHtml(person, opts = {}) {
   if (!person) return "";
   const role = opts.role || person.role || (person.pos ? "player" : "manager");
@@ -848,8 +781,9 @@ export function avatarHtml(person, opts = {}) {
     kitSecondary,
     size,
     mood,
+    facialInjury: role === "player" && hasFacialInjury(person),
   };
-  // 全场景统一：热血程序脸 2.0
+  // 全场景统一：热血程序脸 2.1
   const pngUri = renderAvatarPngUri(renderOpts);
   const svgFallback = () => renderAvatarSvg(renderOpts);
 
