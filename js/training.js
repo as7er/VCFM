@@ -543,12 +543,19 @@ export function processTrainingDay(world) {
 
     // 每周：一线队属性成长（教练 + 训练重点）
     if (world.day % 7 === 0) {
-      const growthRate =
-        focus.growth * inten.growthMult +
-        coachGrowthBonus(club) +
-        trainingGrowthBonus(club);
+      const developmentPlan = isUser && club.delegation?.development === "staff"
+        ? club.delegation.developmentPlan
+        : null;
+      const playerFocus = new Map(
+        (developmentPlan?.focusPlayers || []).map((item) => [item.id, item.focus])
+      );
       for (const p of club.players || []) {
-        if (growFirstTeamPlayer(p, growthRate, focus, {
+        const growthFocus = TRAINING_FOCUSES[playerFocus.get(p.id)] || focus;
+        const growthRate =
+          growthFocus.growth * inten.growthMult +
+          coachGrowthBonus(club) +
+          trainingGrowthBonus(club);
+        if (growFirstTeamPlayer(p, growthRate, growthFocus, {
           world,
           club,
           intensity: inten,
@@ -561,9 +568,12 @@ export function processTrainingDay(world) {
       if (isUser && grewNames.length) {
         const show = grewNames.slice(0, 4).join("、");
         const more = grewNames.length > 4 ? ` 等 ${grewNames.length} 人` : "";
+        const focusLabel = developmentPlan
+          ? `教练培养计划·${TRAINING_FOCUSES[developmentPlan.focus]?.label || focus.label}`
+          : focus.label;
         logs.push({
           day: world.day,
-          text: `🏋️ 训练见效：${show}${more} 属性小幅提升（${focus.label}·${inten.label}）`,
+          text: `🏋️ 训练见效：${show}${more} 属性小幅提升（${focusLabel}·${inten.label}）`,
         });
       }
     }

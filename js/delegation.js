@@ -114,6 +114,67 @@ export function applyDelegatedTraining(world, club) {
   return { ok: true, plan, prepResult };
 }
 
+/** 教练团队执行培养原则：按年轻球员的潜力缺口选择一个可解释的周训练重点。 */
+export function applyDelegatedDevelopment(world, club) {
+  const delegation = ensureDelegation(world, club);
+  if (!isFullyDelegated(world, club, "development")) return { ok: false, skipped: "player" };
+  const candidates = (club.players || []).filter(
+    (player) =>
+      player.age <= 24 &&
+      (player.potential || 0) > (player.ovr || 0) &&
+      !(player.injured > 0)
+  );
+  const groups = {
+    attack: new Set(["shooting", "finishing", "dribbling", "pace"]),
+    defense: new Set(["tackling", "marking", "strength", "positioning"]),
+    technical: new Set(["passing", "vision", "dribbling"]),
+    fitness: new Set(["stamina", "pace", "strength"]),
+    goalkeeping: new Set(["reflexes", "handling", "positioning", "kicking"]),
+  };
+  const totals = Object.fromEntries(Object.keys(groups).map((key) => [key, 0]));
+  const focusPlayers = [];
+  for (const player of candidates) {
+    const attrs = player.attrs || {};
+    let bestKey = player.pos === "GK" ? "goalkeeping" : "technical";
+    let bestGap = -Infinity;
+    for (const [key, keys] of Object.entries(groups)) {
+      if (player.pos === "GK" && key !== "goalkeeping") continue;
+      if (player.pos !== "GK" && key === "goalkeeping") continue;
+      const relevant = [...keys];
+      const gap = average(relevant.map((attr) =>
+        Math.max(0, (player.potential || player.ovr || 0) - Number(attrs[attr] || 0))
+      ));
+      if (gap > bestGap) {
+        bestGap = gap;
+        bestKey = key;
+      }
+    }
+    totals[bestKey] += Math.max(0.1, bestGap);
+    focusPlayers.push({ id: player.id, focus: bestKey });
+  }
+  let focus = candidates.length
+    ? Object.entries(totals).sort((a, b) => b[1] - a[1])[0]?.[0] || "balanced"
+    : "balanced";
+  if (delegation.principles.youthPriority === "high" && candidates.length >= 3) {
+    // 高培养原则优先保证年轻人有明确重点，而不是回退到纯体能/恢复。
+    focus = focus === "goalkeeping" ? focus : focus;
+  }
+  delegation.developmentPlan = {
+    day: world.day,
+    focus,
+    playerIds: focusPlayers.map((item) => item.id),
+    focusPlayers,
+    reason: candidates.length
+      ? `教练根据 ${candidates.length} 名年轻球员的潜力缺口安排${focus}专项`
+      : "当前没有需要专项培养的年轻球员，保持综合发展",
+    reasonEn: candidates.length
+      ? `Staff selected ${focus} from the potential gaps of ${candidates.length} young players`
+      : "No young player needs a focused plan, so the staff keeps development balanced",
+  };
+  delegation.lastAppliedDay.development = world.day;
+  return { ok: true, plan: delegation.developmentPlan };
+}
+
 function formationFit(club, formation) {
   const available = (club.players || []).filter((p) => !(p.injured > 0) && !(p.suspendedMatches > 0));
   const byPos = { GK: 0, DEF: 0, MID: 0, ATT: 0 };

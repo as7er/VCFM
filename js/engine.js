@@ -122,7 +122,11 @@ import {
   TRAINING_FOCUSES,
   TRAINING_INTENSITIES,
 } from "./training.js";
-import { applyDelegatedTraining, ensureWorldDelegation } from "./delegation.js";
+import {
+  applyDelegatedDevelopment,
+  applyDelegatedTraining,
+  ensureWorldDelegation,
+} from "./delegation.js";
 import {
   ensureTransferWindow,
   isTransferWindowOpen,
@@ -164,6 +168,7 @@ import {
   clubTransferBudget,
   ensureClubFinance,
   ensureWorldFinances,
+  processAiDebtActions,
   resetClubSeasonFinance,
   settleWorldWeeklyFinances,
   recordFinanceEntry,
@@ -189,6 +194,7 @@ import {
   continueSecondHalf,
   applyUserHalfTime,
   applyTeamTalk,
+  applyManagedTeamTalk,
   suggestHalfTimeTalk,
   applySubstitution,
   applyLiveTactics,
@@ -203,6 +209,8 @@ import {
   weatherByKey,
 } from "./match.js";
 import {
+  ensureActiveCareer,
+  ensureDirectorCareer,
   ensureManagerCareer,
   recordManagerMatch,
   settleManagerSeason,
@@ -317,6 +325,7 @@ export {
   continueSecondHalf,
   applyUserHalfTime,
   applyTeamTalk,
+  applyManagedTeamTalk,
   suggestHalfTimeTalk,
   applySubstitution,
   applyLiveTactics,
@@ -329,6 +338,8 @@ export {
   isDerby,
   isBigMatch,
   weatherByKey,
+  ensureActiveCareer,
+  ensureDirectorCareer,
   ensureManagerCareer,
   recordManagerMatch,
   settleManagerSeason,
@@ -677,6 +688,7 @@ export function advanceDay(world) {
   // 训练日程：体能 / 伤愈 / 士气 / 周成长（替代原先统一恢复）
   ensureWorldDelegation(world);
   applyDelegatedTraining(world, userClub);
+  applyDelegatedDevelopment(world, userClub);
   processTrainingDay(world);
 
   // 青训
@@ -746,6 +758,8 @@ export function advanceDay(world) {
   // 所有俱乐部使用同一套工资、设施维护与商业收入周结算。
   if (world.day % 7 === 0) {
     const settlements = settleWorldWeeklyFinances(world);
+    const debtActions = processAiDebtActions(world);
+    if (debtActions.length) events.push({ type: "ai_debt_actions", actions: debtActions });
     const user = clubById(world, world.userClubId);
     const userSettle = settlements.find((item) => item.clubId === world.userClubId);
     const total = userSettle?.operatingOut || 0;
@@ -856,16 +870,17 @@ function isRelegationClash(world, fixture) {
   if (!world?.table) return false;
   const homeClub = clubById(world, fixture.home);
   const awayClub = clubById(world, fixture.away);
-  if (!homeClub || !awayClub || homeClub.division !== awayClub.division || homeClub.division >= 3) return false;
+  const relegate = DIVISIONS[homeClub?.division]?.relegate || 0;
+  if (!homeClub || !awayClub || homeClub.division !== awayClub.division || relegate <= 0) return false;
 
   const table = getSortedTable(world, homeClub.division);
   const homePos = table.findIndex(r => r.id === fixture.home) + 1;
   const awayPos = table.findIndex(r => r.id === fixture.away) + 1;
   const total = table.length;
-  const relegationZone = total - 2;
+  const dangerStart = Math.max(1, total - relegate - 1);
 
   // 双方都在保级区附近（倒数5名）
-  return homePos > 0 && awayPos > 0 && homePos >= relegationZone - 2 && awayPos >= relegationZone - 2;
+  return homePos > 0 && awayPos > 0 && homePos >= dangerStart && awayPos >= dangerStart;
 }
 
 function checkInjuryEvent(world, userClub) {
@@ -1653,6 +1668,7 @@ export function processAiTransfers(world) {
 
     // 买：使用阵容平衡系统确定需要补强的位置
     const transferBudget = clubTransferBudget(world, club);
+    if (club.finance?.debtPlan?.transferEmbargo) continue;
     const needPos = selectPositionToBuy(club.players, transferBudget);
     if (!needPos || transferBudget < 150000 || club.players.length >= 25) continue;
 

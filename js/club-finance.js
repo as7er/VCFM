@@ -128,6 +128,78 @@ export function settleWorldWeeklyFinances(world) {
   return settlements;
 }
 
+/**
+ * AI 债务处置：先冻结引援和压低预算，再以可追踪的股东贷款提供有限流动性。
+ * 贷款形成显式 ownerDebt，现金宽裕后自动偿还，不凭空抹掉经营失败。
+ */
+export function processAiDebtActions(world) {
+  const actions = [];
+  for (const club of world?.clubs || []) {
+    if (club.id === world.userClubId) continue;
+    const finance = ensureClubFinance(club, world.season);
+    const operating = clubWeeklyOperatingSnapshot(world, club);
+    if (!finance.debtPlan || typeof finance.debtPlan !== "object") {
+      finance.debtPlan = { weeksNegative: 0, transferEmbargo: false, ownerDebt: 0 };
+    }
+    const plan = finance.debtPlan;
+    plan.ownerDebt = Math.max(0, number(plan.ownerDebt));
+    if (number(club.money) < 0) {
+      plan.weeksNegative = Math.max(0, number(plan.weeksNegative)) + 1;
+      plan.transferEmbargo = true;
+      plan.status = "recovery";
+      plan.lastReviewDay = world.day;
+      const budget = ensureClubFinanceBudget(club);
+      budget.reserveWeeks = 20;
+      budget.transferShare = 25;
+
+      const critical = club.money < -Math.max(operating.operatingOut * 2, 500_000);
+      if (critical || plan.weeksNegative % 4 === 0) {
+        const tier = DIVISIONS[club.division || 3]?.tier || 3;
+        const cap = { 1: 5_000_000, 2: 2_500_000, 3: 1_500_000 }[tier] || 1_500_000;
+        const support = Math.min(
+          cap,
+          Math.max(operating.operatingOut * 2, Math.ceil(Math.abs(club.money) * 0.65))
+        );
+        if (support > 0) {
+          recordFinanceEntry(club, support, {
+            category: "board",
+            source: "owner-loan",
+            season: world.season,
+            day: world.day,
+          });
+          plan.ownerDebt += support;
+          actions.push({ clubId: club.id, type: "owner-loan", amount: support });
+        }
+      } else {
+        actions.push({ clubId: club.id, type: "transfer-embargo", amount: 0 });
+      }
+      continue;
+    }
+
+    plan.weeksNegative = 0;
+    const reserve = operating.operatingOut * 12;
+    if (plan.ownerDebt > 0 && club.money > reserve) {
+      const repayment = Math.min(plan.ownerDebt, Math.max(0, Math.floor(club.money - reserve)));
+      if (repayment > 0) {
+        recordFinanceEntry(club, -repayment, {
+          category: "board",
+          source: "owner-loan-repayment",
+          season: world.season,
+          day: world.day,
+        });
+        plan.ownerDebt -= repayment;
+        actions.push({ clubId: club.id, type: "owner-loan-repayment", amount: repayment });
+      }
+    }
+    if (club.money >= operating.operatingOut * 4 && plan.ownerDebt <= 0) {
+      plan.transferEmbargo = false;
+      plan.status = "stable";
+    }
+    plan.lastReviewDay = world.day;
+  }
+  return actions;
+}
+
 /** AI reserves eight weeks of recurring cash burn before entering the market. */
 export function clubTransferBudget(world, club, reserveWeeks = 8) {
   if (!club) return 0;

@@ -110,6 +110,7 @@ export class SimEngine {
     this.away = away;
     this.opts = opts;
     this.random = typeof opts.random === "function" ? opts.random : Math.random;
+    this.matchModifiers = opts.modifiers || null;
     this.t = 0; // 已模拟时间（秒）
     this.agents = [];
     this.ball = null;
@@ -336,6 +337,12 @@ export class SimEngine {
 
   _teamTactics(team) {
     return (team === "home" ? this.home : this.away)?.tactics || {};
+  }
+
+  /** 由 match.js 注入的额外比赛情境修正；阵型/风格本身仍直接读取球队战术。 */
+  _teamModifier(team, key, fallback = 1) {
+    const value = Number(this.matchModifiers?.[team]?.[key]);
+    return Number.isFinite(value) ? clamp(value, 0.75, 1.25) : fallback;
   }
 
   _tacticLevel(team, key, fallback = 3) {
@@ -805,6 +812,8 @@ export class SimEngine {
         return;
       }
       const fkBoxY = a.team === "home" ? 14 : 86;
+      // 吊传定位球进入独立威胁窗口，训练/主罚质量会影响后续处理。
+      this._cornerAttackUntil[a.team] = this.t + 14;
       const cross = this._bestCross(a);
       this._pass(
         a,
@@ -877,9 +886,14 @@ export class SimEngine {
         (0.5 * distF + 0.35 * angF) * (0.5 + finBias) * (1 - pressure * 0.25);
       if (core) shootQuality *= 1.35; // 核心：球权在自己脚下更敢射
       if (isWing) shootQuality *= 1.12 + cutInProgress * 0.2; // 内切后敢抽射
+      const attackMod = this._teamModifier(a.team, "atk");
+      const chanceMod = this._teamModifier(a.team, "chance");
+      const setpieceMod = setPieceChance ? this._teamModifier(a.team, "setpiece") : 1;
+      shootQuality *= attackMod * setpieceMod;
 
       const passTo = this._bestPass(a);
       let passQuality = passTo ? passTo.value * (0.6 + 0.4 * a.attr.vision) : 0;
+      passQuality *= Math.sqrt(attackMod);
       // 核心：除非传球质量碾压，否则优先自己解决
       if (core) passQuality *= 0.72;
       // 边锋：禁区附近仍会分中路队友，但不轻易放弃自己机会
@@ -901,7 +915,7 @@ export class SimEngine {
           0.03,
           setPieceChance ? 0.64 : 0.56
         ) *
-        (cdBlocked && !setPieceChance ? 0.3 : 1);
+        (cdBlocked && !setPieceChance ? 0.3 : 1) * chanceMod;
       const clearCloseChance = dGoal < 13 && angF > 0.16 && pressure < 0.9;
       if (
         canShoot &&
@@ -1323,7 +1337,9 @@ export class SimEngine {
     // 传球速度：距离越远越快，受 passing 影响精度（加噪声）
     const passSpeed = clamp(18 + d * 0.7, 18, 42) * (0.85 + 0.15 * a.attr.passing);
     // 精度噪声：passing 越低越偏
-    const err = (1 - a.attr.passing) * 6;
+    // 普通职业球员的基础脚法不应让近中距离传球像随机解围；压力与线路风险
+    // 已由决策/拦截系统体现，这里只保留随 passing 变化的温和落点误差。
+    const err = (1 - a.attr.passing) * 3.8;
     const nx = (this.random() - 0.5) * err;
     const ny = (this.random() - 0.5) * err;
     b.owner = null;
@@ -1405,7 +1421,7 @@ export class SimEngine {
     const long = dGoal > 22;
     // 球队级节奏上限：强队长期围攻时也不能每几十秒起脚一次。
     // 这是模拟时间的进攻周期，不是表现层的墙钟等待。
-    this._teamShotUntil[a.team] = this.t + 420 + this.random() * 230;
+    this._teamShotUntil[a.team] = this.t + 520 + this.random() * 300;
     // 近：finishing；远：shooting。远射噪声更大，容易打飞/被扑
     const skill = long
       ? 0.35 * a.attr.finishing + 0.65 * a.attr.shooting
@@ -1437,6 +1453,9 @@ export class SimEngine {
         err *= 0.78;
       }
     }
+    // 传控改善后禁区内起脚质量更高；保留约 12% 的统一落点离散，避免
+    // 等强样本回到 3.3 球/场以上，同时不通过 UI 或赛后缩放篡改结果。
+    err *= 1.12;
     const aimX = 50 + (this.random() - 0.5) * err;
     const dx = aimX - b.x;
     const dy = goalY - b.y;
@@ -1818,7 +1837,11 @@ export class SimEngine {
   _refreshDefPlan(team, owner) {
     const plan = this._defPlans[team];
     if (!plan || (this.t < plan.until && plan.jobs.size)) return plan;
-    const pressing = this._tacticLevel(team, "pressing");
+    const pressing = clamp(
+      this._tacticLevel(team, "pressing") * this._teamModifier(team, "def"),
+      1,
+      5
+    );
 
     const candidates = this.agents.filter(
       (a) => a.team === team && a.role !== "GK" && !a.sentOff
@@ -2299,6 +2322,7 @@ export class SimEngine {
           speed / 220 -
           lateral * 0.012 +
           (reactionRead - 0.45) * 0.32;
+        pSave *= this._teamModifier(gk.team, "def");
         // 极近距离仍更难反应，但不再因为“球已靠近门线”把所有扑救率统一砍半。
         if (shotDistance < 8) pSave *= 0.82;
         else if (shotDistance < 12) pSave *= 0.92;
@@ -2397,7 +2421,11 @@ export class SimEngine {
         if (d > 3.2 + Math.min(1.2, speed * 0.018)) continue;
         checked.add(o.id);
         const blockSkill = 0.55 * o.attr.positioning + 0.45 * o.attr.tackling;
-        const pBlock = clamp(0.12 + blockSkill * 0.38 - speed / 240, 0.08, 0.42);
+        const pBlock = clamp(
+          (0.12 + blockSkill * 0.38 - speed / 240) * this._teamModifier(o.team, "def"),
+          0.08,
+          0.46
+        );
         if (this.random() >= pBlock) continue;
         const side = o.x <= b.x ? 1 : -1;
         // 约半数封堵挡过自己的底线得角球；否则弹回场内。
@@ -2447,7 +2475,11 @@ export class SimEngine {
             o.tackleCdUntil = this.t + 2;
             this._teamInterceptUntil[interceptTeam] = this.t + 75 + this.random() * 30;
             const pick = 0.45 * o.attr.tackling + 0.35 * o.attr.positioning + 0.2 * o.attr.pace;
-            const p = clamp(0.22 + pick * 0.45 - speed / 150, 0.08, 0.62);
+            const p = clamp(
+              (0.22 + pick * 0.45 - speed / 150) * this._teamModifier(o.team, "def"),
+              0.08,
+              0.68
+            );
             if (this.random() < p) {
               b.owner = o.id;
               b.vx = 0; b.vy = 0;
@@ -2499,7 +2531,14 @@ export class SimEngine {
           // 单次成功率保持克制；高速带球略容易丢球。
           const ownerSpeed = Math.hypot(owner.vx, owner.vy);
           const moveVuln = clamp(ownerSpeed / SIM.MAX_PLAYER_SPEED, 0, 1) * 0.1;
-          const p = clamp(0.22 + (def - atk) * 0.45 + moveVuln, 0.07, 0.48);
+          const possResistance = this._teamModifier(owner.team, "poss");
+          const p = clamp(
+            (0.22 + (def - atk) * 0.45 + moveVuln) *
+              this._teamModifier(o.team, "def") /
+              possResistance,
+            0.06,
+            0.52
+          );
           if (this.random() < p) {
             b.owner = o.id;
             b.vx = 0;
@@ -2623,12 +2662,18 @@ export class SimEngine {
           return;
         }
       }
-      // 接管成功率：球越快越难控
-      let ctl = 0.55 + 0.4 * best.attr.dribbling;
+      // 接管成功率：有明确接球目标的普通传球应大多被职业球员稳妥停下；
+      // 传中、争顶和非预期松球仍显著更难，失误继续来自真实线路与压迫。
+      const wasPass = b.state === "pass";
+      const intendedReceive =
+        wasPass && best.team === b.kickTeam && best.id === b.receiverId;
+      let ctl = intendedReceive
+        ? 0.9 + 0.12 * best.attr.dribbling
+        : 0.66 + 0.3 * best.attr.dribbling;
+      if (wasPass && b.isCrossPass) ctl -= intendedReceive ? 0.16 : 0.22;
       if (best.role === "GK") ctl = 0.75 + 0.22 * (best.attr.handling || 0.5);
-      const p = clamp(ctl - speed / 90, 0.15, 0.98);
+      const p = clamp(ctl - speed / (intendedReceive ? 210 : 125), 0.15, 0.99);
       if (this.random() < p) {
-        const wasPass = b.state === "pass";
         const passFrom = b.lastKicker;
         const intendedId = b.receiverId;
         b.owner = best.id;
@@ -2864,6 +2909,7 @@ export class SimEngine {
       0.12,
       0.34
     );
+    pFoul *= this._teamModifier(defender.team, "foul");
     // 后卫在禁区内会收脚，但不应把点球压低两个数量级。
     if (inBox) pFoul *= 0.08;
     if (this.random() >= pFoul) return false;
@@ -3741,7 +3787,9 @@ export class SimEngine {
     }
     for (const team of ["home", "away"]) {
       result.shotsOn[team] = Math.min(result.shots[team], result.shotsOn[team]);
-      result.xg[team] = Math.round(result.xg[team] * 1000) / 1000;
+      // 保留足够精度，让赛后分析按同一批射门求和后再统一四舍五入；
+      // 过早截到 3 位会在 2 位展示边界上与分析页产生 0.01 差异。
+      result.xg[team] = Math.round(result.xg[team] * 1_000_000) / 1_000_000;
     }
     // 控球秒数：时段内增量由调用方用 poss 快照差分；此处给累计值便于诊断
     result.possessionSec = {

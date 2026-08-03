@@ -285,6 +285,7 @@ export function matchdayIncome(club, options = {}) {
     isTitleRace = false,
     cupStage = null,
     winStreak = 0,
+    clubStrength = 0,
     opponentStrength = 0,
     formBonus = 1.0,
     seasonPhaseBonus = 1.0,
@@ -324,8 +325,8 @@ export function matchdayIncome(club, options = {}) {
   }
 
   // 强强对话（对手实力接近）
-  const clubStrength = club.strength || 50;
-  if (opponentStrength > 0 && Math.abs(clubStrength - opponentStrength) < 5 && opponentStrength >= 60) {
+  const actualClubStrength = clubStrength || club.power || 50;
+  if (opponentStrength > 0 && Math.abs(actualClubStrength - opponentStrength) < 5 && opponentStrength >= 60) {
     fillMin = Math.min(1.0, fillMin + 0.08); // 强强对话吸引球迷
   }
 

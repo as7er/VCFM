@@ -9,6 +9,15 @@ import {
   setManagementMode,
 } from "../js/delegation.js";
 import { autoLineup, defaultTactics } from "../js/models.js";
+import {
+  applyLiveTactics,
+  applyManagedTeamTalk,
+  applyTeamTalk,
+  applyUserHalfTime,
+  createMatchSession,
+  playFirstHalf,
+  playSecondHalf,
+} from "../js/match.js";
 
 function player(id, pos, ovr, options = {}) {
   return {
@@ -48,7 +57,7 @@ function testWorld() {
     staff: { coach: { id: "coach", name: "Coach", role: "coach", rating: 15, wage: 1000, age: 45, contractYears: 3, clubId: "user" } },
   };
   const opponent = { id: "opp", name: "Opponent", power: 65, players: squad(), tactics: defaultTactics() };
-  const world = { day: 1, season: 1, userClubId: club.id, clubs: [club, opponent], fixtures: [fixture()] };
+  const world = { day: 1, season: 1, userClubId: club.id, clubs: [club, opponent], fixtures: [fixture()], news: [] };
   return { world, club, opponent };
 }
 
@@ -130,6 +139,34 @@ function testWorld() {
   assert.equal("matchBonus" in club, false);
   assert.equal("delegationMod" in club.tactics, false);
   assert.equal("power" in tactics, false);
+}
+
+{
+  const { world, club } = testWorld();
+  assert.equal(setManagementMode(world, club, "club_director").ok, true);
+  const state = createMatchSession(world, fixture());
+  const originalStyle = club.tactics.style;
+  const playerTalk = applyTeamTalk(state, "demand", "pre");
+  assert.equal(playerTalk.ok, false, "club director must not deliver the team talk");
+  const coachTalk = applyManagedTeamTalk(state, "pre");
+  assert.equal(coachTalk.ok, true, "head coach should deliver the delegated team talk");
+  const halfTime = applyUserHalfTime(state, { style: "attack" });
+  assert.equal(halfTime.ok, false, "club director must not control half-time tactics");
+  const live = applyLiveTactics(state, { style: originalStyle === "attack" ? "defend" : "attack" });
+  assert.equal(live.ok, false, "club director must not control live tactics");
+  assert.equal(club.tactics.style, originalStyle, "blocked live tactics must not mutate club tactics");
+}
+
+{
+  const { world, club } = testWorld();
+  assert.equal(setManagementMode(world, club, "club_director").ok, true);
+  const state = createMatchSession(world, fixture());
+  assert.equal(applyManagedTeamTalk(state, "pre").ok, true);
+  await playFirstHalf(state);
+  await playSecondHalf(state);
+  assert.ok(["encourage", "calm", "demand", "solid", "control"].includes(state.teamTalks.ht));
+  const reviews = state.events.filter((event) => event.managedDecision && event.phase === "matchday");
+  assert.deepEqual(reviews.map((event) => event.minute), [60, 75]);
 }
 
 console.log("delegation audit passed");

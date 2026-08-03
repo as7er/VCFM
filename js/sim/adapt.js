@@ -34,8 +34,15 @@ export function shouldUseSim(state) {
  * @returns {SimEngine}
  */
 export function ensureSimEngine(state) {
-  if (state.simEng) return state.simEng;
-  state.simEng = new SimEngine(state.home, state.away, { random: state.random });
+  if (state.simEng) {
+    state.simEng.matchModifiers = state.simModifiers || state.simEng.matchModifiers || null;
+    return state.simEng;
+  }
+  state.simEng = new SimEngine(state.home, state.away, {
+    random: state.random,
+    modifiers: state.simModifiers || null,
+  });
+  state.simEng.matchModifiers = state.simModifiers || null;
   state.simEngineMeta = { version: 2, halves: [] };
   return state.simEng;
 }
@@ -47,6 +54,7 @@ export function ensureSimEngine(state) {
 export function resyncSimAfterHalfTime(state) {
   const eng = state.simEng;
   if (!eng) return;
+  const priorFitness = new Map(eng.agents.map((agent) => [agent.id, agent.fitness]));
   for (const isHome of [true, false]) {
     const club = isHome ? state.home : state.away;
     ensureTactics(club);
@@ -77,7 +85,7 @@ export function resyncSimAfterHalfTime(state) {
       } catch {
         a.roleId = a.roleId || null;
       }
-      a.fitness = p.fitness ?? 100;
+      a.fitness = priorFitness.has(p.id) ? priorFitness.get(p.id) : p.fitness ?? 100;
       const attrs = p.attrs || {};
       const n = (v) => {
         const raw = Math.max(0.05, Math.min(1, (v ?? 10) / 20));

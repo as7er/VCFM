@@ -139,6 +139,7 @@ function makeOffer(world, club, kind, note) {
  * 生成工作邀请列表（不重复已有 pending 俱乐部）
  */
 export function generateJobOffers(world, { force = false, count = 3 } = {}) {
+  if (world?.managementMode === "club_director") return [];
   ensureManagerJob(world);
   ensureManagerCareer(world);
   const job = world.managerJob;
@@ -312,6 +313,8 @@ export function acceptJobOffer(world, offerId) {
   const prev = world.clubs?.find((c) => c.id === prevId);
 
   world.userClubId = club.id;
+  // 工作邀请代表主教练任命；从俱乐部经营身份转入新东家时明确切换职业语义。
+  world.managementMode = "head_coach";
   world.sacked = false;
   world.sackedReason = null;
   world.sackedDay = null;
@@ -376,6 +379,7 @@ export function rejectJobOffer(world, offerId) {
  */
 export function processManagerJobsDay(world) {
   if (!world || world.seasonOver) return;
+  if (world.managementMode === "club_director") return;
   ensureManagerJob(world);
   expireJobOffers(world);
   const job = world.managerJob;

@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=188" />
+  <link rel="stylesheet" href="css/style.css?v=190" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -1290,6 +1290,9 @@
             <em id="live-def-line-val">3</em>
           </label>
           <button type="button" id="btn-live-tac-apply" class="btn small primary" data-i18n="match.applyTac">应用</button>
+          <select id="live-sub-out" class="match-live-tac-sel" aria-label="换下球员"></select>
+          <select id="live-sub-in" class="match-live-tac-sel" aria-label="换上球员"></select>
+          <button type="button" id="btn-live-sub-apply" class="btn small" aria-label="确认换人">换人</button>
         </div>
 
         <footer class="fm-match-bar fmm-match-bar">
@@ -1318,9 +1321,9 @@
     </section>
 
     <!-- 球员详情弹窗 -->
-    <div id="modal" class="modal hidden">
-      <div class="modal-card" id="modal-card">
-        <button id="modal-close" class="modal-close">×</button>
+    <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Details">
+      <div class="modal-card" id="modal-card" tabindex="-1">
+        <button id="modal-close" class="modal-close" type="button" aria-label="关闭弹窗">×</button>
         <div id="modal-body"></div>
       </div>
     </div>
@@ -1349,12 +1352,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=188"></script>
+  <script type="module" src="js/main.js?v=190"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v188";
+        var CURRENT_CACHE = "vcfm-v190";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1365,7 +1368,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=188").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=190").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1374,8 +1377,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v188")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v188", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v190")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v190", "1");
               location.reload();
             }
           } catch (e) {

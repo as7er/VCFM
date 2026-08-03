@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v188** · 职责委托与经营模式 |
+| 当前版本 | **v190** · 统一比赛因果、真实临场指挥与长期经营可靠性 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -76,6 +76,8 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **v186 肖像修正**：资料头像改为单一原生 48×48 坐标系，消除分数缩放造成的五官错位；无效高精度结果会安全回退。
 - **v187 脸部精修**：资料头像采用更清晰的统一眼型与瞳孔高光、连续对称下颌，并将普通胡茬改为自然的稀疏纹理。
 - **v188 职责委托**：训练、首发、战术、临场与培养职责可交由教练团队；支持阵型、关键球员和培养原则锁定，并可切换由聘用主教练全权带队的俱乐部经营模式。自动决策不提供隐藏比赛加成。
+- **v189 经营模式比赛日控制**：俱乐部经营模式下赛前讲话、中场调整、换人和下半场场边战术均由主教练负责；主教练在 60′、75′ 按比分与体能重新评估，玩家界面只读观赛，所有临场 API 同样受权限保护。
+- **v190 统一比赛因果与经营可靠性**：空间比赛统一消费教练、天气、备战、讲话、阵容和定位球训练；直播按 60′/75′ 分段计算并支持真实换人；补齐职责培养、双职业履历、AI 债务处置、深层存档校验、无障碍弹窗与桌面/手机浏览器回归测试，并重新校准传球、射门和定位球。
 - **离线与性能**：Service Worker 按资源独立预缓存，单项失败不再清空整批离线资源；大型比赛视图只在进入比赛或战报时加载。
 - **统一验证**：核心审计由 `node scripts/verify.mjs` 统一执行，`--full` 追加 24 场真实性校准；GitHub Actions 覆盖 push、PR、手动与定时验证。
 
@@ -137,7 +139,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v188** · delegation and club-director mode |
+| Current version | **v190** · unified match causality, live control, and long-term reliability |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -197,6 +199,8 @@ Repository: https://github.com/as7er/vcfm
 - **v186 portrait fix**: profile portraits now use one native 48×48 coordinate system, eliminating facial misalignment from fractional scaling, with safe fallback for invalid output.
 - **v187 facial polish**: profile portraits use clearer consistent eyes with pupil highlights, continuous symmetric jawlines, and sparse natural stubble.
 - **v188 delegation**: coaching staff can handle training, selection, tactics, matchday changes, and development. Formation, key-player, and development principles can be locked, while club-director mode gives the employed head coach sporting control without hidden match bonuses.
+- **v189 matchday control**: in club-director mode the head coach chooses the pre-match talk, half-time plan, substitutions, and live tactics. The coach re-evaluates at 60' and 75' using score, fitness, and availability; the spectator UI and APIs enforce the same permissions.
+- **v190 unified causality and reliability**: spatial matches now consume coaching, weather, preparation, talks, line-up context, and set-piece training; live matches calculate in 60'/75' windows with real substitutions. Delegated development, separate career records, AI debt actions, deep save validation, accessible modals, browser regression coverage, and passing/shooting/set-piece calibration are included.
 - **Offline and performance**: Service Worker assets are precached independently so one failure cannot discard the batch; the large match view loads only when entering a match or archived report.
 - **Unified verification**: `node scripts/verify.mjs` runs the core audits, while `--full` adds the 24-match realism calibration. GitHub Actions covers pushes, pull requests, manual runs, and a schedule.
 

@@ -30,7 +30,7 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=188";
+import { nationFlagHtml } from "./flags.js?v=190";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -117,6 +117,7 @@ import {
   applyLiveTactics,
   getHalfTimeTips,
   applyTeamTalk,
+  applyManagedTeamTalk,
   suggestHalfTimeTalk,
   buildRoleReview,
   getBenchPlayers,
@@ -195,7 +196,7 @@ import {
   transferWindowLabel,
   transferWindowShort,
   processTransferWindowDay,
-  ensureManagerCareer,
+  ensureActiveCareer,
   managerWinRate,
   ensureManagerJob,
   enterUnemployment,
@@ -269,7 +270,9 @@ import {
   applyDelegatedTraining,
   ensureDelegation,
   ensureWorldDelegation,
+  isFullyDelegated,
   setManagementMode,
+  shouldStaffHandleMatchday,
 } from "./delegation.js";
 import {
   ensureInternational,
@@ -315,7 +318,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=188";
+} from "./avatar.js?v=190";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -403,7 +406,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=188").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=190").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -932,7 +935,7 @@ function initStart() {
       ensureBoardObjective(world);
       ensureTransferWindow(world);
       processTransferWindowDay(world);
-      ensureManagerCareer(world);
+      ensureActiveCareer(world);
       saveGame(world, slot);
       enterMain();
     } catch (err) {
@@ -1015,7 +1018,7 @@ function repairWorldFields(w) {
   }
   ensureBoardObjective(w);
   ensureTransferWindow(w);
-  ensureManagerCareer(w);
+  ensureActiveCareer(w);
   ensureWorldFinances(w);
   ensureWorldDelegation(w);
   if (!Array.isArray(w.poachBids)) w.poachBids = [];
@@ -1081,9 +1084,13 @@ function repairWorldFields(w) {
   ensureWorldRegistrations(w);
   applyWorldClubBranding(w, clubBrandingById, getLang());
   // 旧档若缺少当前五国联赛结构，提示开新档体验完整升降级
-  const counts = { 1: 0, 2: 0, 3: 0 };
-  for (const c of w.clubs || []) counts[c.division || 3]++;
-  if (counts[1] < 4 || counts[2] < 4 || counts[3] < 4) {
+  const divisionIds = Object.keys(DIVISIONS).map(Number).filter(Number.isFinite);
+  const counts = Object.fromEntries(divisionIds.map((id) => [id, 0]));
+  for (const c of w.clubs || []) {
+    const division = Number(c.division || 3);
+    if (division in counts) counts[division]++;
+  }
+  if (divisionIds.some((division) => counts[division] < 4)) {
     // 仍可玩，但升降级可能跳过
     console.warn("存档联赛结构不完整，建议开新档体验完整五国联赛");
   }
@@ -1542,6 +1549,22 @@ function bindMainOnce() {
       closeModal();
       return;
     }
+    if (e.key === "Tab" && modalOpen) {
+      const focusable = [...$("#modal")?.querySelectorAll(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ) || []].filter((element) => element.offsetParent !== null);
+      if (focusable.length) {
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    }
     if (
       modalOpen &&
       activePlayerBrowseContext &&
@@ -1620,6 +1643,7 @@ function bindMainOnce() {
   $("#btn-ht-continue")?.addEventListener("click", () => finishHalfTime(true));
   $("#btn-ht-skip")?.addEventListener("click", () => finishHalfTime(false));
   $("#btn-live-tac-apply")?.addEventListener("click", () => onLiveTacApply());
+  $("#btn-live-sub-apply")?.addEventListener("click", () => onLiveSubApply());
   const bindLiveVal = (inputId, valId) => {
     $(inputId)?.addEventListener("input", (e) => {
       const el = $(valId);
@@ -1635,7 +1659,7 @@ function bindMainOnce() {
 // ---------- Refresh ----------
 function refreshAll() {
   if (!world) return;
-  ensureManagerCareer(world);
+  ensureActiveCareer(world);
   renderTopbar();
   renderDashboard();
   renderFinance();
@@ -1797,7 +1821,7 @@ function showNationModal(code, competitionId = null) {
   body.innerHTML = nationDetailHtml(code, competitionId, meta, record);
   $("#modal-card")?.classList.remove("search-modal");
   $("#modal-card")?.classList.add("wide");
-  $("#modal").classList.remove("hidden");
+  openSharedModal();
 }
 
 function renderNationalTeamsPanel(competitionId = null) {
@@ -2420,7 +2444,7 @@ function renderTraining() {
   const club = getUserClub(world);
   if (!club) return;
   const en = getLang() === "en";
-  const coachControlled = world.managementMode === "club_director";
+  const coachControlled = isFullyDelegated(world, club, "training");
   const t = ensureTraining(club);
   const sum = trainingSummary(club);
   const focusCopy = {
@@ -2587,7 +2611,7 @@ function renderTrainingPrep(club, en) {
       )
       .join("");
     modeBox.querySelectorAll("[data-prep-mode]").forEach((btn) => {
-      btn.disabled = world.managementMode === "club_director";
+      btn.disabled = coachControlled;
       btn.onclick = () => {
         const r = setTrainingMode(club, btn.dataset.prepMode, world.day);
         const msg = en ? r.msgEn || r.msg : r.msg;
@@ -2701,6 +2725,10 @@ function renderDelegationCenter(club, en) {
     .sort((a, b) => (b.ovr || 0) - (a.ovr || 0))
     .map((player) => `<option value="${escapeHtml(player.id)}"${delegation.locks.corePlayerId === player.id ? " selected" : ""}>${escapeHtml(player.name)} · ${player.ovr}</option>`)
     .join("");
+  const developmentPlan = delegation.developmentPlan;
+  const developmentPlanLine = developmentPlan
+    ? `<div class="delegation-status"><strong>${en ? "Development plan" : "当前培养计划"}：</strong>${escapeHtml(en ? developmentPlan.reasonEn : developmentPlan.reason)} · ${en ? "updated Day" : "更新于第"} ${developmentPlan.day}${en ? "" : " 天"}</div>`
+    : "";
   box.innerHTML = `<div class="row-between delegation-heading">
       <div><h2>${en ? "Responsibilities" : "职责委托中心"}</h2>
       <p class="hint">${en ? "Staff decisions use the actual squad, fitness, form, schedule and coach ability. Delegation adds no hidden match bonus." : "自动决策读取真实阵容、体能、状态、赛程与教练能力，不添加隐藏比赛加成。"}</p></div>
@@ -2714,6 +2742,7 @@ function renderDelegationCenter(club, en) {
     <div class="delegation-status">${coach
       ? `${en ? (directorMode ? "Head coach" : "Coaching team") : (directorMode ? "聘用主教练" : "执行教练")}：<strong>${escapeHtml(coach.name)}</strong> · ${en ? "Ability" : "能力"} ${coach.rating}`
       : (en ? "No head coach available; full delegation is unavailable." : "当前没有可执行职责的主教练，无法完全委托。")}</div>
+    ${developmentPlanLine}
     <div class="delegation-grid">${Object.keys(responsibilityOptions).map(selectHtml).join("")}</div>
     ${directorMode ? `<p class="hint delegation-director-note">${en ? "The employed head coach now controls training, selection, tactics and matchday decisions. You retain transfers, contracts, finance, facilities, youth intake and staff hiring." : "聘用主教练现负责训练、选人、战术与临场；你继续负责转会、合同、财政、设施、青训和聘帅。"}</p>` : ""}
     <div class="delegation-principles">
@@ -3204,7 +3233,7 @@ function showStaffModal(staffId, context = {}) {
     ?.addEventListener("click", () => {
       showClubModal(returnClubId);
     });
-  $("#modal").classList.remove("hidden");
+  openSharedModal();
   $("#modal-card").scrollTop = 0;
 }
 
@@ -3380,10 +3409,11 @@ function renderDashboard() {
   // 经理生涯摘要
   const careerBox = $("#manager-career-dash");
   if (careerBox) {
-    const mc = ensureManagerCareer(world);
+    const mc = ensureActiveCareer(world);
     const wr = managerWinRate(mc);
+    const directorMode = world.managementMode === "club_director";
     careerBox.innerHTML = `
-      <div><strong>${escapeHtml(world.managerName)}</strong> · ${en ? `${mc.seasons} seasons · ${mc.matches} matches` : `${mc.seasons} 赛季 · ${mc.matches} 场`}</div>
+      <div><strong>${escapeHtml(world.managerName)}</strong> · ${en ? (directorMode ? "Club director record" : "Manager record") : (directorMode ? "俱乐部经营记录" : "主教练战绩")} · ${en ? `${mc.seasons} seasons · ${mc.matches} matches` : `${mc.seasons} 赛季 · ${mc.matches} 场`}</div>
       <div class="muted" style="margin-top:0.25rem">${en ? `${mc.wins}W ${mc.draws}D ${mc.losses}L · Win ${wr}%` : `${mc.wins}胜 ${mc.draws}平 ${mc.losses}负 · 胜率 ${wr}%`}</div>
       <div class="muted">${en ? `${mc.titles} titles · ${mc.promotions} promotions · ${mc.cups} cups · ${mc.sacked} sackings` : `${mc.titles} 冠 · ${mc.promotions} 次升级 · ${mc.cups} 杯 · 解雇 ${mc.sacked}`}</div>
       ${
@@ -4271,7 +4301,7 @@ function showPlayerModal(playerId, context = {}) {
         .join("")}
     </div>
   `;
-  $("#modal").classList.remove("hidden");
+  openSharedModal();
   $("#modal-card").scrollTop = 0;
   bindPlayerBrowseControls();
   if (!isYouth) {
@@ -5057,7 +5087,8 @@ function nextMatchEligibility(club) {
 }
 
 function bindTacticsDragDrop() {
-  if (world?.managementMode === "club_director") return;
+  const club = getUserClub(world);
+  if (isFullyDelegated(world, club, "tactics")) return;
   const pitch = $("#pitch");
   const bench = $("#tac-bench");
   if (!pitch || pitch._tacBound) return;
@@ -5300,7 +5331,7 @@ function renderTactics() {
   const club = getUserClub(world);
   ensureTactics(club);
   const tac = club.tactics;
-  const coachControlled = world.managementMode === "club_director";
+  const coachControlled = isFullyDelegated(world, club, "tactics");
   renderTacPresets();
   const formSel = $("#formation-select");
   if (formSel) formSel.value = tac.formation;
@@ -5484,7 +5515,7 @@ function bindTacticsCoreButtons() {
   const pitch = $("#pitch");
   if (!pitch) return;
   pitch.querySelectorAll("[data-core-id]").forEach((btn) => {
-    btn.disabled = world?.managementMode === "club_director";
+    btn.disabled = isFullyDelegated(world, getUserClub(world), "tactics");
     btn.addEventListener("mousedown", (e) => e.stopPropagation());
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -5514,7 +5545,7 @@ function bindTacticsRoleSelects() {
   const pitch = $("#pitch");
   if (!pitch) return;
   pitch.querySelectorAll("[data-slot-role]").forEach((sel) => {
-    sel.disabled = world?.managementMode === "club_director";
+    sel.disabled = isFullyDelegated(world, getUserClub(world), "tactics");
     sel.addEventListener("mousedown", (e) => e.stopPropagation());
     sel.addEventListener("click", (e) => e.stopPropagation());
     sel.addEventListener("change", (e) => {
@@ -5538,11 +5569,28 @@ function bindTacticsRoleSelects() {
   });
 }
 
+let sharedModalReturnFocus = null;
+
+function openSharedModal() {
+  const modal = $("#modal");
+  if (!modal) return;
+  if (modal.classList.contains("hidden")) sharedModalReturnFocus = document.activeElement;
+  modal.classList.remove("hidden");
+  requestAnimationFrame(() => {
+    const first = modal.querySelector(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+    );
+    (first || $("#modal-card"))?.focus();
+  });
+}
+
 function closeModal() {
   if (restorePlayerBrowseParent(activePlayerBrowseContext)) return;
   activePlayerBrowseContext = null;
   $("#modal")?.classList.add("hidden");
   $("#modal-card")?.classList.remove("wide", "search-modal");
+  if (sharedModalReturnFocus?.isConnected) sharedModalReturnFocus.focus();
+  sharedModalReturnFocus = null;
 }
 
 function normalizeGlobalSearch(value) {
@@ -5749,7 +5797,7 @@ function openGlobalSearch() {
         autocomplete="off" spellcheck="false" placeholder="${escapeHtml(t("search.placeholder"))}" />
       <div id="global-search-results" class="global-search-results" aria-live="polite"></div>
     </div>`;
-  $("#modal").classList.remove("hidden");
+  openSharedModal();
   const input = $("#global-search-input");
   input?.addEventListener("input", () => renderGlobalSearchResults(input.value));
   renderGlobalSearchResults("");
@@ -6073,7 +6121,7 @@ function showClubModal(clubId) {
 
   $("#modal-card")?.classList.remove("search-modal");
   $("#modal-card")?.classList.add("wide");
-  $("#modal").classList.remove("hidden");
+  openSharedModal();
 }
 
 function renderTable() {
@@ -7257,7 +7305,7 @@ function showAdvanceSummary(events, days) {
         : ""
     }`;
   $("#modal-card")?.classList.remove("wide", "search-modal");
-  modal.classList.remove("hidden");
+  openSharedModal();
   return true;
 }
 
@@ -8155,10 +8203,13 @@ async function openMatch() {
 
   // 赛前简报 + 队内讲话：卡片 + 评论流（天气与开赛锁定一致）
   selectedPreTalk = "encourage";
+  const staffManaged = shouldStaffHandleMatchday(world, user);
   const brief = buildBriefingForFixture(next, user);
   const panel = $("#match-pre-brief");
   if (panel) {
-    const talkHtml = renderTeamTalkPicker("pre", selectedPreTalk, "pre-team-talk");
+    const talkHtml = staffManaged
+      ? `<div class="team-talk-panel coach-controlled"><div class="team-talk-head"><strong>${escapeHtml(getLang() === "en" ? "Head coach in charge" : "主教练负责比赛")}</strong><span class="muted team-talk-hint">${escapeHtml(getLang() === "en" ? "The head coach will choose the team talk and all matchday decisions." : "赛前讲话、临场战术与换人均由主教练决定。")}</span></div></div>`
+      : renderTeamTalkPicker("pre", selectedPreTalk, "pre-team-talk");
     if (brief) {
       panel.innerHTML = renderPrematchBriefHtml(brief, { compact: false }) + talkHtml;
       panel.classList.remove("hidden");
@@ -8166,7 +8217,7 @@ async function openMatch() {
       panel.innerHTML = talkHtml;
       panel.classList.remove("hidden");
     }
-    bindTeamTalkPicker(panel.querySelector(".team-talk-panel"));
+    if (!staffManaged) bindTeamTalkPicker(panel.querySelector(".team-talk-panel"));
   }
   if (brief) {
     for (const text of briefingLogLines(brief)) {
@@ -8437,7 +8488,11 @@ async function runMatch(mode) {
 
     // 读取赛前讲话（面板隐藏前）
     const prePanel = $("#match-pre-brief");
-    selectedPreTalk = getSelectedTeamTalk(prePanel, "pre-team-talk") || selectedPreTalk || "encourage";
+    const userClub = getUserClub(world);
+    const coachRunsMatch = shouldStaffHandleMatchday(world, userClub);
+    if (!coachRunsMatch) {
+      selectedPreTalk = getSelectedTeamTalk(prePanel, "pre-team-talk") || selectedPreTalk || "encourage";
+    }
 
     if (mode === "instant") {
       // 纯战报：同步算完 → 灌事件日志 → 直接赛后报告（不播球场动画）
@@ -8457,7 +8512,7 @@ async function runMatch(mode) {
           /* ignore */
         }
       }
-      const result = simulateMatch(world, pendingMatch, { teamTalkId: selectedPreTalk });
+      const result = simulateMatch(world, pendingMatch, coachRunsMatch ? {} : { teamTalkId: selectedPreTalk });
       let goalCursor = 0;
       for (const ev of result.events || []) {
         if (ev.type === "tick" || !ev.text) continue;
@@ -8485,7 +8540,9 @@ async function runMatch(mode) {
 
     matchState = createMatchSession(world, pendingMatch);
     // 赛前队内讲话 → 士气 + 上半场修正 + 媒体（事件经 playFirstHalf onEvent / 快速日志刷出）
-    const talkRes = applyTeamTalk(matchState, selectedPreTalk, "pre");
+    const talkRes = coachRunsMatch
+      ? applyManagedTeamTalk(matchState, "pre")
+      : applyTeamTalk(matchState, selectedPreTalk, "pre");
     if (talkRes.ok) toast(talkRes.msg);
     // 会话创建后阵容可能 autoLineup，刷新球场
     await ensureMatchPitch(true);
@@ -8599,10 +8656,12 @@ function hideHtPanel() {
 function openHalfTimePanel() {
   const panel = $("#match-ht-panel");
   if (!panel || !matchState) return;
+  const club = matchState.userClub;
+  const coachRunsMatch = shouldStaffHandleMatchday(world, club);
   panel.classList.remove("hidden");
+  panel.classList.toggle("coach-controlled", coachRunsMatch);
   setLiveTacBarVisible(false);
   pendingSubs = [];
-  const club = matchState.userClub;
   ensureTactics(club);
   const tac = club?.tactics || {};
   const htScoreEl = $("#match-ht-score");
@@ -8641,12 +8700,23 @@ function openHalfTimePanel() {
   renderHtFitnessBars();
   renderHtRoleReview();
   renderHtRoleEditors();
+  panel.querySelector(".ht-tactics")?.classList.toggle("hidden", coachRunsMatch);
+  panel.querySelector(".ht-subs")?.classList.toggle("hidden", coachRunsMatch);
+  $("#match-ht-roles")?.classList.toggle("hidden", coachRunsMatch);
+  const continueButton = $("#btn-ht-continue");
+  if (continueButton) {
+    continueButton.textContent = coachRunsMatch
+      ? (getLang() === "en" ? "Accept coach decisions · 2nd half" : "查看主教练安排 · 开始下半场")
+      : (getLang() === "en" ? "Start 2nd half" : "下半场开始");
+  }
+  $("#btn-ht-skip")?.classList.toggle("hidden", coachRunsMatch);
   const htFormEl = $("#ht-formation");
   if (htFormEl && !htFormEl.dataset.roleBound) {
     htFormEl.dataset.roleBound = "1";
     htFormEl.addEventListener("change", () => {
       if (!matchState?.userClub) return;
       const club = matchState.userClub;
+      if (shouldStaffHandleMatchday(world, club)) return;
       ensureTactics(club);
       const next = htFormEl.value;
       if (next && FORMATIONS[next] && next !== club.tactics.formation) {
@@ -8771,8 +8841,13 @@ function collectHtRoles() {
 function renderHtTeamTalk() {
   const box = $("#match-ht-talk");
   if (!box || !matchState) return;
-  const suggested = suggestHalfTimeTalk(matchState) || "encourage";
   const en = getLang() === "en";
+  if (shouldStaffHandleMatchday(world, matchState.userClub)) {
+    box.className = "team-talk-panel coach-controlled";
+    box.innerHTML = `<div class="team-talk-head"><strong>${escapeHtml(en ? "Head coach's dressing room" : "主教练更衣室安排")}</strong><span class="muted team-talk-hint">${escapeHtml(en ? "The coach will choose the team talk, tactics and substitutions from the score, fitness and available squad." : "主教练将依据比分、体能和可用阵容决定讲话、战术与换人。")}</span></div>`;
+    return;
+  }
+  const suggested = suggestHalfTimeTalk(matchState) || "encourage";
   // 直接写入内容，避免与 #match-ht-talk 的 panel 套娃
   box.className = "team-talk-panel";
   box.dataset.phase = "ht";
@@ -8900,6 +8975,9 @@ function renderHtFitnessBars() {
 function setLiveTacBarVisible(show) {
   const bar = $("#match-live-tac");
   if (!bar) return;
+  if (show && matchState?.userClub && shouldStaffHandleMatchday(world, matchState.userClub)) {
+    show = false;
+  }
   bar.classList.toggle("hidden", !show);
   if (show && matchState?.userClub) {
     ensureTactics(matchState.userClub);
@@ -8939,12 +9017,31 @@ function setLiveTacBarVisible(show) {
       const dv = $("#live-def-line-val");
       if (dv) dv.textContent = String(tac.defensiveLine ?? 3);
     }
+    const outSelect = $("#live-sub-out");
+    const inSelect = $("#live-sub-in");
+    const onField = getOnFieldPlayers(matchState.userClub, matchState);
+    const bench = getBenchPlayers(matchState.userClub, matchState);
+    if (outSelect) {
+      outSelect.innerHTML = `<option value="">${getLang() === "en" ? "Player off" : "选择换下"}</option>${onField
+        .map((player) => `<option value="${escapeHtml(player.id)}">↓ ${escapeHtml(player.name)} · ${positionLabel(player.pos)} · ${Math.round(player.fitness ?? 100)}%</option>`)
+        .join("")}`;
+    }
+    if (inSelect) {
+      inSelect.innerHTML = `<option value="">${getLang() === "en" ? "Player on" : "选择换上"}</option>${bench
+        .map((player) => `<option value="${escapeHtml(player.id)}">↑ ${escapeHtml(player.name)} · ${positionLabel(player.pos)} · ${player.ovr}</option>`)
+        .join("")}`;
+    }
   }
 }
 
 function onLiveTacApply() {
   if (!matchState?.userClub || matchState.finished) {
     toast(getLang() === "en" ? "Not available" : "当前无法调整");
+    return;
+  }
+  if (shouldStaffHandleMatchday(world, matchState.userClub)) {
+    toast(getLang() === "en" ? "Matchday decisions are managed by the head coach" : "比赛日决策由主教练负责");
+    setLiveTacBarVisible(false);
     return;
   }
   // 仅下半场 live 有意义；上半场/中场用 HT 面板
@@ -8996,6 +9093,34 @@ function onLiveTacApply() {
   );
 }
 
+function onLiveSubApply() {
+  if (!matchState?.userClub || matchState.finished) {
+    toast(getLang() === "en" ? "Substitution is not available" : "当前无法换人");
+    return;
+  }
+  if (shouldStaffHandleMatchday(world, matchState.userClub)) {
+    toast(getLang() === "en" ? "Substitutions are managed by the head coach" : "临场换人由主教练负责");
+    return;
+  }
+  const outId = $("#live-sub-out")?.value;
+  const inId = $("#live-sub-in")?.value;
+  if (!outId || !inId) {
+    toast(getLang() === "en" ? "Select both players" : "请选择换下和换上球员");
+    return;
+  }
+  const minute = Math.max(46, Math.min(89, Number(matchState.minute) || 46));
+  const before = matchState.events.length;
+  const result = applySubstitution(matchState, matchState.userClub, outId, inId, minute);
+  if (!result.ok) {
+    toast(result.msg || (getLang() === "en" ? "Substitution failed" : "换人失败"));
+    return;
+  }
+  const event = matchState.events.slice(before).find((item) => item.type === "sub");
+  if (event) appendMatchEvent(event);
+  toast(getLang() === "en" ? "Substitution queued for the next restart" : "换人已提交，将在下一比赛窗口生效");
+  setLiveTacBarVisible(true);
+}
+
 function renderHtSubSelects() {
   if (!matchState?.userClub) return;
   const club = matchState.userClub;
@@ -9038,6 +9163,10 @@ function renderHtSubsList() {
 
 function onHtAddSub() {
   if (!matchState?.userClub) return;
+  if (shouldStaffHandleMatchday(world, matchState.userClub)) {
+    toast(getLang() === "en" ? "Substitutions are managed by the head coach" : "换人由主教练负责");
+    return;
+  }
   const outId = $("#ht-sub-out")?.value;
   const inId = $("#ht-sub-in")?.value;
   if (!outId || !inId) {
@@ -9125,6 +9254,7 @@ function buildSecondHalfKickTip(applyOrders, orders) {
 
 async function finishHalfTime(applyOrders) {
   if (!matchState || matchState.finished || liveRunning) return;
+  const coachRunsMatch = shouldStaffHandleMatchday(world, matchState.userClub);
   hideHtPanel();
   setMatchBusy(true);
   matchPlayback.controlsEnabled = true;
@@ -9132,9 +9262,11 @@ async function finishHalfTime(applyOrders) {
   if (matchView?.setFrozen) matchView.setFrozen(false);
   updateMatchPlaybackUI();
 
-  const htTalk = getSelectedTeamTalk($("#match-ht-talk"), "ht-team-talk");
-  const htRoles = collectHtRoles();
-  const orders = applyOrders
+  const htTalk = coachRunsMatch ? null : getSelectedTeamTalk($("#match-ht-talk"), "ht-team-talk");
+  const htRoles = coachRunsMatch ? null : collectHtRoles();
+  const orders = coachRunsMatch
+    ? {}
+    : applyOrders
     ? {
         style: $("#ht-style")?.value,
         formation: $("#ht-formation")?.value,
@@ -9151,7 +9283,9 @@ async function finishHalfTime(applyOrders) {
         teamTalk: htTalk,
       };
 
-  const kickTip = buildSecondHalfKickTip(applyOrders, orders);
+  const kickTip = coachRunsMatch
+    ? (getLang() === "en" ? "Head coach decisions applied — 2nd half" : "主教练已完成中场安排 · 下半场开始")
+    : buildSecondHalfKickTip(applyOrders, orders);
   try {
     const live = !!matchState._liveMode;
     setMatchLiveState("live");
@@ -9852,9 +9986,10 @@ function renderCareerJobs() {
 function renderCareer() {
   const el = $("#career-panel");
   if (!el || !world) return;
-  const mc = ensureManagerCareer(world);
+  const mc = ensureActiveCareer(world);
   const club = getUserClub(world);
   const en = getLang() === "en";
+  const directorMode = world.managementMode === "club_director";
   if (club) ensureClubHonors(club);
   try {
     ensureManagerJob(world);
@@ -9871,7 +10006,7 @@ function renderCareer() {
     coolLeft = resignCooldownLeft(world) || 0;
   } catch (_) {}
   const job = world.managerJob || {};
-  const unemployed = job.status === "unemployed" || !!world.sacked;
+  const unemployed = !directorMode && (job.status === "unemployed" || !!world.sacked);
   const offers = (() => {
     try {
       return pendingJobOffers(world) || [];
@@ -9899,7 +10034,9 @@ function renderCareer() {
     )
     .join("");
 
-  const offerHtml = offers.length
+  const offerHtml = directorMode
+    ? `<p class="muted">${en ? "Manager job offers are inactive while you work as club director. Switch to head-coach mode before entering the manager job market." : "俱乐部经营身份不参与主教练职位市场；切换回主教练模式后才会处理执教邀请。"}</p>`
+    : offers.length
     ? `<div class="job-offer-list">${offers
         .map((o) => {
           const kindLabel =
@@ -9944,7 +10081,7 @@ function renderCareer() {
   el.innerHTML = `
     <div class="grid-2">
       <div class="card">
-        <h2>${en ? "Manager career" : "经理生涯"}</h2>
+        <h2>${en ? (directorMode ? "Club director career" : "Manager career") : (directorMode ? "俱乐部经营生涯" : "经理生涯")}</h2>
         <p><strong>${escapeHtml(world.managerName || "—")}</strong>
           · ${
             unemployed

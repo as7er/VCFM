@@ -25,6 +25,27 @@ export function emptyManagerCareer() {
   };
 }
 
+// 俱乐部经营模式使用独立职业档案，避免把体育总监的比赛结果冒充主教练战绩。
+export function emptyDirectorCareer() {
+  return {
+    seasons: 0,
+    matches: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    goalsFor: 0,
+    goalsAgainst: 0,
+    titles: 0,
+    promotions: 0,
+    relegations: 0,
+    cups: 0,
+    sacked: 0,
+    bestFinish: null,
+    trophies: [],
+    badges: [],
+  };
+}
+
 export function ensureManagerCareer(world) {
   if (!world.managerCareer) world.managerCareer = emptyManagerCareer();
   const c = world.managerCareer;
@@ -35,6 +56,23 @@ export function ensureManagerCareer(world) {
   return c;
 }
 
+export function ensureDirectorCareer(world) {
+  if (!world.directorCareer) world.directorCareer = emptyDirectorCareer();
+  const c = world.directorCareer;
+  for (const [key, fallback] of Object.entries(emptyDirectorCareer())) {
+    if (c[key] == null) c[key] = Array.isArray(fallback) ? [] : fallback;
+  }
+  if (!Array.isArray(c.trophies)) c.trophies = [];
+  if (!Array.isArray(c.badges)) c.badges = [];
+  return c;
+}
+
+export function ensureActiveCareer(world) {
+  return world?.managementMode === "club_director"
+    ? ensureDirectorCareer(world)
+    : ensureManagerCareer(world);
+}
+
 export function ensureClubHonors(club) {
   if (!club) return [];
   if (!Array.isArray(club.honors)) club.honors = [];
@@ -43,7 +81,7 @@ export function ensureClubHonors(club) {
 
 /** 用户完赛后更新生涯场次 */
 export function recordManagerMatch(world, myG, opG, isCup = false) {
-  const c = ensureManagerCareer(world);
+  const c = ensureActiveCareer(world);
   c.matches += 1;
   c.goalsFor += myG;
   c.goalsAgainst += opG;
@@ -56,7 +94,7 @@ export function recordManagerMatch(world, myG, opG, isCup = false) {
 }
 
 export function recordManagerSack(world) {
-  const c = ensureManagerCareer(world);
+  const c = ensureActiveCareer(world);
   c.sacked += 1;
 }
 
@@ -64,7 +102,7 @@ export function recordManagerSack(world) {
  * 赛季末：写入结算快照 + 俱乐部荣誉 + 经理奖杯
  */
 export function settleManagerSeason(world, userPos, userDiv, promoNews = []) {
-  const c = ensureManagerCareer(world);
+  const c = ensureActiveCareer(world);
   const club = world.clubs.find((x) => x.id === world.userClubId);
   if (!club) return null;
 

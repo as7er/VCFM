@@ -1,0 +1,13 @@
+{
+  "name": "vcfm",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/verify.mjs",
+    "test:full": "node scripts/verify.mjs --full",
+    "test:browser": "node scripts/browser-e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.55.0"
+  }
+}

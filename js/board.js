@@ -4,6 +4,7 @@ import { DIVISIONS } from "./data.js";
 import { formatMoney } from "./models.js";
 import { pushBoardInbox, pushBoardObjectiveMail } from "./inbox.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
+import { ensureActiveCareer } from "./career.js";
 
 const STATUS_LABEL = {
   active: "进行中",
@@ -374,8 +375,8 @@ export function sackManager(world, reason = "") {
   world.sackedDay = world.day;
   world.sackedReason = reason || "董事会对成绩失去耐心";
   try {
-    if (!world.managerCareer) world.managerCareer = { sacked: 0 };
-    world.managerCareer.sacked = (world.managerCareer.sacked || 0) + 1;
+    const career = ensureActiveCareer(world);
+    career.sacked = (career.sacked || 0) + 1;
   } catch (_) {
     /* ignore */
   }
@@ -385,10 +386,15 @@ export function sackManager(world, reason = "") {
   }
 
   world.news = world.news || [];
+  const roleLabel = world.managementMode === "club_director" ? "俱乐部经营负责人" : "经理";
   world.news.unshift({
     day: world.day,
-    text: `🚨 解雇通告：${world.managerName || "经理"} 被 ${user.name} 董事会解除职务。${world.sackedReason}`,
+    text: `🚨 解雇通告：${world.managerName || roleLabel} 被 ${user.name} 董事会解除${roleLabel}职务。${world.sackedReason}`,
   });
+  if (world.managementMode === "club_director") {
+    // 经营职位终止后回到主教练求职市场，避免沿用已失效的经营权限或陷入无职位死档。
+    world.managementMode = "head_coach";
+  }
 
   return {
     sacked: true,

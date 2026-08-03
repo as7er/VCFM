@@ -3,6 +3,8 @@
  * v154: 基于表现、对手、赛事类型的收入加成
  */
 
+import { DIVISIONS } from "./data.js";
+
 /**
  * 计算比赛日收入加成（完整版）
  *
@@ -125,7 +127,8 @@ function isChampionshipClash(world, club1, club2) {
  * 判断是否为保级大战
  */
 function isRelegationBattle(world, club1, club2) {
-  if (club1.division !== club2.division || club1.division >= 3) return false;
+  const relegate = DIVISIONS[club1?.division]?.relegate || 0;
+  if (club1.division !== club2.division || relegate <= 0) return false;
 
   const table = getSortedTableByDivision(world, club1.division);
   if (!table || table.length === 0) return false;
@@ -133,10 +136,10 @@ function isRelegationBattle(world, club1, club2) {
   const pos1 = table.findIndex(r => r.id === club1.id) + 1;
   const pos2 = table.findIndex(r => r.id === club2.id) + 1;
   const total = table.length;
-  const relegationZone = total - 2;
+  const dangerStart = Math.max(1, total - relegate - 1);
 
   // 双方都在保级区附近（倒数5名）
-  return pos1 > 0 && pos2 > 0 && pos1 >= relegationZone - 2 && pos2 >= relegationZone - 2;
+  return pos1 > 0 && pos2 > 0 && pos1 >= dangerStart && pos2 >= dangerStart;
 }
 
 /**

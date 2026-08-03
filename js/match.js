@@ -76,6 +76,7 @@ import { deriveMatchAnalysis } from "./match-analysis.js";
 import { recordMatchPlayingTime } from "./player-pathway.js";
 import {
   applyPreMatchDelegation,
+  isFullyDelegated,
   shouldStaffHandleMatchday,
 } from "./delegation.js";
 
@@ -375,6 +376,7 @@ function recomputeSides(state) {
   ensureLineupRoles(away);
   const hs = teamStrength(home);
   const as = teamStrength(away);
+  if (!state.preMatchStrength) state.preMatchStrength = { home: hs, away: as };
   let homeAtk = applyStyle(hs, home.tactics, "atk", away.tactics);
   let homeDef = applyStyle(hs, home.tactics, "def", away.tactics);
   let awayAtk = applyStyle(as, away.tactics, "atk", home.tactics);
@@ -387,6 +389,12 @@ function recomputeSides(state) {
   homeDef *= hRole.def;
   awayAtk *= aRole.atk;
   awayDef *= aRole.def;
+  // 记录未应用比赛情境前的基线。空间引擎也要消费同一套赛前/天气/教练/讲话修正，
+  // 否则用户场与后台概率场会对同一事实得出不同结果。
+  const simBase = {
+    home: { atk: homeAtk, def: homeDef },
+    away: { atk: awayAtk, def: awayDef },
+  };
   state._roleMods = { home: hRole, away: aRole };
 
   // 赛前准备加成
@@ -501,6 +509,13 @@ function recomputeSides(state) {
     awayDef *= Math.pow(0.86, aRed);
   }
 
+  // 保留讲话前的比赛情境基线。空间引擎需要看到天气、教练、阵容、赛事
+  // 情境和红牌，但不能让这些叠加项把不同讲话压到同一个上限，导致临场指令失去因果差异。
+  const simContext = {
+    home: { atk: homeAtk, def: homeDef },
+    away: { atk: awayAtk, def: awayDef },
+  };
+
   // 队内讲话（本半场）
   const talkH = state.teamTalkMods?.home;
   const talkA = state.teamTalkMods?.away;
@@ -529,6 +544,35 @@ function recomputeSides(state) {
   state.pace = paceTalk;
   state.homeXG = Math.max(0.15, (homeAtk / Math.max(awayDef, 1)) * 1.15 * paceTalk);
   state.awayXG = Math.max(0.12, (awayAtk / Math.max(homeDef, 1)) * 1.0 * paceTalk);
+
+  // 只把“额外比赛情境”传给空间引擎；阵型、风格和球员能力本身已经由 SimEngine
+  // 直接读取，避免重复叠加。该对象会在中场/临场调整后被重新计算并同步到引擎。
+  const talkMods = state.teamTalkMods || {};
+  const prepSetpiece = (prep) => 1 + (prep?.setpiece || 0) / 100;
+  const simContextMod = (value, base) => clamp(value / Math.max(base, 0.01), 0.84, 1.16);
+  state.simModifiers = {
+    home: {
+      atk: clamp(simContextMod(simContext.home.atk, simBase.home.atk) * (talkMods.home?.atk ?? 1), 0.75, 1.25),
+      def: clamp(simContextMod(simContext.home.def, simBase.home.def) * (talkMods.home?.def ?? 1), 0.75, 1.25),
+      chance: clamp(talkMods.home?.chance ?? 1, 0.82, 1.22),
+      poss: clamp(talkMods.home?.poss ?? 1, 0.82, 1.22),
+      foul: clamp(talkMods.home?.foul ?? 1, 0.82, 1.22),
+      pace: clamp(talkMods.home?.pace ?? 1, 0.82, 1.22),
+      fitness: clamp((state._fitW?.home || 1), 0.75, 1.25),
+      setpiece: clamp(prepSetpiece(homePrep), 0.82, 1.22),
+    },
+    away: {
+      atk: clamp(simContextMod(simContext.away.atk, simBase.away.atk) * (talkMods.away?.atk ?? 1), 0.75, 1.25),
+      def: clamp(simContextMod(simContext.away.def, simBase.away.def) * (talkMods.away?.def ?? 1), 0.75, 1.25),
+      chance: clamp(talkMods.away?.chance ?? 1, 0.82, 1.22),
+      poss: clamp(talkMods.away?.poss ?? 1, 0.82, 1.22),
+      foul: clamp(talkMods.away?.foul ?? 1, 0.82, 1.22),
+      pace: clamp(talkMods.away?.pace ?? 1, 0.82, 1.22),
+      fitness: clamp((state._fitW?.away || 1), 0.75, 1.25),
+      setpiece: clamp(prepSetpiece(awayPrep), 0.82, 1.22),
+    },
+  };
+  if (state.simEng) state.simEng.matchModifiers = state.simModifiers;
 }
 
 /**
@@ -627,14 +671,18 @@ export function createMatchSession(world, fixture) {
 }
 
 /**
- * 应用用户队内讲话：士气 + 本半场攻防修正 + 事件 + 媒体
+ * 应用队内讲话：士气 + 本半场攻防修正 + 事件 + 媒体
  * @param {"pre"|"ht"} phase
+ * @param {{ managed?: boolean }} [options]
  */
-export function applyTeamTalk(state, talkId, phase = "pre") {
+export function applyTeamTalk(state, talkId, phase = "pre", options = {}) {
   const club = state?.userClub;
   const talk = TEAM_TALKS[talkId];
   if (!club || !talk || !state.userSide) {
     return { ok: false, msg: "无法讲话" };
+  }
+  if (shouldStaffHandleMatchday(state.world, club) && !options.managed) {
+    return { ok: false, msg: "队内讲话已委托主教练" };
   }
   if (!talk.phases.includes(phase)) {
     return { ok: false, msg: "该讲话不适用当前阶段" };
@@ -696,6 +744,32 @@ export function applyTeamTalk(state, talkId, phase = "pre") {
     msg: `${phaseLabel}：${label}`,
     morale: dMorale,
   };
+}
+
+/** 俱乐部经营模式：按比分、阵型和球队状态由主教练选择讲话。 */
+export function applyManagedTeamTalk(state, phase = "pre") {
+  const club = state?.userClub;
+  if (!club || !shouldStaffHandleMatchday(state.world, club)) {
+    return { ok: false, msg: "当前不是主教练代管比赛" };
+  }
+  const t = club.tactics || {};
+  const myGoals = club === state.home ? state.hg : state.ag;
+  const oppGoals = club === state.home ? state.ag : state.hg;
+  let talkId = "encourage";
+  if (phase === "ht") {
+    if (myGoals < oppGoals) talkId = "demand";
+    else if (myGoals > oppGoals + 1) talkId = "solid";
+    else if (myGoals > oppGoals) talkId = "control";
+    else if (t.style === "defend") talkId = "solid";
+    else if (t.style === "possession") talkId = "control";
+  } else if (t.style === "defend") {
+    talkId = "solid";
+  } else if (t.style === "possession") {
+    talkId = "control";
+  } else if (t.style === "attack" || t.style === "counter") {
+    talkId = "encourage";
+  }
+  return applyTeamTalk(state, talkId, phase, { managed: true });
 }
 
 /** 推荐中场讲话（按比分，仅 UI 提示） */
@@ -1113,7 +1187,10 @@ function pushSimFlavor(state, item) {
 async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighlightPlan } = {}) {
   ensureSimEngine(state);
   wireSimInjuries(state);
-  if (fromMin >= 46) resyncSimAfterHalfTime(state);
+  if (fromMin === 46 || state._simNeedsResync) {
+    resyncSimAfterHalfTime(state);
+    state._simNeedsResync = false;
+  }
 
   // 直播 / 快速模拟：有高光播放器则录帧并细播；一键完赛等无 playHighlightPlan 不录
   const highlightStream = !!(onEvent && typeof playHighlightPlan === "function");
@@ -1614,7 +1691,7 @@ function tryInjury(state, minute) {
 
 function aiAutoSub(state, club, outId, minute) {
   const sk = sideKey(state, club);
-  if (state.subsUsed[sk] >= state.maxSubs) return;
+  if (state.subsUsed[sk] >= state.maxSubs) return { ok: false, msg: "换人次数已用尽" };
   const xiIds = new Set(club.tactics.lineup);
   const outP = club.players.find((p) => p.id === outId);
   const bench = club.players
@@ -1631,8 +1708,8 @@ function aiAutoSub(state, club, outId, minute) {
       return b.ovr + posMatch - (a.ovr + (outP && b.pos === outP.pos ? 5 : 0));
     });
   const inn = bench[0];
-  if (!inn) return;
-  applySubstitution(state, club, outId, inn.id, minute, true);
+  if (!inn) return { ok: false, msg: "没有合格替补" };
+  return applySubstitution(state, club, outId, inn.id, minute, true);
 }
 
 /**
@@ -1662,6 +1739,7 @@ export function applySubstitution(state, club, outId, inId, minute, silent = fal
   ensureLineupRoles(club);
   state.subsUsed[sk]++;
   state.injuredOut.delete(outId); // 已换下
+  if (state.simEng) state._simNeedsResync = true;
   recomputeSides(state);
 
   if (!silent) {
@@ -1764,22 +1842,32 @@ function midMatchCoachPrompt(state, minute) {
 export function aiHalfTime(state) {
   for (const club of [state.home, state.away]) {
     if (club.id === state.world.userClubId && !shouldStaffHandleMatchday(state.world, club)) continue;
+    const managedUser = club.id === state.world.userClubId;
     ensureTactics(club);
-    const opp = club === state.home ? state.away : state.home;
     const myG = club === state.home ? state.hg : state.ag;
     const opG = club === state.home ? state.ag : state.hg;
     const t = club.tactics;
+    const before = {
+      style: t.style,
+      pressing: t.pressing,
+      tempo: t.tempo,
+      width: t.width,
+      defensiveLine: t.defensiveLine,
+    };
+    let reason = "比分与场上结构稳定，保持原计划";
     if (myG < opG) {
       t.style = chance(0.5) ? "attack" : "balanced";
       t.pressing = Math.min(5, (t.pressing || 3) + 1);
       t.tempo = Math.min(5, (t.tempo || 3) + 1);
       t.defensiveLine = Math.min(5, (t.defensiveLine || 3) + 1);
       t.width = Math.min(5, (t.width || 3) + 1);
+      reason = "半场落后，提高压迫、节奏和防线以争取扳平";
     } else if (myG > opG + 1) {
       t.style = chance(0.4) ? "defend" : "possession";
       t.pressing = Math.max(1, (t.pressing || 3) - 1);
       t.defensiveLine = Math.max(1, (t.defensiveLine || 3) - 1);
       t.tempo = Math.max(1, (t.tempo || 3) - 1);
+      reason = "两球以上领先，降低比赛风险并保护体能";
     }
     // 换下疲劳/受伤
     const sk = sideKey(state, club);
@@ -1788,8 +1876,59 @@ export function aiHalfTime(state) {
     if (tired[0] && state.subsUsed[sk] < state.maxSubs && chance(0.55)) {
       aiAutoSub(state, club, tired[0].id, 46);
     }
+    if (managedUser) {
+      const changed = Object.keys(before).some((key) => before[key] !== t[key]);
+      pushEv(
+        state,
+        45,
+        "coach",
+        `🧠 主教练中场决定：${changed ? `${t.formation} · ${styleLabel(t.style)} · 压迫 ${t.pressing} · 节奏 ${t.tempo}` : "维持现有战术"}。${reason}`,
+        {
+          teamId: club.id,
+          managedDecision: true,
+          phase: "ht",
+          reason,
+          tactics: { ...t },
+        }
+      );
+    }
   }
   recomputeSides(state);
+}
+
+/** 主教练在 60'/75' 评估体能、比分和比赛风险，决定是否继续轮换。 */
+function coachInMatchReview(state, minute) {
+  for (const club of [state.home, state.away]) {
+    if (club.id !== state.world.userClubId || !shouldStaffHandleMatchday(state.world, club)) continue;
+    const sk = sideKey(state, club);
+    const xi = activeXi(state, club);
+    const tired = xi.filter((p) => (p.fitness || 100) < (minute >= 75 ? 62 : 55))
+      .sort((a, b) => (a.fitness || 0) - (b.fitness || 0));
+    const myG = club === state.home ? state.hg : state.ag;
+    const opG = club === state.home ? state.ag : state.hg;
+    let decision = "维持场上阵容，继续观察";
+    if (tired[0] && state.subsUsed[sk] < state.maxSubs) {
+      const result = aiAutoSub(state, club, tired[0].id, minute);
+      if (result?.ok) decision = `安排替补换下体能不足的 ${tired[0].name}`;
+    } else if (myG < opG && minute >= 60) {
+      club.tactics.style = "attack";
+      club.tactics.pressing = Math.min(5, (club.tactics.pressing || 3) + 1);
+      club.tactics.tempo = Math.min(5, (club.tactics.tempo || 3) + 1);
+      decision = "比分落后，增加压迫和进攻节奏";
+    } else if (myG > opG && minute >= 75) {
+      club.tactics.style = "defend";
+      club.tactics.pressing = Math.max(1, (club.tactics.pressing || 3) - 1);
+      club.tactics.tempo = Math.max(1, (club.tactics.tempo || 3) - 1);
+      decision = "比分领先，降低风险并保护体能";
+    }
+    pushEv(state, minute, "coach", `🧠 ${minute}' 主教练评估：${decision}`, {
+      teamId: club.id,
+      managedDecision: true,
+      phase: "matchday",
+      minute,
+    });
+    recomputeSides(state);
+  }
 }
 
 /**
@@ -1979,8 +2118,14 @@ export function buildRoleReview(state, opts = {}) {
  * 写入 events 供画面反馈；立即 recomputeSides
  */
 export function applyLiveTactics(state, orders = {}) {
-  const club = state.userClub;
+  const club = state?.userClub;
   if (!club || !state || state.finished) return { ok: false, msg: "无法调整" };
+  if (shouldStaffHandleMatchday(state.world, club)) {
+    return { ok: false, msg: "临场战术已委托主教练" };
+  }
+  if (isFullyDelegated(state.world, club, "tactics")) {
+    return { ok: false, msg: "战术已委托教练团队" };
+  }
   ensureTactics(club);
   const t = club.tactics;
   let changed = false;
@@ -2010,6 +2155,7 @@ export function applyLiveTactics(state, orders = {}) {
     ensureMatchLineup(club, { eligibleIds: state.eligiblePlayerIds?.[state.userSide] });
     ensureLineupRoles(club, { reset: true });
     formChanged = true;
+    if (state.simEng) state._simNeedsResync = true;
     changed = true;
   }
   if (!changed) return { ok: true, msg: "无变化", tactics: { ...t } };
@@ -2108,9 +2254,19 @@ function styleLabel(s) {
 /** 下半场 46–90 + 收尾事件（不含 finalize） */
 export async function playSecondHalf(state, opts = {}) {
   aiHalfTime(state);
+  if (state.userClub && shouldStaffHandleMatchday(state.world, state.userClub)) {
+    applyManagedTeamTalk(state, "ht");
+  }
   state.phase = "h2";
   if (shouldUseSim(state)) {
-    await simulatePeriodWithSim(state, 46, 90, opts);
+    const managed = state.userClub && shouldStaffHandleMatchday(state.world, state.userClub);
+    // 所有直播比赛按指挥窗口分段。玩家在 46–60' 高光播放时做出的场边调整，
+    // 会在尚未计算的 61–75' 生效；不再出现整半场预跑后的“假即时控制”。
+    await simulatePeriodWithSim(state, 46, 60, opts);
+    if (managed) coachInMatchReview(state, 60);
+    await simulatePeriodWithSim(state, 61, 75, opts);
+    if (managed) coachInMatchReview(state, 75);
+    await simulatePeriodWithSim(state, 76, 90, opts);
   } else {
     // 理论兜底：无用户参与的 state 走 AI 同步概率引擎（正常流程不会到这）
     runMinutesSync(state, 46, 90);
@@ -2607,7 +2763,8 @@ export function finalizeMatch(state) {
               fixture.roundLabel === "半决赛" ? "semi" :
               fixture.roundLabel === "1/4决赛" ? "quarter" : null,
     winStreak: homeWinStreak,
-    opponentStrength: away.strength || 50,
+    clubStrength: state.preMatchStrength?.home || teamStrength(home),
+    opponentStrength: state.preMatchStrength?.away || teamStrength(away),
     formBonus: getFormBonus(world, home.id),
     seasonPhaseBonus: getSeasonPhaseBonus(world),
   };
@@ -2881,7 +3038,10 @@ function runMinutesSync(state, fromMin, toMin) {
 export function simulateMatchSync(world, fixture, opts = {}) {
   const state = createMatchSession(world, fixture);
   const { home, away, weather, derby, bigMatch, isCup } = state;
-  if (opts.teamTalkId && state.userClub) {
+  const staffManaged = state.userClub && shouldStaffHandleMatchday(state.world, state.userClub);
+  if (staffManaged) {
+    applyManagedTeamTalk(state, "pre");
+  } else if (opts.teamTalkId && state.userClub) {
     applyTeamTalk(state, opts.teamTalkId, "pre");
   }
   pushEv(state, 0, "kickoff", "比赛开始！");
@@ -2895,18 +3055,38 @@ export function simulateMatchSync(world, fixture, opts = {}) {
     simulatePeriodWithSimSync(state, 1, 45);
     pushEv(state, 45, "ht", `中场休息 ${home.name} ${state.hg} - ${state.ag} ${away.name}`);
     aiHalfTime(state);
-    if (opts.htTalkId && state.userClub) {
+    if (staffManaged) {
+      applyManagedTeamTalk(state, "ht");
+    } else if (opts.htTalkId && state.userClub) {
       applyTeamTalk(state, opts.htTalkId, "ht");
     }
-    simulatePeriodWithSimSync(state, 46, 90);
+    if (staffManaged) {
+      simulatePeriodWithSimSync(state, 46, 60);
+      coachInMatchReview(state, 60);
+      simulatePeriodWithSimSync(state, 61, 75);
+      coachInMatchReview(state, 75);
+      simulatePeriodWithSimSync(state, 76, 90);
+    } else {
+      simulatePeriodWithSimSync(state, 46, 90);
+    }
   } else {
     runMinutesSync(state, 1, 45);
     pushEv(state, 45, "ht", `中场休息 ${home.name} ${state.hg} - ${state.ag} ${away.name}`);
     aiHalfTime(state);
-    if (opts.htTalkId && state.userClub) {
+    if (staffManaged) {
+      applyManagedTeamTalk(state, "ht");
+    } else if (opts.htTalkId && state.userClub) {
       applyTeamTalk(state, opts.htTalkId, "ht");
     }
-    runMinutesSync(state, 46, 90);
+    if (staffManaged) {
+      runMinutesSync(state, 46, 60);
+      coachInMatchReview(state, 60);
+      runMinutesSync(state, 61, 75);
+      coachInMatchReview(state, 75);
+      runMinutesSync(state, 76, 90);
+    } else {
+      runMinutesSync(state, 46, 90);
+    }
   }
   pushEv(state, 90, "ft", `全场结束 ${home.name} ${state.hg} - ${state.ag} ${away.name}`);
   return finalizeMatch(state);
@@ -2934,7 +3114,8 @@ export async function continueSecondHalf(state, orders = {}, opts = {}) {
       orders.teamTalk ||
       (orders.roles && orders.roles.length) ||
       (orders.subs && orders.subs.length));
-  if (state.userSide && hasOrders) {
+  const staffManaged = state.userClub && shouldStaffHandleMatchday(state.world, state.userClub);
+  if (state.userSide && hasOrders && !staffManaged) {
     applyUserHalfTime(state, orders);
   }
   // 中场调整事件立刻走 onEvent（直播横幅/评论/换人动画），不要等完场再刷日志
@@ -2971,7 +3152,9 @@ export function getOnFieldPlayers(club, state) {
  * 判断是否保级大战（需要排名数据）
  */
 function checkRelegationBattle(world, club) {
-  if (!world?.table || club.division >= 3) return false;
+  const divisionInfo = DIVISIONS[club?.division];
+  const relegate = divisionInfo?.relegate || 0;
+  if (!world?.table || relegate <= 0) return false;
   const table = Object.entries(world.table)
     .filter(([id, row]) => {
       const c = world.clubs.find(cl => cl.id === id);
@@ -2983,17 +3166,17 @@ function checkRelegationBattle(world, club) {
   const myPos = table.findIndex((r) => r.id === club.id) + 1;
   if (myPos === 0) return false;
   const total = table.length;
-  const relegationZone = total - 2; // 最后3名降级
+  const dangerStart = Math.max(1, total - relegate); // 降级区外再包含一个危险位
 
   // 位于倒数4名（降级区或危险区）
-  return myPos >= relegationZone - 1;
+  return myPos >= dangerStart;
 }
 
 /**
  * 判断是否争冠关键战
  */
 function checkTitleRace(world, club) {
-  if (!world?.table || club.division !== 1) return false;
+  if (!world?.table || DIVISIONS[club?.division]?.tier !== 1) return false;
   const table = Object.entries(world.table)
     .filter(([id, row]) => {
       const c = world.clubs.find(cl => cl.id === id);
