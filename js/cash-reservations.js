@@ -1,5 +1,7 @@
 /** Cash reserved by active transfer, renewal, and loan negotiations. */
 
+import { buildTransferPaymentPlan } from "./finance-obligations.js";
+
 export const ACTIVE_TRANSFER_NEGOTIATION_STATUSES = new Set([
   "market_search",
   "seller_review",
@@ -28,7 +30,12 @@ function nonNegativeMoney(value) {
 export function transferNegotiationCashCost(negotiation) {
   const years = Math.max(1, Math.min(5, Math.round(Number(negotiation?.years) || 3)));
   const wage = nonNegativeMoney(negotiation?.wage);
-  return nonNegativeMoney(negotiation?.fee) + Math.round(wage * years * 0.5);
+  const plan = buildTransferPaymentPlan(
+    negotiation?.fee,
+    negotiation?.upfrontPct,
+    negotiation?.installmentCount
+  );
+  return plan.upfront + Math.round(wage * years * 0.5);
 }
 
 export function activeTransferCashCommitments(world, buyerClubId, { excludeId = null } = {}) {

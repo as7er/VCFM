@@ -175,6 +175,17 @@ import {
 } from "./club-finance.js";
 import { clubCashAvailability } from "./cash-reservations.js";
 import {
+  buildTransferPaymentPlan,
+  processFinanceObligationsDay,
+  settleTransferAgreement,
+} from "./finance-obligations.js";
+import { ensureWorldSponsorships, settleSponsorshipSeason } from "./sponsorships.js";
+import {
+  processLeagueTransitionPayments,
+  registerLeagueTransitionFinance,
+} from "./league-transition-finance.js";
+import { settleWorldDebtSeason } from "./club-debt.js";
+import {
   autoRegisterClub,
   availableRegistrationContexts,
   developmentStatus,
@@ -632,6 +643,7 @@ export function advanceDay(world) {
   // 待业：日历仍推进（生成工作邀请），但不能经营旧队比赛
   if (world.sacked) {
     world.day += 1;
+    processFinanceObligationsDay(world);
     processTransferNegotiationsDay(world);
     processDealNegotiationsDay(world);
     ensureManagerJob(world);
@@ -646,6 +658,7 @@ export function advanceDay(world) {
   }
 
   world.day += 1;
+  processFinanceObligationsDay(world);
   const events = []; // 收集关键事件用于反馈
 
   // 转会窗开/关提示
@@ -928,6 +941,8 @@ export function finishSeason(world) {
 
   // 转播分成 + 名次奖金：须在升降级改写 division 之前，按本赛季最终积分榜
   const leaguePay = applySeasonLeagueFinance(world, getSortedTable);
+  const sponsorshipPay = settleSponsorshipSeason(world, getSortedTable);
+  const debtPay = settleWorldDebtSeason(world);
 
   // 先算本级排名与升降级（在年龄变化前，用本赛季积分）
   const promoNews = applyPromotionRelegation(world);
@@ -949,6 +964,18 @@ export function finishSeason(world) {
       day: world.day,
       text: `📺 联赛分红：第 ${up.pos} 名 · 转播分成 ${formatMoney(up.broadcast)} + 名次奖金 ${formatMoney(up.prize)} = ${formatMoney(up.total)}（已入账）`,
     });
+  }
+  const userSponsorPay = sponsorshipPay.find((item) => item.clubId === userClub.id);
+  if (userSponsorPay?.achieved) {
+    world.news.unshift({
+      day: world.day,
+      text: `商业赞助：联赛排名目标已达成，表现奖金 ${formatMoney(userSponsorPay.amount)} 已入账。`,
+    });
+  }
+  const userDebtPay = debtPay.filter((item) => item.clubId === userClub.id)
+    .reduce((sum, item) => sum + item.principal, 0);
+  if (userDebtPay > 0) {
+    world.news.unshift({ day: world.day, text: `赛季债务还本 ${formatMoney(userDebtPay)} 已从现金余额扣除。` });
   }
   mediaSeasonAwards(world, userClub, pos, divName);
   const boardSettle = settleBoardObjective(world, pos, getSortedTable);
@@ -1143,6 +1170,8 @@ export function startNextSeason(world) {
     }
     autoLineup(c);
   }
+  ensureWorldSponsorships(world);
+  const leagueTransitionPayments = processLeagueTransitionPayments(world);
   ensureWorldSeasonPlans(world);
 
   world.fixtures = generateAllDivisionFixtures(world.clubs);
@@ -1156,6 +1185,13 @@ export function startNextSeason(world) {
     day: 1,
     text: `📅 ${world.season} 赛季开始！${user.name} 征战${divName}。国内联赛、杯赛与大陆赛事赛程已生成。${expandedClubs ? ` 世界联赛新增 ${expandedClubs} 家俱乐部。` : ""}`,
   });
+  const userTransitionPayment = leagueTransitionPayments.find((item) => item.clubId === user.id);
+  if (userTransitionPayment) {
+    world.news.unshift({
+      day: 1,
+      text: `${userTransitionPayment.kind === "promotion" ? "升级筹备支持" : "降级缓冲金"} ${formatMoney(userTransitionPayment.amount)} 已入账。`,
+    });
+  }
   mediaSeasonKickoff(world, user, divName);
   ensureBoardObjective(world);
 
@@ -1322,7 +1358,10 @@ export function applyPromotionRelegation(world) {
 
   for (const move of moves) {
     const club = clubMap.get(move.id);
-    if (club) club.division = move.to;
+    if (club) {
+      registerLeagueTransitionFinance(world, club, move);
+      club.division = move.to;
+    }
   }
 
   const userMove = moves.find((m) => m.id === user.id);
@@ -1566,11 +1605,29 @@ function transferBetween(world, buyer, seller, player) {
   if (idx < 0) return { ok: false, msg: "球员不存在" };
   if (seller.players.length <= 14) return { ok: false, msg: "卖方阵容过少" };
   if (buyer.players.length >= 25) return { ok: false, msg: "买方阵容已满" };
+  if (buyer.finance?.compliance?.transferEmbargo || buyer.finance?.debtPlan?.transferEmbargo) {
+    return { ok: false, msg: "买方处于财政转会限制期" };
+  }
   const price = Math.round((player.value || estimateValue(player)) * (0.9 + rng() * 0.2));
-  if (clubTransferBudget(world, buyer) < price) return { ok: false, msg: "扣除运营储备后资金不足" };
-
-  recordFinanceEntry(buyer, -price, { category: "transfer", source: "ai-transfer", season: world.season, day: world.day });
-  recordFinanceEntry(seller, price, { category: "transfer", source: "ai-transfer", season: world.season, day: world.day });
+  const installmentCount = price >= 1_200_000 ? 2 : price >= 400_000 ? 1 : 0;
+  const paymentPlan = buildTransferPaymentPlan(price, installmentCount > 0 ? 65 : 100, installmentCount);
+  if (clubTransferBudget(world, buyer) < paymentPlan.upfront) {
+    return { ok: false, msg: "扣除运营储备和既有分期后资金不足" };
+  }
+  const transferId = `ai_${world.season}_${world.day}_${player.id}`;
+  settleTransferAgreement(world, {
+    transferId,
+    buyerClubId: buyer.id,
+    sellerClubId: seller.id,
+    player,
+    fee: price,
+    upfrontPct: paymentPlan.upfrontPct,
+    installmentCount: paymentPlan.installmentCount,
+    appearanceBonus: price >= 400_000 ? Math.round(price * 0.06) : 0,
+    appearanceTarget: 20,
+    sellOnPct: (player.age || 25) <= 23 ? 10 : 0,
+    source: "ai-transfer-upfront",
+  });
   seller.players.splice(idx, 1);
   player.clubId = buyer.id;
   player.morale = Math.min(100, (player.morale || 70) + 5);
@@ -1579,7 +1636,7 @@ function transferBetween(world, buyer, seller, player) {
   assignSquadNumbers(buyer);
   autoLineup(buyer);
   autoLineup(seller);
-  return { ok: true, price, player };
+  return { ok: true, price, upfront: paymentPlan.upfront, player };
 }
 
 /**
@@ -1668,7 +1725,7 @@ export function processAiTransfers(world) {
 
     // 买：使用阵容平衡系统确定需要补强的位置
     const transferBudget = clubTransferBudget(world, club);
-    if (club.finance?.debtPlan?.transferEmbargo) continue;
+    if (club.finance?.debtPlan?.transferEmbargo || club.finance?.compliance?.transferEmbargo) continue;
     const needPos = selectPositionToBuy(club.players, transferBudget);
     if (!needPos || transferBudget < 150000 || club.players.length >= 25) continue;
 
@@ -1758,6 +1815,9 @@ export function buyPlayer(world, playerId, fromClubId, options = {}) {
   if (!win.ok) return win;
 
   const user = getUserClub(world);
+  if (user.finance?.compliance?.transferEmbargo || user.finance?.debtPlan?.transferEmbargo) {
+    return { ok: false, msg: "俱乐部处于财政转会限制期" };
+  }
   const from = clubById(world, fromClubId);
   if (!from || from.id === user.id) return { ok: false, msg: "无效的卖家" };
   const idx = from.players.findIndex((p) => p.id === playerId);
@@ -1767,13 +1827,14 @@ export function buyPlayer(world, playerId, fromClubId, options = {}) {
   ensureStaff(user);
   ensureContract(player);
   const price = Math.round(player.value * (1.05 + rng() * 0.15) * scoutBuyMod(user));
-  const priceCash = clubCashAvailability(world, user, price);
+  const paymentPlan = buildTransferPaymentPlan(price, options.upfrontPct, options.installmentCount);
+  const priceCash = clubCashAvailability(world, user, paymentPlan.upfront);
   if (!priceCash.ok) {
     return {
       ok: false,
       msg: priceCash.reserved > 0
-        ? `未承诺现金不足：转会谈判已占用 ${formatMoney(priceCash.reserved)}，本交易需要 ${formatMoney(price)}`
-        : `资金不足，需要 ${formatMoney(price)}`,
+        ? `未承诺现金不足：转会谈判已占用 ${formatMoney(priceCash.reserved)}，本交易首付款需要 ${formatMoney(paymentPlan.upfront)}`
+        : `资金不足，需要首付款 ${formatMoney(paymentPlan.upfront)}`,
     };
   }
   if (user.players.length >= 28) return { ok: false, msg: "阵容已满（最多 28 人）" };
@@ -1788,19 +1849,30 @@ export function buyPlayer(world, playerId, fromClubId, options = {}) {
   }
   const newWage = Math.max(player.wage || 800, Math.round(estimateWage(player) * wageMult));
   const signingBonus = Math.round(newWage * years * 0.5);
-  const dealCash = clubCashAvailability(world, user, price + signingBonus);
+  const dealCash = clubCashAvailability(world, user, paymentPlan.upfront + signingBonus);
   if (!dealCash.ok) {
     return {
       ok: false,
       msg: dealCash.reserved > 0
-        ? `未承诺现金不足：转会谈判已占用 ${formatMoney(dealCash.reserved)}，转会费与签约奖需 ${formatMoney(price + signingBonus)}`
-        : `资金不足：转会费 ${formatMoney(price)} + 签约奖 ${formatMoney(signingBonus)}`,
+        ? `未承诺现金不足：转会谈判已占用 ${formatMoney(dealCash.reserved)}，首付款与签约奖需 ${formatMoney(paymentPlan.upfront + signingBonus)}`
+        : `资金不足：首付款 ${formatMoney(paymentPlan.upfront)} + 签约奖 ${formatMoney(signingBonus)}`,
     };
   }
 
-  recordFinanceEntry(user, -price, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
+  settleTransferAgreement(world, {
+    transferId: `legacy_${world.season}_${world.day}_${player.id}`,
+    buyerClubId: user.id,
+    sellerClubId: from.id,
+    player,
+    fee: price,
+    upfrontPct: paymentPlan.upfrontPct,
+    installmentCount: paymentPlan.installmentCount,
+    appearanceBonus: options.appearanceBonus,
+    appearanceTarget: options.appearanceTarget,
+    sellOnPct: options.sellOnPct,
+    source: "transfer-upfront",
+  });
   recordFinanceEntry(user, -signingBonus, { category: "transfer", source: "signing-bonus", season: world.season, day: world.day });
-  recordFinanceEntry(from, price, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
   from.players.splice(idx, 1);
   player.clubId = user.id;
   player.morale = Math.min(100, player.morale + 8);

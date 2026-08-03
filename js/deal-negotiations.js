@@ -35,6 +35,10 @@ function playerAtClub(club, playerId) {
   return club?.players?.find((player) => player.id === playerId) || null;
 }
 
+function hasTransferEmbargo(club) {
+  return !!(club?.finance?.debtPlan?.transferEmbargo || club?.finance?.compliance?.transferEmbargo);
+}
+
 function nextDecisionDay(world, random = Math.random) {
   return (world.day || 0) + (random() < 0.5 ? 1 : 2);
 }
@@ -273,6 +277,7 @@ function validateLoan(world, negotiation, { checkFunds = true } = {}) {
   }
   if (host && host.players.length >= 28) return { ok: false, reason: "租入方阵容已满" };
   if (!host && negotiation.kind !== "loan_out") return { ok: false, reason: "租入方俱乐部已不存在" };
+  if (host && hasTransferEmbargo(host)) return { ok: false, reason: "租入方处于财政转会限制期" };
   if (checkFunds && negotiation.payerClubId) {
     const payer = clubById(world, negotiation.payerClubId);
     if (!payer) return { ok: false, reason: "支付租借费的俱乐部已不存在" };
@@ -387,7 +392,7 @@ function findLoanHost(world, negotiation, owner, player, random) {
   const askingFee = money(negotiation.fee);
   const candidates = [];
   for (const host of world.clubs || []) {
-    if (host.id === owner.id || host.players.length >= 26) continue;
+    if (host.id === owner.id || host.players.length >= 26 || hasTransferEmbargo(host)) continue;
     const need = shouldBuyPosition(host.players || [], player.pos);
     const offerFee = Math.min(askingFee, Math.round(value * (0.045 + random() * 0.04 + (need ? 0.015 : 0))));
     const wageShare = clamp(0.62 + random() * 0.28 + (need ? 0.06 : 0), 0.5, 1);

@@ -35,6 +35,7 @@ async function assertNoHorizontalOverflow(page, label) {
 
 const navGroupByTab = {
   dashboard: "overview",
+  finance: "overview",
   career: "overview",
   squad: "team",
   training: "team",
@@ -66,13 +67,21 @@ try {
   }
   await assertNoHorizontalOverflow(page, "desktop dashboard");
 
-  for (const tab of ["squad", "training", "tactics", "fixtures", "career"]) {
+  for (const tab of ["finance", "squad", "training", "tactics", "fixtures", "career"]) {
     await openTab(page, tab);
     await page.waitForTimeout(100);
     await assertNoHorizontalOverflow(page, `desktop ${tab}`);
+    if (tab === "finance") {
+      await page.waitForSelector("#finance-sponsorship .sponsor-offer");
+      assert.equal(await page.locator("#finance-sponsorship .sponsor-offer").count(), 3);
+      assert.ok((await page.locator("#finance-debt").innerText()).trim().length > 0);
+      assert.ok((await page.locator("#finance-budget-projection").innerText()).trim().length > 0);
+    }
   }
 
   await page.setViewportSize({ width: 390, height: 844 });
+  await openTab(page, "finance");
+  await assertNoHorizontalOverflow(page, "mobile finance");
   await openTab(page, "dashboard");
   await assertNoHorizontalOverflow(page, "mobile dashboard");
   await page.locator("#btn-global-search").focus();
@@ -81,7 +90,7 @@ try {
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
 
-  console.log("Browser E2E passed: desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: finance rendering, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v191** · 职员国籍与任职履历 |
+| 当前版本 | **v192** · 真实俱乐部财政体系 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -25,11 +25,12 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 仓库：https://github.com/as7er/vcfm
 
-### v191 更新亮点
+### v192 更新亮点
 
-- 主教练、球探和队医现在拥有稳定国籍，资料页显示国旗及中英文国家名。
-- 职员资料记录俱乐部、职位和任职时期；解约、合同到期、自由签约与俱乐部间流动会自动闭合旧履历并建立新履历。
-- 旧存档会按职员 ID 稳定补齐国籍，并根据现有归属补记当前任职，不改变既有姓名、能力、合同或所属俱乐部。
+- 国内杯与洲际赛事现在按参赛、赛果和晋级结算奖金；比赛日收入拆分为门票、零售和接待，全部使用同一份赛前上座数据。
+- 转会支持首付、分期、出场奖金、二次转会分成和按 15–21 岁培养履历分配的青训补偿；未来付款会进入财政义务和安全预算。
+- 每家俱乐部拥有多年赞助合同与下一周期报价；升级支持、两季降级保护和赞助价值变化共同反映联赛层级变动。
+- 融资会真实记录本金、利率、周利息和赛季还本；工资或债务超出收入承受能力时，俱乐部将被限制买入、自由签约和租入球员。
 
 ### 快速开始
 
@@ -65,13 +66,13 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **阵容与球员**：体能、士气、伤病、停赛、潜力、号码、合同、赛季数据和近 5 场滚动状态；五档出场定位按逐场真实分钟滚动复核，训练、青训成长和年龄曲线会留下可解释的属性变化记录；联赛与洲际赛事使用 25 人报名名单、本土培养名额和 U21/B 名单资格。
 - **战术**：阵型、风格、压迫、节奏、宽度、防线、槽位角色、核心球员与战术板拖拽换位。
 - **训练与青训**：训练重点、强度、赛前备战、青训名单和球员成长；可委托助理教练按赛程与阵容短板安排。
-- **转会与合同**：夏窗、冬窗、续约、租借、自由球员和 AI 报价；买入、出售、续约与租借均按现实参与方逐阶段审核、还价或拒绝，成交前不会移动球员。
+- **转会与合同**：夏窗、冬窗、续约、租借、自由球员和 AI 报价；买入、出售、续约与租借均按现实参与方逐阶段审核，永久转会支持分期、出场奖金、二次转会分成和青训补偿。
 - **职员体系**：主教练、球探和队医拥有能力、工资、合同、稳定国籍与完整任职履历；可以签自由职员、接触其他俱乐部在职职员并支付补偿。
 - **经理生涯**：董事会目标、名望、成就与执教历史；被解雇或主动请辞后进入待业市场，也可能在任时收到更高水平球队邀请。
 
 ### 经营与体验
 
-- **财政**：用户与 AI 俱乐部共同结算门票、商业收入、转会、工资、设施、转播和排名奖金；AI 转会必须保留真实运营储备。
+- **财政**：用户与 AI 俱乐部共同使用统一总账，结算门票、零售、接待、赞助、赛事奖金、转会、工资、设施、转播和联赛层级补助；财政页显示未来应收应付、债务本金与利息、现金储备和合规状态。
 - **设施**：球场、训练、青训、医疗等设施可以升级，并影响收入、成长、恢复和伤病。
 - **信息系统**：信箱、世界新闻、媒体、球探任务、关注列表、球员对话、全局搜索和可连续浏览的球员资料。
 - **存档**：3 个槽位、自动保存、手动保存、JSON 导出与导入；旧存档会在加载时补齐新增字段。
@@ -149,7 +150,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v191** · staff nationality and employment history |
+| Current version | **v192** · realistic club finances |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -158,11 +159,12 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 Repository: https://github.com/as7er/vcfm
 
-### What's new in v191
+### What's new in v192
 
-- Managers, scouts, and physios now have stable nationalities, with flags and localized country names on staff profiles.
-- Staff profiles record club, role, and tenure. Releases, contract expiry, free-agent appointments, and moves between clubs close the previous entry and open the next one.
-- Existing saves deterministically fill nationality from the staff ID and record current employment from the existing club assignment, without changing names, ability, contracts, or clubs.
+- Domestic cups and continental competitions now pay participation, result, and progression awards. Matchday revenue separates tickets, retail, and hospitality while using the same pre-match attendance.
+- Permanent transfers support upfront payments, installments, appearance bonuses, sell-on clauses, and training compensation based on each player's recorded development from ages 15–21. Future payments feed the finance obligations and safe budget.
+- Every club has multi-season sponsorship contracts and offers for the next cycle. Promotion support, two-season parachute payments, and sponsor-value changes reflect movement between league levels.
+- Financing records principal, rates, weekly interest, and seasonal amortization. Clubs whose wages or debt exceed sustainable revenue can be restricted from purchases, free-agent signings, and incoming loans.
 
 ### Quick start
 
@@ -198,13 +200,13 @@ Repository: https://github.com/as7er/vcfm
 - **Squad and players**: fitness, morale, injuries, suspensions, potential, numbers, contracts, season statistics, and rolling five-match form. Five playing-time roles are reviewed against real match minutes, while training, academy growth, and ageing create explainable attribute-change records. League and continental matches use 25-player registrations, homegrown quotas, and U21/List B eligibility.
 - **Tactics**: formation, style, pressing, tempo, width, defensive line, slot roles, core player, and drag-and-drop changes.
 - **Training and youth**: training focus, intensity, match preparation, youth development, and assistant-manager delegation based on schedule and squad weaknesses.
-- **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Purchases, sales, renewals, and loans pass through the relevant clubs and players in staged reviews, counters, or rejections; players do not move before completion.
+- **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Purchases, sales, renewals, and loans use staged reviews, while permanent deals support installments, appearance bonuses, sell-on clauses, and training compensation.
 - **Staff**: managers, scouts, and physios have ability, wages, contracts, stable nationalities, and complete employment histories. Hire free agents or approach employed staff with compensation.
 - **Manager career**: board objectives, reputation, achievements, and job history. Sacking or resignation leads to unemployment and new offers; successful employed managers may receive prestige approaches.
 
 ### Operations and usability
 
-- **Finances**: user and AI clubs share the same ticket, commercial, transfer, wage, facility, broadcast, and prize ledger; AI transfer spending preserves a real operating reserve.
+- **Finances**: user and AI clubs share one ledger for tickets, retail, hospitality, sponsorships, competition awards, transfers, wages, facilities, broadcasts, and league-transition support. The finance page exposes future receivables/payables, debt principal and interest, cash reserves, and compliance status.
 - **Facilities**: stadium, training, youth, and medical upgrades affect revenue, development, recovery, and injuries.
 - **Information systems**: inbox, world news, media, scouting missions, shortlist, player talks, global search, and continuous player-profile browsing.
 - **Saves**: 3 slots, autosave, manual save, and JSON export/import. Older saves are migrated with defaults for new fields.

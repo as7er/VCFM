@@ -7,6 +7,11 @@ import {
   DIVISIONS,
   CONTINENTAL_COMPETITIONS,
 } from "./data.js";
+import {
+  ensureCompetitionParticipationFinance,
+  settleCompetitionFixtureFinance,
+  settleContinentalLeagueQualification,
+} from "./competition-finance.js";
 
 function rng() {
   return Math.random();
@@ -371,6 +376,7 @@ export function ensureCompetitions(world) {
       } else {
         refreshContinentalBranding(current, config);
       }
+      ensureCompetitionParticipationFinance(world, world.continentals[config.id]);
     }
   }
   world.cup = null;
@@ -591,6 +597,7 @@ function advanceContinental(world, tournament) {
     );
     if (!stageFixtures.length || !stageFixtures.every((f) => f.played)) return;
     const seeded = sortedContinentalTable(tournament).slice(0, 8).map((r) => r.id);
+    settleContinentalLeagueQualification(world, tournament, seeded);
     const entrants = [seeded[0], seeded[7], seeded[3], seeded[4], seeded[1], seeded[6], seeded[2], seeded[5]];
     addKnockoutRound(
       tournament,
@@ -623,6 +630,7 @@ function advanceContinental(world, tournament) {
 export function advanceCompetition(world, fixture) {
   const tournament = findCompetition(world, fixture);
   if (!tournament) return;
+  settleCompetitionFixtureFinance(world, tournament, fixture);
   if (tournament.type === "domestic") advanceDomesticCup(world, tournament);
   else advanceContinental(world, tournament);
 }

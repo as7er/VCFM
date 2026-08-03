@@ -19,6 +19,10 @@ function clubById(world, id) {
   return world?.clubs?.find((c) => c.id === id) || null;
 }
 
+function hasTransferEmbargo(club) {
+  return !!(club?.finance?.debtPlan?.transferEmbargo || club?.finance?.compliance?.transferEmbargo);
+}
+
 function findPlayerAnywhere(world, playerId) {
   for (const c of world.clubs || []) {
     const p = c.players.find((x) => x.id === playerId);
@@ -184,6 +188,7 @@ export function loanOutPlayer(world, playerId, opts = {}) {
     const candidates = world.clubs.filter(
       (c) =>
         c.id !== user.id &&
+        !hasTransferEmbargo(c) &&
         c.players.length < 26 &&
         c.players.length >= 12
     );
@@ -193,6 +198,7 @@ export function loanOutPlayer(world, playerId, opts = {}) {
     toClub = candidates[Math.floor(Math.random() * Math.min(5, candidates.length))];
   }
   if (toClub.players.length >= 28) return { ok: false, msg: "对方阵容已满" };
+  if (hasTransferEmbargo(toClub)) return { ok: false, msg: "接收方处于财政转会限制期" };
 
   const fee = opts.fee != null ? Math.max(0, Math.round(Number(opts.fee) || 0)) : loanFeeFor(player);
   const wageShare = opts.wageShare != null
@@ -241,6 +247,7 @@ export function loanInPlayer(world, playerId, fromClubId, opts = {}) {
   const user = clubById(world, world.userClubId);
   const from = clubById(world, fromClubId);
   if (!user || !from || from.id === user.id) return { ok: false, msg: "无效俱乐部" };
+  if (hasTransferEmbargo(user)) return { ok: false, msg: "俱乐部处于财政转会限制期" };
   const player = from.players.find((p) => p.id === playerId);
   if (!player) return { ok: false, msg: "球员不存在" };
   if (player.loan) return { ok: false, msg: "该球员已在租借中" };

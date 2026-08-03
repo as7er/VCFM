@@ -393,10 +393,24 @@ export function matchdayIncome(club, options = {}) {
   income = Math.min(income, incomeCap);
   if (capped) factors.push({ key: "cap", multiplier: null });
 
+  // Ancillary revenue uses the same locked pre-match attendance. Better stadiums
+  // support more retail points and hospitality seats; no result data is consumed.
+  const retailPerHead = 1.5 + st.level * 0.8;
+  const occasionSpend = isDerby || isTitleRace || cupStage === "final" ? 1.1 : 1;
+  const retailIncome = Math.round(attendance * retailPerHead * occasionSpend);
+  const hospitalitySeats = Math.round(attendance * (0.008 + st.level * 0.004));
+  const hospitalityYield = 18 + st.level * 8;
+  const hospitalityIncome = Math.round(hospitalitySeats * hospitalityYield * occasionSpend);
+  const totalIncome = income + retailIncome + hospitalityIncome;
+
   // options.detail === true 时返回明细（上座/容量），默认仍返回金额以兼容旧调用
   if (options.detail) {
     return {
       income,
+      ticketIncome: income,
+      retailIncome,
+      hospitalityIncome,
+      totalIncome,
       attendance,
       capacity,
       fill: Math.round(fill * 1000) / 10,

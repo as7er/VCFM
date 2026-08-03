@@ -13,6 +13,19 @@ import {
   transferNegotiationCashCost,
 } from "./cash-reservations.js";
 import { ensureContract } from "./contracts.js";
+import { clubFinanceObligationSnapshot, ensureFinanceObligations } from "./finance-obligations.js";
+import {
+  clubCommercialBreakdown,
+  ensureWorldSponsorships,
+  sponsorshipMarketWeekly,
+} from "./sponsorships.js";
+import {
+  clubDebtSnapshot,
+  ensureWorldDebts,
+  recordClubDebtInterest,
+  reduceOwnerDebt,
+  registerOwnerLoan,
+} from "./club-debt.js";
 
 export const CLUB_FINANCE_VERSION = 2;
 
@@ -26,12 +39,16 @@ export function ensureClubFinance(club, season = null) {
   const finance = club.finance;
   const seasonFields = [
     "seasonTicketIncome",
+    "seasonMatchdayIncome",
     "seasonCommercialIncome",
     "seasonWageOut",
     "seasonFacilityOut",
     "seasonTransferNet",
     "seasonBroadcastIncome",
     "seasonPrizeIncome",
+    "seasonCompetitionIncome",
+    "seasonLeagueTransitionIncome",
+    "seasonFinancingNet",
     "seasonHomeGates",
   ];
   for (const field of seasonFields) finance[field] = number(finance[field]);
@@ -41,7 +58,10 @@ export function ensureClubFinance(club, season = null) {
 }
 
 export function ensureWorldFinances(world) {
+  ensureFinanceObligations(world);
   for (const club of world?.clubs || []) ensureClubFinance(club, world?.season ?? null);
+  ensureWorldSponsorships(world);
+  ensureWorldDebts(world);
   return world;
 }
 
@@ -72,13 +92,7 @@ export function clubSquadWageBill(world, club) {
 
 /** Sponsorship and commercial income uses public league level and club strength only. */
 export function clubWeeklyCommercialIncome(club) {
-  const tier = DIVISIONS[club?.division || 3]?.tier || 3;
-  // Sponsorship is the stable base that complements volatile gates and annual TV/prize money.
-  // Lower leagues depend more heavily on local partners because their broadcast pools are small.
-  const base = { 1: 220_000, 2: 135_000, 3: 120_000 }[tier] || 120_000;
-  const power = Math.max(40, Math.min(85, number(club?.power) || 55));
-  const strengthFactor = 0.75 + ((power - 40) / 45) * 0.65;
-  return Math.round(base * strengthFactor);
+  return sponsorshipMarketWeekly(club);
 }
 
 export function clubWeeklyOperatingSnapshot(world, club) {
@@ -91,9 +105,12 @@ export function clubWeeklyOperatingSnapshot(world, club) {
   );
   const staffWage = staffWageBill(club);
   const facilityUpkeep = facilityWeeklyUpkeep(club) + number(youthFacilityInfo(club).upkeep);
-  const commercialIncome = clubWeeklyCommercialIncome(club);
+  const commercial = clubCommercialBreakdown(world, club);
+  const commercialIncome = commercial.total;
+  const debt = clubDebtSnapshot(world, club);
+  const debtInterest = debt.weeklyInterest;
   const wageOut = Math.round(squadWage + youthWage + staffWage);
-  const operatingOut = Math.round(wageOut + facilityUpkeep);
+  const operatingOut = Math.round(wageOut + facilityUpkeep + debtInterest);
   return {
     squadWage,
     youthWage,
@@ -101,6 +118,9 @@ export function clubWeeklyOperatingSnapshot(world, club) {
     wageOut,
     facilityUpkeep,
     commercialIncome,
+    commercial,
+    debtInterest,
+    debt,
     operatingOut,
     net: commercialIncome - operatingOut,
   };
@@ -113,8 +133,11 @@ export function settleWorldWeeklyFinances(world) {
     const finance = ensureClubFinance(club);
     const snapshot = clubWeeklyOperatingSnapshot(world, club);
     ensureFinanceLedger(club, finance, world.season);
-    recordFinanceEntry(club, snapshot.commercialIncome, {
-      category: "commercial", source: "weekly-settlement", season: world.season, day: world.day,
+    recordFinanceEntry(club, snapshot.commercial.sponsorship, {
+      category: "commercial", source: "sponsorship-weekly", season: world.season, day: world.day,
+    });
+    recordFinanceEntry(club, snapshot.commercial.otherCommercial, {
+      category: "commercial", source: "commercial-operations", season: world.season, day: world.day,
     });
     recordFinanceEntry(club, -snapshot.wageOut, {
       category: "wage", source: "weekly-settlement", season: world.season, day: world.day,
@@ -122,6 +145,8 @@ export function settleWorldWeeklyFinances(world) {
     recordFinanceEntry(club, -snapshot.facilityUpkeep, {
       category: "facility", source: "weekly-settlement", season: world.season, day: world.day,
     });
+    recordClubDebtInterest(world, club);
+    reviewClubFinancialCompliance(world, club, snapshot);
     finance.lastWeeklySettlement = { day: world.day || 0, ...snapshot };
     settlements.push({ clubId: club.id, money: club.money, ...snapshot });
   }
@@ -167,6 +192,7 @@ export function processAiDebtActions(world) {
             season: world.season,
             day: world.day,
           });
+          registerOwnerLoan(world, club, support);
           plan.ownerDebt += support;
           actions.push({ clubId: club.id, type: "owner-loan", amount: support });
         }
@@ -188,6 +214,7 @@ export function processAiDebtActions(world) {
           day: world.day,
         });
         plan.ownerDebt -= repayment;
+        reduceOwnerDebt(club, repayment);
         actions.push({ clubId: club.id, type: "owner-loan-repayment", amount: repayment });
       }
     }
@@ -205,21 +232,58 @@ export function clubTransferBudget(world, club, reserveWeeks = 8) {
   if (!club) return 0;
   const weekly = clubWeeklyOperatingSnapshot(world, club);
   const reserve = Math.max(0, weekly.operatingOut - weekly.commercialIncome) * reserveWeeks;
-  return Math.max(0, Math.floor(number(club.money) - reserve));
+  const obligations = clubFinanceObligationSnapshot(world, club.id);
+  const debt = clubDebtSnapshot(world, club);
+  return Math.max(0, Math.floor(
+    number(club.money) - reserve - obligations.scheduledPayable - debt.principalDueThisSeason
+  ));
+}
+
+export function reviewClubFinancialCompliance(world, club, operatingSnapshot = null) {
+  if (!club) return null;
+  const operating = operatingSnapshot || clubWeeklyOperatingSnapshot(world, club);
+  const debt = clubDebtSnapshot(world, club);
+  const annualRevenue = Math.max(
+    1,
+    operating.commercialIncome * 32 + Math.round(number(stadiumInfo(club)?.matchday) * 17)
+  );
+  const weeklyRevenue = annualRevenue / 32;
+  const wageRatio = operating.wageOut / Math.max(1, weeklyRevenue);
+  const debtRatio = debt.outstanding / annualRevenue;
+  const critical = debtRatio > 1.1 || (wageRatio > 1.2 && number(club.money) < 0);
+  const warning = critical || debtRatio > 0.75 || wageRatio > 0.9;
+  const compliance = {
+    version: 1,
+    status: critical ? "restricted" : warning ? "warning" : "compliant",
+    wageRatio: Math.round(wageRatio * 1000) / 10,
+    debtRatio: Math.round(debtRatio * 1000) / 10,
+    annualRevenue: Math.round(annualRevenue),
+    transferEmbargo: critical,
+    reviewedSeason: world?.season ?? null,
+    reviewedDay: world?.day ?? null,
+  };
+  ensureClubFinance(club).compliance = compliance;
+  return compliance;
 }
 
 export function recordMatchdayFinance(club, gate, day, season = null) {
   const finance = ensureClubFinance(club, season);
-  const income = Math.max(0, Math.round(number(gate?.income ?? gate)));
-  recordFinanceEntry(club, income, { category: "ticket", source: "matchday", season, day });
-  finance.lastTicketIncome = income;
+  const ticket = Math.max(0, Math.round(number(gate?.ticketIncome ?? gate?.income ?? gate)));
+  const retail = Math.max(0, Math.round(number(gate?.retailIncome)));
+  const hospitality = Math.max(0, Math.round(number(gate?.hospitalityIncome)));
+  recordFinanceEntry(club, ticket, { category: "ticket", source: "matchday-ticket", season, day });
+  recordFinanceEntry(club, retail, { category: "matchday", source: "matchday-retail", season, day });
+  recordFinanceEntry(club, hospitality, { category: "matchday", source: "matchday-hospitality", season, day });
+  finance.lastTicketIncome = ticket;
+  finance.lastMatchdayAncillaryIncome = retail + hospitality;
+  finance.lastMatchdayIncome = ticket + retail + hospitality;
   finance.lastTicketDay = day;
   finance.lastAttendance = gate?.attendance ?? null;
   finance.lastCapacity = gate?.capacity ?? null;
   finance.lastFillPct = gate?.fill ?? null;
   finance.lastTicketFactors = Array.isArray(gate?.factors) ? gate.factors : [];
   finance.seasonHomeGates += 1;
-  return income;
+  return { ticket, retail, hospitality, total: ticket + retail + hospitality };
 }
 
 export function ensureClubFinanceBudget(club) {
@@ -331,6 +395,8 @@ export function clubSeasonBudgetSnapshot(world, club) {
   const finance = ensureClubFinance(club, world.season);
   const plan = ensureClubFinanceBudget(club);
   const commitments = clubFinanceCommitments(world, club);
+  const obligations = clubFinanceObligationSnapshot(world, club.id);
+  const debt = clubDebtSnapshot(world, club);
   const operating = clubWeeklyOperatingSnapshot(world, club);
   const futureClubFixtures = (world.fixtures || []).filter(
     (fixture) =>
@@ -359,12 +425,18 @@ export function clubSeasonBudgetSnapshot(world, club) {
   const projectedCommittedWages = Math.round(commitments.weeklyWageIncrease * remainingWeeks);
   const projectedCommitmentCost = commitments.total + projectedCommittedWages;
   const projectedEndAfterCommitments = projectedEndCash - projectedCommitmentCost;
+  const projectedEndAfterObligations = projectedEndAfterCommitments
+    - obligations.dueThisSeasonPayable
+    + obligations.dueThisSeasonReceivable
+    - debt.principalDueThisSeason;
   const reserveCash = Math.round(
     (operating.operatingOut + commitments.weeklyWageIncrease) * plan.reserveWeeks
   );
-  const safeTransferCeiling = Math.max(0, Math.floor(number(club.money) - reserveCash - commitments.total));
+  const safeTransferCeiling = Math.max(0, Math.floor(
+    number(club.money) - reserveCash - commitments.total - obligations.scheduledPayable - debt.principalDueThisSeason
+  ));
   const plannedTransferBudget = Math.floor(safeTransferCeiling * (plan.transferShare / 100));
-  const projectedEndAfterBudget = projectedEndAfterCommitments - plannedTransferBudget;
+  const projectedEndAfterBudget = projectedEndAfterObligations - plannedTransferBudget;
   const projectedWeeklyRevenue =
     operating.commercialIncome +
     (remainingWeeks > 0 ? projectedTickets / remainingWeeks : 0) +
@@ -392,8 +464,12 @@ export function clubSeasonBudgetSnapshot(world, club) {
     projectedCommittedWages,
     projectedCommitmentCost,
     projectedEndAfterCommitments,
+    projectedEndAfterObligations,
     reserveCash,
     commitments,
+    obligations,
+    debt,
+    compliance: reviewClubFinancialCompliance(world, club, operating),
     safeTransferCeiling,
     plannedTransferBudget,
     projectedEndAfterBudget,
@@ -406,6 +482,7 @@ export function resetClubSeasonFinance(club, season = null) {
   const finance = ensureClubFinance(club);
   for (const field of [
     "seasonTicketIncome",
+    "seasonMatchdayIncome",
     "seasonCommercialIncome",
     "seasonHomeGates",
     "seasonWageOut",
@@ -413,6 +490,9 @@ export function resetClubSeasonFinance(club, season = null) {
     "seasonTransferNet",
     "seasonBroadcastIncome",
     "seasonPrizeIncome",
+    "seasonCompetitionIncome",
+    "seasonLeagueTransitionIncome",
+    "seasonFinancingNet",
   ]) {
     finance[field] = 0;
   }

@@ -18,6 +18,7 @@ import { isTransferWindowOpen, transferWindowLabel } from "./transfers.js";
 import { POS_LABEL } from "./data.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { clubTransferBudget } from "./club-finance.js";
+import { buildTransferPaymentPlan, settleTransferAgreement } from "./finance-obligations.js";
 import { shouldBuyPosition } from "./squad-balance.js";
 import {
   ACTIVE_DEAL_NEGOTIATION_STATUSES,
@@ -57,6 +58,36 @@ function signingBonus(wage, years) {
   return Math.round(money(wage) * clamp(Math.round(Number(years) || 3), 1, 5) * 0.5);
 }
 
+function transferPaymentTerms(
+  fee,
+  { upfrontPct = 100, installmentCount = 0, appearanceBonus = 0, appearanceTarget = 20, sellOnPct = 0 } = {}
+) {
+  const plan = buildTransferPaymentPlan(fee, upfrontPct, installmentCount);
+  return {
+    upfrontPct: plan.upfrontPct,
+    installmentCount: plan.installmentCount,
+    appearanceBonus: money(appearanceBonus),
+    appearanceTarget: Math.max(5, Math.min(50, Math.round(Number(appearanceTarget) || 20))),
+    sellOnPct: Math.max(0, Math.min(30, Math.round(Number(sellOnPct) || 0))),
+  };
+}
+
+function aiTransferPaymentTerms(fee, random = Math.random) {
+  const total = money(fee);
+  // Keep ordinary one-million-class deals cash-settled for legacy negotiation flows;
+  // meaningful multi-million AI bids expose the same structured terms as the user UI.
+  if (total < 1_200_000) return transferPaymentTerms(total);
+  const installmentCount = total >= 4_000_000 ? 3 : total >= 1_200_000 ? 2 : 1;
+  const upfrontPct = installmentCount >= 2 ? 60 : 70;
+  return transferPaymentTerms(total, {
+    upfrontPct,
+    installmentCount,
+    appearanceBonus: Math.round(total * (0.05 + random() * 0.05)),
+    appearanceTarget: 20,
+    sellOnPct: 8 + Math.floor(random() * 5),
+  });
+}
+
 function negotiationId(world) {
   const serial = (Number(world._transferNegotiationSerial) || 0) + 1;
   world._transferNegotiationSerial = serial;
@@ -69,6 +100,10 @@ function clubById(world, id) {
 
 function playerAtClub(club, playerId) {
   return club?.players?.find((player) => player.id === playerId) || null;
+}
+
+function hasTransferEmbargo(club) {
+  return !!(club?.finance?.debtPlan?.transferEmbargo || club?.finance?.compliance?.transferEmbargo);
 }
 
 function setStatus(world, negotiation, status, extra = {}) {
@@ -158,6 +193,7 @@ function validateLiveDeal(
   if (!buyer || !seller || buyer.id === seller.id) {
     return { ok: false, reason: "交易俱乐部已不存在" };
   }
+  if (hasTransferEmbargo(buyer)) return { ok: false, reason: "买方处于财政转会限制期" };
   const player = playerAtClub(seller, negotiation.playerId);
   if (!player) return { ok: false, reason: "球员已经离开卖方俱乐部" };
   if (player.loan) return { ok: false, reason: "球员当前处于租借关系，无法完成永久转会" };
@@ -193,7 +229,17 @@ export function submitTransferNegotiation(
   world,
   playerId,
   sellerClubId,
-  { fee, years = 3, wage, random = Math.random } = {}
+  {
+    fee,
+    years = 3,
+    wage,
+    upfrontPct = 100,
+    installmentCount = 0,
+    appearanceBonus = 0,
+    appearanceTarget = 20,
+    sellOnPct = 0,
+    random = Math.random,
+  } = {}
 ) {
   ensureTransferNegotiations(world);
   if (!world || world.sacked) return { ok: false, msg: "你当前无法操作转会" };
@@ -203,6 +249,7 @@ export function submitTransferNegotiation(
   const buyer = clubById(world, world.userClubId);
   const seller = clubById(world, sellerClubId);
   if (!buyer || !seller || buyer.id === seller.id) return { ok: false, msg: "无效的卖方俱乐部" };
+  if (hasTransferEmbargo(buyer)) return { ok: false, msg: "俱乐部处于财政转会限制期" };
   const player = playerAtClub(seller, playerId);
   if (!player) return { ok: false, msg: "球员已不在该俱乐部" };
   if (player.loan) return { ok: false, msg: "租借球员不可进行永久转会谈判" };
@@ -223,14 +270,23 @@ export function submitTransferNegotiation(
   if (offeredFee <= 0) return { ok: false, msg: "转会费报价必须大于 0" };
   if (offeredWage <= 0) return { ok: false, msg: "合同周薪必须大于 0" };
   const bonus = signingBonus(offeredWage, contractYears);
+  const paymentTerms = transferPaymentTerms(offeredFee, {
+    upfrontPct,
+    installmentCount,
+    appearanceBonus,
+    appearanceTarget,
+    sellOnPct,
+  });
+  const draft = { fee: offeredFee, wage: offeredWage, years: contractYears, ...paymentTerms };
   const reserved = activeTransferCashCommitments(world, buyer.id) +
     activeDealCashCommitments(world, buyer.id);
-  if ((Number(buyer.money) || 0) - reserved < offeredFee + bonus) {
+  const immediateCost = transferNegotiationCashCost(draft);
+  if ((Number(buyer.money) || 0) - reserved < immediateCost) {
     return {
       ok: false,
       msg: reserved > 0
-        ? `未承诺现金不足：进行中谈判已占用 ${formatMoney(reserved)}，新报价与签约奖还需 ${formatMoney(offeredFee + bonus)}`
-        : `资金不足：报价与签约奖合计需要 ${formatMoney(offeredFee + bonus)}`,
+        ? `未承诺现金不足：进行中谈判已占用 ${formatMoney(reserved)}，首付款与签约奖还需 ${formatMoney(immediateCost)}`
+        : `资金不足：首付款与签约奖合计需要 ${formatMoney(immediateCost)}`,
     };
   }
 
@@ -248,6 +304,7 @@ export function submitTransferNegotiation(
     initialWage: offeredWage,
     wage: offeredWage,
     signingBonus: bonus,
+    ...paymentTerms,
     status: "club_review",
     createdDay: world.day || 0,
     updatedDay: world.day || 0,
@@ -312,6 +369,7 @@ function validateSaleDeal(
   if (!buyer || buyer.id === listing.seller.id) {
     return { ok: false, reason: "买方俱乐部已不存在" };
   }
+  if (hasTransferEmbargo(buyer)) return { ok: false, reason: "买方处于财政转会限制期" };
   if ((buyer.players || []).length >= MAX_SQUAD) {
     return { ok: false, reason: "买方一线队已经满员" };
   }
@@ -472,6 +530,11 @@ function setSaleOffer(world, negotiation, buyer, fee, terms, reason, sourceBidId
     years: terms.years,
     wage: terms.wage,
     signingBonus: terms.signingBonus,
+    upfrontPct: terms.upfrontPct,
+    installmentCount: terms.installmentCount,
+    appearanceBonus: terms.appearanceBonus,
+    appearanceTarget: terms.appearanceTarget,
+    sellOnPct: terms.sellOnPct,
     buyerOfferFee: money(fee),
     decisionDay: null,
     reason,
@@ -490,8 +553,11 @@ function findSaleBuyer(world, negotiation, seller, player, random) {
     .sort((a, b) => (b.fee || 0) - (a.fee || 0))[0];
   if (pendingBid) {
     const buyer = clubById(world, pendingBid.buyerId);
-    if (buyer) {
-      const terms = saleContractTerms(buyer, seller, player, random);
+    if (buyer && !hasTransferEmbargo(buyer)) {
+      const terms = {
+        ...saleContractTerms(buyer, seller, player, random),
+        ...aiTransferPaymentTerms(pendingBid.fee, random),
+      };
       const candidate = {
         ...negotiation,
         buyerClubId: buyer.id,
@@ -511,12 +577,15 @@ function findSaleBuyer(world, negotiation, seller, player, random) {
   if (asking > value * 1.65) return null;
   const candidates = [];
   for (const buyer of world.clubs || []) {
-    if (buyer.id === seller.id || (buyer.players || []).length >= 26) continue;
-    const terms = saleContractTerms(buyer, seller, player, random);
+    if (buyer.id === seller.id || (buyer.players || []).length >= 26 || hasTransferEmbargo(buyer)) continue;
     const need = shouldBuyPosition(buyer.players || [], player.pos);
     const marketOffer = Math.round(value * (0.84 + random() * 0.22 + (need ? 0.07 : 0)));
     const fee = Math.min(asking, marketOffer);
     if (fee < Math.min(asking * 0.66, value * 0.78)) continue;
+    const terms = {
+      ...saleContractTerms(buyer, seller, player, random),
+      ...aiTransferPaymentTerms(fee, random),
+    };
     const candidate = { ...negotiation, buyerClubId: buyer.id, fee, ...terms };
     const other = activeTransferCashCommitments(world, buyer.id, { excludeId: negotiation.id }) +
       activeDealCashCommitments(world, buyer.id);
@@ -615,9 +684,20 @@ function completeSaleNegotiation(world, negotiation) {
 
   const fee = money(negotiation.fee);
   const bonus = signingBonus(negotiation.wage, negotiation.years);
-  recordFinanceEntry(buyer, -fee, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
+  const settlement = settleTransferAgreement(world, {
+    buyerClubId: buyer.id,
+    sellerClubId: seller.id,
+    player,
+    fee,
+    upfrontPct: negotiation.upfrontPct,
+    installmentCount: negotiation.installmentCount,
+    appearanceBonus: negotiation.appearanceBonus,
+    appearanceTarget: negotiation.appearanceTarget,
+    sellOnPct: negotiation.sellOnPct,
+    transferId: negotiation.id,
+    source: "transfer-upfront",
+  });
   recordFinanceEntry(buyer, -bonus, { category: "transfer", source: "signing-bonus", season: world.season, day: world.day });
-  recordFinanceEntry(seller, fee, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
 
   seller.players.splice(sellerIndex, 1);
   player.clubId = buyer.id;
@@ -657,7 +737,7 @@ function completeSaleNegotiation(world, negotiation) {
   });
   return {
     ok: true,
-    msg: `已售出 ${player.name} 至 ${buyer.name}，收入 ${formatMoney(fee)}`,
+    msg: `已售出 ${player.name} 至 ${buyer.name}，总价 ${formatMoney(fee)} · 已收 ${formatMoney(settlement.upfront)}`,
     negotiation,
   };
 }
@@ -690,7 +770,10 @@ export function acceptIncomingTransferOffer(
     return { ok: false, msg: "该球员已有进行中的续约或租借谈判" };
   }
   const existing = findActiveSaleNegotiation(world, playerId);
-  const terms = saleContractTerms(buyer, seller, player, random);
+  const terms = {
+    ...saleContractTerms(buyer, seller, player, random),
+    ...aiTransferPaymentTerms(fee, random),
+  };
   const negotiation = {
     id: negotiationId(world),
     kind: "user_sell",
@@ -742,9 +825,20 @@ function completeBuyNegotiation(world, negotiation) {
 
   const fee = money(negotiation.fee);
   const bonus = signingBonus(negotiation.wage, negotiation.years);
-  recordFinanceEntry(buyer, -fee, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
+  const settlement = settleTransferAgreement(world, {
+    buyerClubId: buyer.id,
+    sellerClubId: seller.id,
+    player,
+    fee,
+    upfrontPct: negotiation.upfrontPct,
+    installmentCount: negotiation.installmentCount,
+    appearanceBonus: negotiation.appearanceBonus,
+    appearanceTarget: negotiation.appearanceTarget,
+    sellOnPct: negotiation.sellOnPct,
+    transferId: negotiation.id,
+    source: "transfer-upfront",
+  });
   recordFinanceEntry(buyer, -bonus, { category: "transfer", source: "signing-bonus", season: world.season, day: world.day });
-  recordFinanceEntry(seller, fee, { category: "transfer", source: "transfer-fee", season: world.season, day: world.day });
 
   seller.players.splice(sellerIndex, 1);
   player.clubId = buyer.id;
@@ -779,7 +873,7 @@ function completeBuyNegotiation(world, negotiation) {
   });
   return {
     ok: true,
-    msg: `成功签下 ${player.name}：转会费 ${formatMoney(fee)} + 签约奖 ${formatMoney(bonus)}`,
+    msg: `成功签下 ${player.name}：总价 ${formatMoney(fee)} · 首付 ${formatMoney(settlement.upfront)} + 签约奖 ${formatMoney(bonus)}`,
     negotiation,
   };
 }

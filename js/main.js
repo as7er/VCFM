@@ -30,11 +30,17 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=191";
+import { nationFlagHtml } from "./flags.js?v=192";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
 import { clubCashAvailability } from "./cash-reservations.js";
+import { buildTransferPaymentPlan } from "./finance-obligations.js";
+import { acceptSponsorshipOffer, sponsorshipSnapshot } from "./sponsorships.js";
+import {
+  repayClubFinancing,
+  requestClubFinancing,
+} from "./club-debt.js";
 import {
   ensureCompetitions,
   sortedContinentalTable,
@@ -318,7 +324,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=191";
+} from "./avatar.js?v=192";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -406,7 +412,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=191").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=192").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1194,6 +1200,57 @@ function bindMainOnce() {
   $("#finance-category-filter")?.addEventListener("change", (event) => {
     financeLedgerFilter = event.target.value || "all";
     renderFinance();
+  });
+  $("#finance-sponsorship")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-sponsor-offer]");
+    if (!button || !world) return;
+    const res = acceptSponsorshipOffer(world, world.userClubId, button.dataset.sponsorOffer);
+    toast(getLang() === "en" ? (res.ok ? "Sponsorship selected" : res.msg) : res.msg);
+    if (res.ok) {
+      saveGame(world);
+      refreshAll();
+    }
+  });
+  $("#btn-finance-borrow")?.addEventListener("click", () => {
+    if (!world) return;
+    const club = getUserClub(world);
+    const budget = clubSeasonBudgetSnapshot(world, club);
+    const en = getLang() === "en";
+    if (budget.debt.headroom < 100_000) {
+      toast(en ? "No borrowing headroom" : "当前没有可用融资额度");
+      return;
+    }
+    const amountIn = prompt(
+      en ? `Borrowing headroom ${formatMoney(budget.debt.headroom)}\nAmount:` : `可用融资额度 ${formatMoney(budget.debt.headroom)}\n请输入融资金额：`,
+      String(Math.min(budget.debt.headroom, Math.max(100_000, Math.round(budget.debt.headroom / 2))))
+    );
+    if (amountIn == null) return;
+    const termIn = prompt(en ? "Term in seasons (1–3):" : "期限（1–3 个赛季）：", "2");
+    if (termIn == null) return;
+    const res = requestClubFinancing(world, club.id, parseMoneyInput(amountIn), parseInt(termIn, 10));
+    toast(en ? (res.ok ? "Financing received" : res.msg) : res.msg);
+    if (res.ok) {
+      saveGame(world);
+      refreshAll();
+    }
+  });
+  $("#finance-debt")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-debt-repay]");
+    if (!button || !world) return;
+    const club = getUserClub(world);
+    const debt = club.finance?.debt?.facilities?.find((item) => item.id === button.dataset.debtRepay);
+    if (!debt) return;
+    const amountIn = prompt(
+      getLang() === "en" ? `Outstanding ${formatMoney(debt.balance)}\nRepayment:` : `未偿本金 ${formatMoney(debt.balance)}\n请输入还款金额：`,
+      String(Math.min(Number(club.money) || 0, Number(debt.balance) || 0))
+    );
+    if (amountIn == null) return;
+    const res = repayClubFinancing(world, club.id, debt.id, parseMoneyInput(amountIn));
+    toast(getLang() === "en" ? (res.ok ? "Debt repaid" : res.msg) : res.msg);
+    if (res.ok) {
+      saveGame(world);
+      refreshAll();
+    }
   });
   $("#finance-reserve-weeks")?.addEventListener("input", (event) => {
     const club = world ? getUserClub(world) : null;
@@ -3566,18 +3623,18 @@ function renderDashboard() {
           ? `Est. gate ~${formatMoney(fin.estTicket || 0)}/home`
           : `预估门票约 ${formatMoney(fin.estTicket || 0)}/主场`;
     const seasonGate = en
-      ? `Season tickets <strong>${formatMoney(fin.seasonTickets || 0)}</strong>${fin.seasonHomeGates ? ` · ${fin.seasonHomeGates} home` : ""}`
-      : `本季门票 <strong>${formatMoney(fin.seasonTickets || 0)}</strong>${fin.seasonHomeGates ? ` · ${fin.seasonHomeGates} 场主场` : ""}`;
+      ? `Season matchday <strong>${formatMoney((fin.seasonTickets || 0) + (fin.seasonMatchday || 0))}</strong> (tickets ${formatMoney(fin.seasonTickets || 0)} · ancillary ${formatMoney(fin.seasonMatchday || 0)})${fin.seasonHomeGates ? ` · ${fin.seasonHomeGates} home` : ""}`
+      : `本季比赛日 <strong>${formatMoney((fin.seasonTickets || 0) + (fin.seasonMatchday || 0))}</strong>（门票 ${formatMoney(fin.seasonTickets || 0)} · 附加 ${formatMoney(fin.seasonMatchday || 0)}）${fin.seasonHomeGates ? ` · ${fin.seasonHomeGates} 场主场` : ""}`;
     const commercialLine = en
       ? `Commercial income <strong>${formatMoney(fin.seasonCommercial || 0)}</strong> · weekly ${formatMoney(fin.commercialIncome || 0)}`
       : `商业收入 <strong>${formatMoney(fin.seasonCommercial || 0)}</strong> · 每周 ${formatMoney(fin.commercialIncome || 0)}`;
     const ticketFactors = ticketFactorsText(fin.lastTicketFactors, en);
-    const tvPrizeTotal = (fin.seasonBroadcast || 0) + (fin.seasonPrize || 0);
+    const tvPrizeTotal = (fin.seasonBroadcast || 0) + (fin.seasonPrize || 0) + (fin.seasonCompetition || 0);
     const tvPrizeLine =
       tvPrizeTotal > 0
         ? en
-          ? `TV + prizes <strong class="stat-high">${formatMoney(tvPrizeTotal)}</strong> (broadcast ${formatMoney(fin.seasonBroadcast || 0)} · place ${formatMoney(fin.seasonPrize || 0)}${fin.lastPrizePos ? ` · P${fin.lastPrizePos}` : ""})`
-          : `转播+奖金 <strong class="stat-high">${formatMoney(tvPrizeTotal)}</strong>（转播 ${formatMoney(fin.seasonBroadcast || 0)} · 名次 ${formatMoney(fin.seasonPrize || 0)}${fin.lastPrizePos ? ` · 第${fin.lastPrizePos}名` : ""}）`
+          ? `TV + prizes <strong class="stat-high">${formatMoney(tvPrizeTotal)}</strong> (broadcast ${formatMoney(fin.seasonBroadcast || 0)} · place ${formatMoney(fin.seasonPrize || 0)} · competitions ${formatMoney(fin.seasonCompetition || 0)}${fin.lastPrizePos ? ` · P${fin.lastPrizePos}` : ""})`
+          : `转播+奖金 <strong class="stat-high">${formatMoney(tvPrizeTotal)}</strong>（转播 ${formatMoney(fin.seasonBroadcast || 0)} · 名次 ${formatMoney(fin.seasonPrize || 0)} · 赛事 ${formatMoney(fin.seasonCompetition || 0)}${fin.lastPrizePos ? ` · 第${fin.lastPrizePos}名` : ""}）`
         : fin.lastBroadcast != null || fin.lastPrize != null
           ? en
             ? `Last league payout TV ${formatMoney(fin.lastBroadcast || 0)} · prize ${formatMoney(fin.lastPrize || 0)}${fin.lastPrizePos ? ` · P${fin.lastPrizePos}` : ""}${fin.lastLeaguePayoutSeason ? ` (S${fin.lastLeaguePayoutSeason})` : ""}`
@@ -3627,9 +3684,13 @@ function renderDashboard() {
 
 const FINANCE_CATEGORY_ORDER = [
   "ticket",
+  "matchday",
   "commercial",
   "broadcast",
   "prize",
+  "competition",
+  "league",
+  "financing",
   "transfer",
   "loan",
   "wage",
@@ -3643,10 +3704,14 @@ const FINANCE_CATEGORY_ORDER = [
 
 function financeCategoryLabel(category, en) {
   const labels = {
-    ticket: ["门票", "Matchday"],
+    ticket: ["门票", "Tickets"],
+    matchday: ["比赛日附加", "Matchday ancillary"],
     commercial: ["商业", "Commercial"],
     broadcast: ["转播", "Broadcast"],
     prize: ["奖金", "Prize money"],
+    competition: ["赛事", "Competitions"],
+    league: ["联赛流动", "League transition"],
+    financing: ["融资", "Financing"],
     transfer: ["转会", "Transfers"],
     loan: ["租借", "Loans"],
     wage: ["薪资", "Wages"],
@@ -3665,8 +3730,21 @@ function financeSourceLabel(source, en) {
   const labels = {
     legacy: ["期初迁移", "Opening migration"],
     "weekly-settlement": ["俱乐部周结算", "Weekly club settlement"],
+    "sponsorship-weekly": ["主赞助周收入", "Weekly sponsorship"],
+    "commercial-operations": ["其他商业经营", "Other commercial operations"],
+    "sponsorship-signing": ["赞助签约金", "Sponsorship signing payment"],
+    "sponsorship-performance": ["赞助表现奖金", "Sponsorship performance bonus"],
     matchday: ["主场比赛日", "Home matchday"],
+    "matchday-ticket": ["比赛门票", "Match tickets"],
+    "matchday-retail": ["餐饮与零售", "Food, beverage and retail"],
+    "matchday-hospitality": ["商务接待", "Hospitality"],
     "transfer-fee": ["球员转会费", "Player transfer fee"],
+    "transfer-upfront": ["转会首付款", "Transfer upfront payment"],
+    "ai-transfer-upfront": ["俱乐部转会首付款", "Club transfer upfront payment"],
+    "transfer-installment": ["转会分期付款", "Transfer installment"],
+    "transfer-appearance-bonus": ["转会出场奖金", "Transfer appearance bonus"],
+    "transfer-sell-on": ["二次转售分成", "Sell-on share"],
+    "training-solidarity": ["青训培养补偿", "Training solidarity contribution"],
     "signing-bonus": ["球员签约奖", "Player signing bonus"],
     "ai-transfer": ["俱乐部间转会", "Club transfer"],
     "poach-sale": ["挖角成交", "Accepted transfer bid"],
@@ -3675,6 +3753,19 @@ function financeSourceLabel(source, en) {
     "facility-upgrade": ["设施建设", "Facility project"],
     "season-broadcast": ["赛季转播分成", "Season broadcast share"],
     "season-prize": ["联赛名次奖金", "League prize money"],
+    "competition-participation": ["洲际参赛分成", "Continental participation"],
+    "competition-quarter-final": ["洲际八强奖金", "Continental quarter-final bonus"],
+    "domestic-cup-prize": ["国内杯晋级奖金", "Domestic cup progress prize"],
+    "domestic-cup-runner-up": ["国内杯亚军奖金", "Domestic cup runner-up prize"],
+    "continental-match-win": ["洲际胜场奖金", "Continental win bonus"],
+    "continental-match-draw": ["洲际平局奖金", "Continental draw bonus"],
+    "continental-progress-prize": ["洲际晋级奖金", "Continental progress prize"],
+    "continental-runner-up": ["洲际亚军奖金", "Continental runner-up prize"],
+    "promotion-support": ["升级筹备支持", "Promotion support"],
+    "relegation-parachute": ["降级缓冲金", "Relegation parachute payment"],
+    "bank-financing": ["银行融资到账", "Bank financing received"],
+    "debt-interest": ["融资利息", "Financing interest"],
+    "debt-principal": ["偿还本金", "Principal repayment"],
     "contract-renewal": ["球员续约", "Player renewal"],
     "contract-termination": ["球员解约补偿", "Player release compensation"],
     "free-agent-signing": ["自由球员签约", "Free-agent signing"],
@@ -3705,6 +3796,8 @@ function renderFinance() {
   const budget = clubSeasonBudgetSnapshot(world, club);
   const ledger = financeLedgerSummary(club, world.season);
   if (!snapshot || !budget) return;
+  renderSponsorship(club, en);
+  renderDebtFinance(club, budget, en);
 
   const statusLabels = {
     stable: en ? "Stable" : "稳健",
@@ -3746,6 +3839,9 @@ function renderFinance() {
       <div><span>${en ? "Committed cash" : "已承诺现金"}</span><strong class="${budget.commitments.total > 0 ? "stat-low" : "stat-high"}">${formatMoney(budget.commitments.total)}</strong></div>
       <div><span>${en ? "Committed weekly wages" : "已承诺周薪"}</span><strong class="${budget.commitments.weeklyWageIncrease > 0 ? "stat-low" : "stat-high"}">${formatMoney(budget.commitments.weeklyWageIncrease)}</strong></div>
       <div><span>${en ? "Remaining wage impact" : "本季工资影响"}</span><strong class="${budget.projectedCommittedWages > 0 ? "stat-low" : "stat-high"}">${formatMoney(budget.projectedCommittedWages)}</strong></div>
+      <div><span>${en ? "Transfer installments payable" : "转会分期应付"}</span><strong class="${budget.obligations.scheduledPayable > 0 ? "stat-low" : "stat-high"}">${formatMoney(budget.obligations.scheduledPayable)}</strong></div>
+      <div><span>${en ? "Transfer installments receivable" : "转会分期应收"}</span><strong class="${budget.obligations.scheduledReceivable > 0 ? "stat-high" : "muted"}">${formatMoney(budget.obligations.scheduledReceivable)}</strong></div>
+      <div><span>${en ? "Conditional transfer exposure" : "条件转会付款风险"}</span><strong class="${budget.obligations.conditionalPayable > 0 ? "stat-low" : "stat-high"}">${formatMoney(budget.obligations.conditionalPayable)}</strong></div>
       <div><span>${en ? "Safe transfer ceiling" : "安全转会上限"}</span><strong>${formatMoney(budget.safeTransferCeiling)}</strong></div>
       <div><span>${en ? "Planned transfer budget" : "计划转会预算"}</span><strong class="stat-high">${formatMoney(budget.plannedTransferBudget)}</strong></div>
       <div><span>${en ? "Projected season-end cash" : "预计季末余额"}</span><strong class="${budget.projectedEndAfterBudget >= 0 ? "stat-high" : "stat-low"}">${formatMoney(budget.projectedEndAfterBudget)}</strong></div>
@@ -3819,6 +3915,62 @@ function renderFinance() {
         }).join("")
       : `<tr><td colspan="5" class="muted">${en ? "No matching transactions" : "没有符合筛选条件的流水"}</td></tr>`;
   }
+}
+
+function renderSponsorship(club, en) {
+  const box = $("#finance-sponsorship");
+  const status = $("#finance-sponsorship-status");
+  if (!box || !world || !club) return;
+  const data = sponsorshipSnapshot(world, club);
+  const active = data.active;
+  const next = data.next;
+  if (status) {
+    status.textContent = next
+      ? (en ? `Next season: ${next.sponsor}` : `下赛季：${next.sponsor}`)
+      : (en ? `Renews after S${active.endSeason}` : `${active.endSeason} 赛季后续签`);
+  }
+  const offerCards = (data.offers || []).map((offer) => {
+    const selected = next?.id === offer.id;
+    const target = Math.max(1, Math.ceil(18 * offer.targetRate));
+    return `<div class="sponsor-offer">
+      <strong>${escapeHtml(offer.sponsor)}</strong>
+      <span>${offer.years}${en ? "y" : "年"} · ${en ? "weekly" : "周收入"} ${formatMoney(offer.weeklyBase)}</span>
+      <span>${en ? "top" : "排名前"} ${target} · ${en ? "bonus" : "达标奖"} ${formatMoney(offer.performanceBonus)}</span>
+      <button type="button" class="btn small ${selected ? "primary" : ""}" data-sponsor-offer="${escapeHtml(offer.id)}">${selected ? (en ? "Selected" : "已选定") : (en ? "Select" : "选择")}</button>
+    </div>`;
+  }).join("");
+  box.innerHTML = `
+    <div><span>${en ? "Current sponsor" : "当前赞助商"}</span><strong>${escapeHtml(active.sponsor)}</strong></div>
+    <div><span>${en ? "Contract" : "合同期"}</span><strong>S${active.startSeason}–S${active.endSeason}</strong></div>
+    <div><span>${en ? "Sponsor weekly" : "赞助周收入"}</span><strong>${formatMoney(active.weeklyBase)}</strong></div>
+    <div><span>${en ? "Target / bonus" : "目标 / 达标奖"}</span><strong>${en ? `Top ${data.targetPosition}` : `前 ${data.targetPosition}`} · ${formatMoney(active.performanceBonus)}</strong></div>
+    <div class="sponsor-offers"><span>${en ? "Offers for next season" : "下赛季报价"}</span><div class="sponsor-offer-list">${offerCards}</div></div>`;
+}
+
+function renderDebtFinance(club, budget, en) {
+  const box = $("#finance-debt");
+  if (!box || !club || !budget?.debt) return;
+  const debt = budget.debt;
+  const compliance = budget.compliance || {};
+  const complianceLabels = {
+    compliant: en ? "Compliant" : "合规",
+    warning: en ? "Warning" : "预警",
+    restricted: en ? "Transfer restricted" : "转会受限",
+  };
+  const facilities = debt.facilities.length
+    ? debt.facilities.map((facility) => `<div class="debt-facility">
+        <strong>${escapeHtml(facility.lender || (facility.kind === "owner" ? "Club ownership" : "Lender"))}</strong>
+        <span>${en ? "principal" : "本金"} ${formatMoney(facility.balance)} · ${en ? "rate" : "年利率"} ${(Number(facility.annualRate || 0) * 100).toFixed(1)}% · ${en ? "maturity" : "到期"} S${facility.maturitySeason}</span>
+        <button type="button" class="btn small" data-debt-repay="${escapeHtml(facility.id)}">${en ? "Repay" : "提前还款"}</button>
+      </div>`).join("")
+    : `<span>${en ? "No outstanding financing" : "当前无未偿融资"}</span>`;
+  box.innerHTML = `
+    <div><span>${en ? "Outstanding debt" : "未偿债务"}</span><strong>${formatMoney(debt.outstanding)}</strong></div>
+    <div><span>${en ? "Weekly interest" : "每周利息"}</span><strong>${formatMoney(debt.weeklyInterest)}</strong></div>
+    <div><span>${en ? "Principal due this season" : "本季到期本金"}</span><strong>${formatMoney(debt.principalDueThisSeason)}</strong></div>
+    <div><span>${en ? "Borrowing headroom" : "可用融资额度"}</span><strong>${formatMoney(debt.headroom)}</strong></div>
+    <div><span>${en ? "Compliance" : "财政合规"}</span><strong class="${compliance.status === "restricted" ? "stat-low" : compliance.status === "warning" ? "stat-mid" : "stat-high"}">${complianceLabels[compliance.status] || complianceLabels.compliant}</strong><span>${en ? "wages" : "工资"} ${compliance.wageRatio || 0}% · ${en ? "debt/revenue" : "债务/收入"} ${compliance.debtRatio || 0}%</span></div>
+    <div class="debt-facilities"><span>${en ? "Facilities" : "融资明细"}</span><div class="debt-facility-list">${facilities}</div></div>`;
 }
 
 function ovrClass(n) {
@@ -6404,11 +6556,39 @@ function openBuyNegotiator(playerId, fromClubId) {
   if (wageIn == null) return;
   const wage = parseMoneyInput(wageIn);
   const signingBonus = Math.round(wage * y * 0.5);
+  const installmentIn = prompt(
+    en ? "Transfer-fee installments (0–3, default 2):" : "转会费分期数（0–3，默认 2）：",
+    fee >= 400_000 ? "2" : "0"
+  );
+  if (installmentIn == null) return;
+  const installmentCount = Math.max(0, Math.min(3, parseInt(installmentIn, 10) || 0));
+  let upfrontPct = 100;
+  if (installmentCount > 0) {
+    const upfrontIn = prompt(
+      en ? "Upfront share (30–90%, default 60):" : "首付比例（30–90%，默认 60）：",
+      "60"
+    );
+    if (upfrontIn == null) return;
+    upfrontPct = Math.max(30, Math.min(90, parseInt(upfrontIn, 10) || 60));
+  }
+  const appearanceIn = prompt(
+    en ? "Bonus after 20 appearances (0 to omit):" : "出场 20 次后的附加奖金（填 0 表示无）：",
+    String(Math.round(fee * 0.08))
+  );
+  if (appearanceIn == null) return;
+  const appearanceBonus = Math.max(0, parseMoneyInput(appearanceIn));
+  const sellOnIn = prompt(
+    en ? "Sell-on share for the selling club (0–30%, default 10):" : "卖方二次转售分成（0–30%，默认 10）：",
+    "10"
+  );
+  if (sellOnIn == null) return;
+  const sellOnPct = Math.max(0, Math.min(30, parseInt(sellOnIn, 10) || 0));
+  const paymentPlan = buildTransferPaymentPlan(fee, upfrontPct, installmentCount);
   if (
     !confirm(
       en
-        ? `Submit an offer for ${deal.player.name}?\nFee ${formatMoney(fee)}\nSigning bonus ${formatMoney(signingBonus)}\n${y} years · wage ${formatMoney(wage)}\nThe club and player will reply in stages.`
-        : `向 ${deal.player.name} 提交报价？\n转会费 ${formatMoney(fee)}\n签约奖 ${formatMoney(signingBonus)}\n${y} 年 · 周薪 ${formatMoney(wage)}\n俱乐部与球员将分阶段答复。`
+        ? `Submit an offer for ${deal.player.name}?\nFee ${formatMoney(fee)} · upfront ${formatMoney(paymentPlan.upfront)} · ${paymentPlan.installmentCount} installments\nAppearance bonus ${formatMoney(appearanceBonus)} · sell-on ${sellOnPct}%\nSigning bonus ${formatMoney(signingBonus)}\n${y} years · wage ${formatMoney(wage)}\nThe club and player will reply in stages.`
+        : `向 ${deal.player.name} 提交报价？\n转会费 ${formatMoney(fee)} · 首付 ${formatMoney(paymentPlan.upfront)} · ${paymentPlan.installmentCount} 期\n出场奖金 ${formatMoney(appearanceBonus)} · 二次转售 ${sellOnPct}%\n签约奖 ${formatMoney(signingBonus)}\n${y} 年 · 周薪 ${formatMoney(wage)}\n俱乐部与球员将分阶段答复。`
     )
   ) {
     return;
@@ -6417,6 +6597,11 @@ function openBuyNegotiator(playerId, fromClubId) {
     fee,
     years: y,
     wage,
+    upfrontPct: paymentPlan.upfrontPct,
+    installmentCount: paymentPlan.installmentCount,
+    appearanceBonus,
+    appearanceTarget: 20,
+    sellOnPct,
   });
   toast(en && res.ok ? `Offer submitted for ${deal.player.name}` : res.msg);
   if (res.ok) {
@@ -6498,9 +6683,21 @@ function renderTransferNegotiations() {
           ? clubDisplayName(buyer)
           : en ? "Transfer market" : "转会市场"
         : seller ? clubDisplayName(seller) : negotiation.sellerClubId;
+      const feePlan = buildTransferPaymentPlan(
+        negotiation.fee,
+        negotiation.upfrontPct,
+        negotiation.installmentCount
+      );
+      const paymentTerms = feePlan.installmentCount > 0
+        ? `${en ? "upfront" : "首付"} ${formatMoney(feePlan.upfront)} · ${feePlan.installmentCount}${en ? " installments" : " 期"}`
+        : en ? "paid in full" : "一次付清";
+      const clauses = [
+        negotiation.appearanceBonus > 0 ? `${en ? "apps" : "出场"} ${formatMoney(negotiation.appearanceBonus)}` : "",
+        negotiation.sellOnPct > 0 ? `${en ? "sell-on" : "转售"} ${negotiation.sellOnPct}%` : "",
+      ].filter(Boolean).join(" · ");
       const terms = sale && negotiation.wage == null
         ? `${en ? "asking" : "挂牌价"} ${formatMoney(negotiation.askingFee || negotiation.fee)}`
-        : `${en ? "fee" : "转会费"} ${formatMoney(negotiation.fee)} · ${negotiation.years}${en ? "y" : "年"} / ${en ? "wage" : "周薪"} ${formatMoney(negotiation.wage)}`;
+        : `${en ? "fee" : "转会费"} ${formatMoney(negotiation.fee)} · ${paymentTerms}${clauses ? ` · ${clauses}` : ""} · ${negotiation.years}${en ? "y" : "年"} / ${en ? "wage" : "周薪"} ${formatMoney(negotiation.wage)}`;
       return `<div class="poach-row">
         <div>
           <strong>${escapeHtml(playerName)}</strong> · ${escapeHtml(counterpart)}
@@ -9816,7 +10013,7 @@ function showMatchReport(report, opts = {}) {
               : report.ticketStadium
                 ? ` <span class="muted">（${escapeHtml(report.ticketStadium)}）</span>`
                 : ""
-          }${ticketFactors ? `<div class="muted">${getLang() === "en" ? "Factors: " : "系数："}${escapeHtml(ticketFactors)}</div>` : ""}</div>`
+          }${report.matchdayTotalIncome != null ? `<div class="muted">${getLang() === "en" ? "Retail" : "餐饮零售"} ${formatMoney(report.matchdayRetailIncome || 0)} · ${getLang() === "en" ? "Hospitality" : "商务接待"} ${formatMoney(report.matchdayHospitalityIncome || 0)} · ${getLang() === "en" ? "Total" : "合计"} ${formatMoney(report.matchdayTotalIncome)}</div>` : ""}${ticketFactors ? `<div class="muted">${getLang() === "en" ? "Factors: " : "系数："}${escapeHtml(ticketFactors)}</div>` : ""}</div>`
         : ""
     }
     ${

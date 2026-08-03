@@ -10,6 +10,19 @@ function finiteIfPresent(value, label) {
   }
 }
 
+function validateSponsorshipContract(contract, label) {
+  if (contract == null) return;
+  if (!isRecord(contract) || typeof contract.id !== "string" || !contract.id) {
+    throw new Error(`invalid save: ${label} is invalid`);
+  }
+  for (const field of [
+    "startSeason", "endSeason", "years", "weeklyBase", "signingBonus",
+    "targetRate", "performanceBonus", "bonusSettledSeason",
+  ]) {
+    finiteIfPresent(contract[field], `${label} ${field}`);
+  }
+}
+
 export function validateSaveStructure(world) {
   if (!isRecord(world)) throw new Error("invalid save: root must be an object");
   if (!Array.isArray(world.clubs) || world.clubs.length === 0) {
@@ -24,6 +37,58 @@ export function validateSaveStructure(world) {
     if (clubIds.has(club.id)) throw new Error("invalid save: duplicate club id");
     if (!Array.isArray(club.players)) throw new Error("invalid save: club squad is missing");
     finiteIfPresent(club.money, `club ${club.id} money`);
+    if (club.sponsorship != null) {
+      if (!isRecord(club.sponsorship)) throw new Error(`invalid save: club ${club.id} sponsorship is invalid`);
+      validateSponsorshipContract(club.sponsorship.activeContract, `club ${club.id} active sponsorship`);
+      validateSponsorshipContract(club.sponsorship.nextContract, `club ${club.id} next sponsorship`);
+      if (club.sponsorship.offers != null && !Array.isArray(club.sponsorship.offers)) {
+        throw new Error(`invalid save: club ${club.id} sponsorship offers are invalid`);
+      }
+      const offerIds = new Set();
+      for (const offer of club.sponsorship.offers || []) {
+        validateSponsorshipContract(offer, `club ${club.id} sponsorship offer`);
+        if (offerIds.has(offer.id)) throw new Error(`invalid save: club ${club.id} has duplicate sponsorship offers`);
+        offerIds.add(offer.id);
+      }
+    }
+    if (club.finance?.debt != null) {
+      if (!isRecord(club.finance.debt) || !Array.isArray(club.finance.debt.facilities)) {
+        throw new Error(`invalid save: club ${club.id} debt is invalid`);
+      }
+      const debtIds = new Set();
+      for (const facility of club.finance.debt.facilities) {
+        if (!isRecord(facility) || typeof facility.id !== "string" || !facility.id) {
+          throw new Error(`invalid save: club ${club.id} debt facility is invalid`);
+        }
+        if (debtIds.has(facility.id)) throw new Error(`invalid save: club ${club.id} has duplicate debt facilities`);
+        debtIds.add(facility.id);
+        for (const field of [
+          "originalPrincipal", "balance", "annualRate", "termSeasons", "startSeason",
+          "maturitySeason", "lastPrincipalSeason",
+        ]) {
+          finiteIfPresent(facility[field], `debt facility ${facility.id} ${field}`);
+        }
+      }
+    }
+    if (club.finance?.leagueTransitionPayments != null) {
+      if (!Array.isArray(club.finance.leagueTransitionPayments)) {
+        throw new Error(`invalid save: club ${club.id} league transition payments are invalid`);
+      }
+      const paymentIds = new Set();
+      for (const payment of club.finance.leagueTransitionPayments) {
+        if (!isRecord(payment) || typeof payment.id !== "string" || !payment.id) {
+          throw new Error(`invalid save: club ${club.id} league transition payment is invalid`);
+        }
+        if (paymentIds.has(payment.id)) throw new Error(`invalid save: club ${club.id} has duplicate league transition payments`);
+        paymentIds.add(payment.id);
+        for (const field of ["season", "amount", "installment", "paidSeason", "paidDay"]) {
+          finiteIfPresent(payment[field], `league transition payment ${payment.id} ${field}`);
+        }
+      }
+    }
+    for (const field of ["wageRatio", "debtRatio", "annualRevenue", "reviewedSeason", "reviewedDay"]) {
+      finiteIfPresent(club.finance?.compliance?.[field], `club ${club.id} compliance ${field}`);
+    }
     const localPlayerIds = new Set();
     for (const player of club.players) {
       if (!isRecord(player) || typeof player.id !== "string" || !player.id.trim()) {
@@ -108,8 +173,34 @@ export function validateSaveStructure(world) {
           throw new Error(`invalid save: ${listName} references a missing club`);
         }
       }
-      for (const field of ["fee", "askingFee", "wage", "signingBonus", "wageShare", "years", "decisionDay"]) {
+      for (const field of [
+        "fee", "askingFee", "wage", "signingBonus", "wageShare", "years", "decisionDay",
+        "upfrontPct", "installmentCount", "appearanceBonus", "appearanceTarget", "sellOnPct",
+      ]) {
         finiteIfPresent(negotiation[field], `${listName} ${negotiation.id} ${field}`);
+      }
+    }
+  }
+  if (world.financeObligations != null) {
+    if (!Array.isArray(world.financeObligations)) {
+      throw new Error("invalid save: finance obligations are invalid");
+    }
+    const obligationIds = new Set();
+    for (const obligation of world.financeObligations) {
+      if (!isRecord(obligation) || typeof obligation.id !== "string" || !obligation.id) {
+        throw new Error("invalid save: finance obligations contain an invalid record");
+      }
+      if (obligationIds.has(obligation.id)) {
+        throw new Error("invalid save: duplicate finance obligation id");
+      }
+      obligationIds.add(obligation.id);
+      for (const field of ["payerClubId", "payeeClubId", "triggerClubId"]) {
+        if (obligation[field] != null && !clubIds.has(obligation[field])) {
+          throw new Error("invalid save: finance obligation references a missing club");
+        }
+      }
+      for (const field of ["amount", "createdSeason", "createdDay", "dueSeason", "dueDay", "target", "progress"]) {
+        finiteIfPresent(obligation[field], `finance obligation ${obligation.id} ${field}`);
       }
     }
   }

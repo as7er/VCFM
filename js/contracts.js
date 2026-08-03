@@ -272,6 +272,9 @@ export function signFreeAgent(world, playerId) {
   if (!win.ok) return win;
   const club = world.clubs.find((c) => c.id === world.userClubId);
   if (!club) return { ok: false, msg: "无球队" };
+  if (club.finance?.compliance?.transferEmbargo || club.finance?.debtPlan?.transferEmbargo) {
+    return { ok: false, msg: "俱乐部处于财政转会限制期" };
+  }
   if (!Array.isArray(world.freeAgents)) return { ok: false, msg: "无自由球员" };
   const idx = world.freeAgents.findIndex((p) => p.id === playerId);
   if (idx < 0) return { ok: false, msg: "球员不存在" };

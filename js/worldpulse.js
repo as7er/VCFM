@@ -210,7 +210,9 @@ export function financeSnapshot(world) {
   // 赛季账本：赛后/发薪/转会写入 club.finance（无隐藏账）
   const fin = ensureClubFinance(club, world.season);
   const seasonTickets = Number(fin.seasonTicketIncome) || 0;
+  const seasonMatchday = Number(fin.seasonMatchdayIncome) || 0;
   const lastTicket = fin.lastTicketIncome != null ? Number(fin.lastTicketIncome) : null;
+  const lastMatchday = fin.lastMatchdayIncome != null ? Number(fin.lastMatchdayIncome) : null;
   const lastTicketDay = fin.lastTicketDay != null ? Number(fin.lastTicketDay) : null;
   const lastAttendance = fin.lastAttendance != null ? Number(fin.lastAttendance) : null;
   const lastCapacity = fin.lastCapacity != null ? Number(fin.lastCapacity) : null;
@@ -224,6 +226,7 @@ export function financeSnapshot(world) {
   const seasonHomeGates = Number(fin.seasonHomeGates) || 0;
   const seasonBroadcast = Number(fin.seasonBroadcastIncome) || 0;
   const seasonPrize = Number(fin.seasonPrizeIncome) || 0;
+  const seasonCompetition = Number(fin.seasonCompetitionIncome) || 0;
   const seasonCommercial = Number(fin.seasonCommercialIncome) || 0;
   const lastBroadcast = fin.lastBroadcastPayout != null ? Number(fin.lastBroadcastPayout) : null;
   const lastPrize = fin.lastPrizePayout != null ? Number(fin.lastPrizePayout) : null;
@@ -249,7 +252,9 @@ export function financeSnapshot(world) {
     warning: weeksCover < 8,
     critical: weeksCover < 4,
     seasonTickets,
+    seasonMatchday,
     lastTicket,
+    lastMatchday,
     lastTicketDay,
     lastAttendance,
     lastCapacity,
@@ -264,6 +269,7 @@ export function financeSnapshot(world) {
     seasonHomeGates,
     seasonBroadcast,
     seasonPrize,
+    seasonCompetition,
     seasonCommercial,
     lastBroadcast,
     lastPrize,

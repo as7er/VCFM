@@ -42,4 +42,25 @@ brokenNegotiation.transferNegotiations = [{
 }];
 rejects(brokenNegotiation, /references a missing club/);
 
-console.log("Save schema audit passed: duplicate IDs, references and non-finite values are rejected");
+const invalidSponsor = clone(source);
+invalidSponsor.clubs[0].sponsorship = {
+  activeContract: { id: "bad-sponsor", weeklyBase: Number.NaN },
+};
+rejects(invalidSponsor, /active sponsorship weeklyBase must be finite/);
+
+const duplicateDebt = clone(source);
+duplicateDebt.clubs[0].finance.debt = {
+  facilities: [
+    { id: "same-debt", balance: 100_000 },
+    { id: "same-debt", balance: 80_000 },
+  ],
+};
+rejects(duplicateDebt, /duplicate debt facilities/);
+
+const invalidTransitionPayment = clone(source);
+invalidTransitionPayment.clubs[0].finance.leagueTransitionPayments = [
+  { id: "bad-transition", season: source.season + 1, amount: Number.POSITIVE_INFINITY },
+];
+rejects(invalidTransitionPayment, /league transition payment .* amount must be finite/);
+
+console.log("Save schema audit passed: IDs, references and football-finance values are validated");

@@ -6520,6 +6520,8 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
 }
 .finance-summary-card,
 .finance-ledger-card { grid-column: 1 / -1; }
+.finance-sponsorship-card { grid-column: 1 / -1; }
+.finance-debt-card { grid-column: 1 / -1; }
 .finance-budget-card { grid-column: span 7; }
 .finance-breakdown-card { grid-column: span 5; }
 .finance-section-head { gap: 1rem; align-items: center; }
@@ -6592,12 +6594,50 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
   padding: 0.75rem 0.8rem;
   border-bottom: 1px solid var(--border);
 }
+.finance-sponsorship {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+.finance-sponsorship > div {
+  min-width: 0;
+  padding: 0.75rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+.finance-sponsorship span { display: block; color: var(--muted); font-size: 0.76rem; }
+.finance-sponsorship strong { display: block; margin-top: 0.2rem; overflow-wrap: anywhere; }
+.finance-sponsorship .sponsor-offers { grid-column: 1 / -1; }
+.finance-sponsorship .sponsor-offer-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; margin-top: 0.55rem; border-top: 1px solid var(--border); }
+.finance-sponsorship .sponsor-offer { padding: 0.6rem; border-right: 1px solid var(--border); }
+.finance-sponsorship .sponsor-offer:last-child { border-right: 0; }
+.finance-sponsorship .sponsor-offer button { margin-top: 0.5rem; }
+.finance-debt {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+.finance-debt > div { min-width: 0; padding: 0.75rem 0.8rem; border-bottom: 1px solid var(--border); }
+.finance-debt span { display: block; color: var(--muted); font-size: 0.76rem; }
+.finance-debt strong { display: block; margin-top: 0.2rem; overflow-wrap: anywhere; }
+.finance-debt .debt-facilities { grid-column: 1 / -1; }
+.debt-facility-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 0; margin-top: 0.55rem; border-top: 1px solid var(--border); }
+.debt-facility { padding: 0.6rem; border-right: 1px solid var(--border); }
+.debt-facility:last-child { border-right: 0; }
+.debt-facility button { margin-top: 0.5rem; }
 .finance-category-label { display: inline-flex; align-items: center; gap: 0.45rem; white-space: nowrap; }
 .finance-category-dot { width: 0.62rem; height: 0.62rem; flex: 0 0 0.62rem; border-radius: 2px; background: #94a3b8; }
 .finance-cat-ticket { background: #22c55e; }
+.finance-cat-matchday { background: #84cc16; }
 .finance-cat-commercial { background: #14b8a6; }
 .finance-cat-broadcast { background: #38bdf8; }
 .finance-cat-prize { background: #eab308; }
+.finance-cat-competition { background: #10b981; }
+.finance-cat-league { background: #06b6d4; }
+.finance-cat-financing { background: #6366f1; }
 .finance-cat-transfer { background: #f97316; }
 .finance-cat-loan { background: #fb7185; }
 .finance-cat-wage { background: #ef4444; }
@@ -6735,6 +6775,12 @@ summary:focus-visible {
   .finance-metrics > div:nth-child(2) { border-right: 0; }
   .finance-metrics > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
   .finance-budget-controls { grid-template-columns: minmax(0, 1fr); }
+  .finance-sponsorship .sponsor-offer-list { grid-template-columns: minmax(0, 1fr); }
+  .finance-sponsorship .sponsor-offer { border-right: 0; border-bottom: 1px solid var(--border); }
+  .finance-sponsorship .sponsor-offer:last-child { border-bottom: 0; }
+  .debt-facility { border-right: 0; border-bottom: 1px solid var(--border); }
+  .debt-facility:last-child { border-bottom: 0; }
+  .finance-debt { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .modal { padding: 0; align-items: stretch; }
   .modal-card,
   .modal-card.wide,
@@ -6759,6 +6805,7 @@ summary:focus-visible {
   .dashboard-match-card .next-match { min-height: 7rem; }
   .finance-budget-controls label { grid-template-columns: minmax(6.8rem, auto) minmax(5rem, 1fr) minmax(4rem, auto); }
   .finance-budget-projection { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .finance-sponsorship { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .squad-heading { align-items: flex-start; gap: 0.6rem; }
   .squad-heading-tools { align-items: flex-end; flex-direction: column; }
   .registration-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

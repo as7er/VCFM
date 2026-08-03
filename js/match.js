@@ -36,6 +36,7 @@ import {
 } from "./staff.js";
 import { trainingInjuryMod, matchdayIncome, stadiumInfo } from "./facilities.js";
 import { recordMatchdayFinance } from "./club-finance.js";
+import { recordTransferAppearances } from "./finance-obligations.js";
 import { ensureMatchSeed, matchRandom } from "./random.js";
 import {
   applyMatchPrepBonus,
@@ -2503,6 +2504,9 @@ function buildReport(state) {
     analysis,
     narrative,
     ticketIncome: state.ticketIncome != null ? state.ticketIncome : null,
+    matchdayRetailIncome: state.matchdayRetailIncome || 0,
+    matchdayHospitalityIncome: state.matchdayHospitalityIncome || 0,
+    matchdayTotalIncome: state.matchdayTotalIncome != null ? state.matchdayTotalIncome : null,
     ticketStadium: state.ticketStadium || null,
     ticketCapacity: state.ticketCapacity || null,
     ticketAttendance: state.ticketAttendance != null ? state.ticketAttendance : null,
@@ -2829,6 +2833,9 @@ export function finalizeMatch(state) {
   fixture.weather = state.weather.key;
   fixture.derby = state.derby;
 
+  recordTransferAppearances(world, home.id, appearedPlayers(state, home).map((player) => player.id));
+  recordTransferAppearances(world, away.id, appearedPlayers(state, away).map((player) => player.id));
+
   if (isLeague) {
     applyResult(world, fixture);
   } else if (fixture.competitionType === "continental-league-stage") {
@@ -2848,9 +2855,12 @@ export function finalizeMatch(state) {
 
   // 主场收入属于实际主队，AI 与用户使用相同球场、上座和比赛情境数据。
   const gate = matchdayIncome(home, { ...homeGateContext, detail: true, random: rng });
-  const gateIncome = recordMatchdayFinance(home, gate, world.day, world.season);
+  const gateSettlement = recordMatchdayFinance(home, gate, world.day, world.season);
   if (fixture.home === world.userClubId) {
-    state.ticketIncome = gateIncome;
+    state.ticketIncome = gateSettlement.ticket;
+    state.matchdayRetailIncome = gateSettlement.retail;
+    state.matchdayHospitalityIncome = gateSettlement.hospitality;
+    state.matchdayTotalIncome = gateSettlement.total;
     state.ticketStadium = stadiumInfo(home).name;
     state.ticketCapacity = gate.capacity;
     state.ticketAttendance = gate.attendance;
@@ -2946,7 +2956,7 @@ export function finalizeMatch(state) {
           : `容量约 ${(capacity || 0).toLocaleString()}`;
       world.news.unshift({
         day: world.day,
-        text: `🎟️ 门票收入 ${formatMoney(income)}（${stInfo.name} · ${crowdTxt} · 本季累计 ${formatMoney(me.finance?.seasonTicketIncome || 0)}）`,
+        text: `比赛日收入 ${formatMoney(state.matchdayTotalIncome || income)}（门票 ${formatMoney(income)} · 餐饮零售 ${formatMoney(state.matchdayRetailIncome || 0)} · 商务接待 ${formatMoney(state.matchdayHospitalityIncome || 0)} · ${stInfo.name} · ${crowdTxt}）`,
       });
     }
     if (isLeague) {

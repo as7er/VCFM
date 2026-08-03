@@ -3,12 +3,16 @@
 export const FINANCE_LEDGER_VERSION = 1;
 const LEGACY_FIELDS = Object.freeze({
   ticket: "seasonTicketIncome",
+  matchday: "seasonMatchdayIncome",
   commercial: "seasonCommercialIncome",
   wage: "seasonWageOut",
   facility: "seasonFacilityOut",
   transfer: "seasonTransferNet",
   broadcast: "seasonBroadcastIncome",
   prize: "seasonPrizeIncome",
+  competition: "seasonCompetitionIncome",
+  league: "seasonLeagueTransitionIncome",
+  financing: "seasonFinancingNet",
 });
 
 function numeric(value) {
