@@ -4605,12 +4605,15 @@ button.player-link.pitch-player-link:hover {
   font-size: 0.9rem;
 }
 .staff-diff-tag {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
   margin-left: 0.25rem;
-  padding: 0.05rem 0.35rem;
+  padding: 0.08rem 0.38rem;
   border-radius: 4px;
-  font-size: 0.68rem;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
   font-weight: 700;
+  line-height: 1.25;
   vertical-align: middle;
   background: rgba(148, 163, 184, 0.2);
   color: var(--muted);
@@ -4635,6 +4638,31 @@ html[data-theme="light"] .job-offer-card {
 }
 html[data-theme="light"] .report-tickets {
   background: rgba(22, 163, 74, 0.08);
+}
+html[data-theme="light"] .staff-diff-tag {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+html[data-theme="light"] .staff-diff-tag.short {
+  background: #ecfdf5;
+  border-color: #86efac;
+  color: #166534;
+}
+html[data-theme="light"] .staff-diff-tag.elite {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #9a3412;
+}
+html[data-theme="light"] .staff-diff-tag.star {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #166534;
+}
+html[data-theme="light"] .staff-diff-tag.weaker {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1e40af;
 }
 @media (max-width: 820px) {
   .club-staff-grid { grid-template-columns: 1fr; }

@@ -29,6 +29,8 @@ assert.ok(css.includes(".dashboard-layout"));
 assert.ok(css.includes(".finance-layout"));
 assert.ok(css.includes(".btn:focus-visible"));
 assert.ok(css.includes("min-height: 100dvh"), "mobile modals should use the viewport");
+assert.match(css, /html\[data-theme="light"\] \.staff-diff-tag\.elite \{[^}]*color: #9a3412;/s, "elite-club staff tags need high-contrast light-theme text");
+assert.match(css, /html\[data-theme="light"\] \.staff-diff-tag\.star \{[^}]*color: #166534;/s, "top-rated staff tags must remain distinct and readable in the light theme");
 
 for (const key of ["nav.overview", "nav.team", "nav.matches", "nav.transfer", "nav.world", "squad.compact", "squad.full"]) {
   assert.equal((i18n.match(new RegExp(`"${key.replace(".", "\\.")}"`, "g")) || []).length, 2, `${key} must exist in both languages`);
