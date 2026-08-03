@@ -25,6 +25,12 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 仓库：https://github.com/as7er/vcfm
 
+### v191 更新亮点
+
+- 主教练、球探和队医现在拥有稳定国籍，资料页显示国旗及中英文国家名。
+- 职员资料记录俱乐部、职位和任职时期；解约、合同到期、自由签约与俱乐部间流动会自动闭合旧履历并建立新履历。
+- 旧存档会按职员 ID 稳定补齐国籍，并根据现有归属补记当前任职，不改变既有姓名、能力、合同或所属俱乐部。
+
 ### 快速开始
 
 1. 从五国任一低级别联赛选择一家俱乐部，创建经理并开始赛季。
@@ -48,9 +54,10 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **三种观看方式**：直播保留完整高光节奏；快速高光跳过平淡时段但细看真实进球与扑救；一键完赛不播放球场动画，直接进入赛后报告。
 - **真实战术因果**：主客队运行同一套 AI；阵型、角色、能力、状态、体能、士气和战术共同影响场上表现，没有只为界面结果服务的隐藏球队加权。
 - **可读的转播表现**：俯视球场、真空间录帧、倍速、暂停、中场调整、进球回放、庆祝、球轨迹、xG、控球和射门统计。
-- **v180 空间事件比赛分析**：赛后战报从同一批空间事件派生出脚前 xG、射门图、推进、压迫、行动热区和完成传球网络；分析随比赛报告保存，可回看且不使用赛后结果修饰机会质量。
-- **v165 真实性校准**：远射意愿随距离衰减，射门高度与门将反应时间进入结算；抢断、点球、角球和开球站位经过固定种子批量审计。
-- **v166 赛前票房因果**：上座与门票系数只读取开赛前状态，不再受本场赛果倒灌；战报和财政概览展示杯赛、德比、争冠、联赛层级等收入系数。
+- **空间事件比赛分析**：赛后战报从同一批空间事件派生出脚前 xG、射门图、推进、压迫、行动热区和完成传球网络；分析随比赛报告保存，可回看且不使用赛后结果修饰机会质量。
+- **真实性与可复现性**：每场比赛保存确定性随机种子；远射、射门高度、门将反应、抢断、点球、角球和强弱队表现经过固定种子批量审计。
+- **统一临场因果**：教练、天气、备战、队内讲话、真实阵容和定位球训练共同进入空间模拟；下半场按 46–60、61–75、76–90 分段计算，换人和战术调整会影响尚未模拟的区间。
+- **赛前票房因果**：上座与门票系数只读取开赛前状态，不受本场赛果倒灌；战报和财政概览展示杯赛、德比、争冠、联赛层级等收入系数。
 - **后台比赛保持轻量**：非用户场次使用快速概率引擎，避免推进赛程时为整轮比赛运行空间模拟。
 
 ### 球队管理
@@ -59,7 +66,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **战术**：阵型、风格、压迫、节奏、宽度、防线、槽位角色、核心球员与战术板拖拽换位。
 - **训练与青训**：训练重点、强度、赛前备战、青训名单和球员成长；可委托助理教练按赛程与阵容短板安排。
 - **转会与合同**：夏窗、冬窗、续约、租借、自由球员和 AI 报价；买入、出售、续约与租借均按现实参与方逐阶段审核、还价或拒绝，成交前不会移动球员。
-- **职员体系**：主教练、球探和队医拥有能力、工资与合同；可以签自由职员、接触其他俱乐部在职职员并支付补偿。
+- **职员体系**：主教练、球探和队医拥有能力、工资、合同、稳定国籍与完整任职履历；可以签自由职员、接触其他俱乐部在职职员并支付补偿。
 - **经理生涯**：董事会目标、名望、成就与执教历史；被解雇或主动请辞后进入待业市场，也可能在任时收到更高水平球队邀请。
 
 ### 经营与体验
@@ -68,16 +75,11 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **设施**：球场、训练、青训、医疗等设施可以升级，并影响收入、成长、恢复和伤病。
 - **信息系统**：信箱、世界新闻、媒体、球探任务、关注列表、球员对话、全局搜索和可连续浏览的球员资料。
 - **存档**：3 个槽位、自动保存、手动保存、JSON 导出与导入；旧存档会在加载时补齐新增字段。
-- **v181 存档可靠性**：Worker 压缩失败时同步保存各槽最新快照，页面退出前冲刷待存队列；版本化 Schema 与结构校验保护旧档迁移和导入。
-- **v182 球员路径**：出场承诺按可用比赛、首发、替补和实际分钟评估，连续违约会影响关系、士气与离队意愿；比赛结算修正为所有真实出场球员统一记出场与评分。
-- **v183 人物头像**：程序脸新增脸型、耳形、眼距、胡须和年龄层；生成与渲染共享同一外貌数据，只有头面部诊断才显示面部创伤。
-- **v184 头像清晰度**：名单头像统一到 32px 像素网格，资料肖像提升到 96px，并使用硬边像素缩放与自适应状态角标。
-- **v185 双精度肖像**：资料页使用同一人物外貌生成原生 48×48 高精度像素肖像，名单与战术板继续使用紧凑 32×32 版本。
-- **v186 肖像修正**：资料头像改为单一原生 48×48 坐标系，消除分数缩放造成的五官错位；无效高精度结果会安全回退。
-- **v187 脸部精修**：资料头像采用更清晰的统一眼型与瞳孔高光、连续对称下颌，并将普通胡茬改为自然的稀疏纹理。
-- **v188 职责委托**：训练、首发、战术、临场与培养职责可交由教练团队；支持阵型、关键球员和培养原则锁定，并可切换由聘用主教练全权带队的俱乐部经营模式。自动决策不提供隐藏比赛加成。
-- **v189 经营模式比赛日控制**：俱乐部经营模式下赛前讲话、中场调整、换人和下半场场边战术均由主教练负责；主教练在 60′、75′ 按比分与体能重新评估，玩家界面只读观赛，所有临场 API 同样受权限保护。
-- **v190 统一比赛因果与经营可靠性**：空间比赛统一消费教练、天气、备战、讲话、阵容和定位球训练；直播按 60′/75′ 分段计算并支持真实换人；补齐职责培养、双职业履历、AI 债务处置、深层存档校验、无障碍弹窗与桌面/手机浏览器回归测试，并重新校准传球、射门和定位球。
+- **存档可靠性**：Worker 压缩失败时同步保存各槽最新快照，页面退出前冲刷待存队列；版本化 Schema、深层引用检查与数值校验保护旧档迁移和导入。
+- **球员路径**：出场承诺按可用比赛、首发、替补和实际分钟评估，连续违约会影响关系、士气与离队意愿；训练、青训、年龄变化和实际出场均留下可解释记录。
+- **双精度人物肖像**：名单和战术板使用 32×32 程序脸，资料页从同一外貌生成原生 48×48 高精度肖像并显示为 96px；伤病外观读取实际诊断，无效结果会安全回退。
+- **职责委托与经营模式**：训练、首发、战术、临场与培养职责可交由教练团队；支持阵型、关键球员和培养原则锁定。俱乐部经营模式下主教练全权带队，玩家专注转会、合同、财政、设施、青训和聘帅。
+- **长期经营可靠性**：玩家经理与受聘主教练分别记录职业履历，AI 会进行债务处置；自动决策只读取真实能力、体能、状态、赛程和职员能力，不写入隐藏胜率或能力修正。
 - **离线与性能**：Service Worker 按资源独立预缓存，单项失败不再清空整批离线资源；大型比赛视图只在进入比赛或战报时加载。
 - **统一验证**：核心审计由 `node scripts/verify.mjs` 统一执行，`--full` 追加 24 场真实性校准；GitHub Actions 覆盖 push、PR、手动与定时验证。
 
@@ -85,7 +87,9 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 ES Modules 必须通过 HTTP 提供，不要直接双击 `index.html`。
 
-Windows 推荐使用仓库自带脚本，它会清理占用端口、启动 no-store 服务并打开浏览器：
+以下启动方式需要 **Python 3**。Windows 一键启动脚本还需要 **PowerShell 7**（`pwsh`）；脚本会终止占用 `127.0.0.1:8765` 的现有进程，然后启动 no-store 服务并打开浏览器。
+
+Windows 推荐使用仓库自带脚本：
 
 ```powershell
 pwsh -File start-local.ps1
@@ -103,12 +107,18 @@ python -m http.server 8765 --bind 127.0.0.1
 
 ### 验证与审计
 
+开发与验证建议使用 **Node.js 22**。首次运行先安装开发依赖：
+
 ```bash
-node scripts/verify.mjs
-node scripts/verify.mjs --full
+npm ci
+npm test
+npm run test:full
+npm run test:browser
 ```
 
-比赛真实性审计使用固定随机种子，检查进球、射门距离与转化率、抢断、犯规、点球、角球、伤病、卡死和强弱队差距。v165 的 24 场等强校准样本为 3.04 球/场、10.5% 射门转化率、37.5% 禁区外射门，30+ 距离零进球。
+`npm test` 运行语法检查和核心审计，通常需要数分钟；`npm run test:full` 额外运行 24 场固定种子真实性校准。`npm run test:browser` 使用本机 Microsoft Edge，并通过 Python 在 `127.0.0.1:8876` 启动临时测试服务，覆盖桌面/手机布局、导航和弹窗焦点。
+
+比赛真实性审计检查进球、射门距离与转化率、抢断、犯规、点球、角球、伤病、卡死和强弱队差距。直接调用统一入口也受支持：`node scripts/verify.mjs [--full]`。
 
 ### 技术栈
 
@@ -148,6 +158,12 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 Repository: https://github.com/as7er/vcfm
 
+### What's new in v191
+
+- Managers, scouts, and physios now have stable nationalities, with flags and localized country names on staff profiles.
+- Staff profiles record club, role, and tenure. Releases, contract expiry, free-agent appointments, and moves between clubs close the previous entry and open the next one.
+- Existing saves deterministically fill nationality from the staff ID and record current employment from the existing club assignment, without changing names, ability, contracts, or clubs.
+
 ### Quick start
 
 1. Choose a club from any of the five nations' lower divisions and create your manager.
@@ -171,9 +187,10 @@ Repository: https://github.com/as7er/vcfm
 - **Three viewing modes**: Live keeps the full highlight rhythm; Quick Highlights skips quiet periods while showing real goals and saves; Instant Finish goes straight to the report.
 - **Shared tactical causality**: both teams run the same AI. Formation, roles, ability, form, fitness, morale, and tactics drive performance without UI-only team weighting.
 - **Broadcast presentation**: top-down pitch, recorded spatial frames, speed controls, pause, half-time changes, replays, celebrations, ball trails, xG, possession, and shot statistics.
-- **v180 spatial-event match analysis**: post-match reports derive pre-shot xG, shot maps, progression, pressing, action heatmaps, and completed-pass networks from the same event stream. The saved analysis remains available in archived reports and never uses the shot outcome to rewrite chance quality.
-- **v165 realism calibration**: long-shot intent decays with distance; shot height and goalkeeper reaction time affect outcomes; tackles, penalties, corners, and kickoff positions are covered by seeded batch audits.
-- **v166 pre-match gate causality**: attendance and gate modifiers now use only information known before kickoff; match reports and the finance overview expose cup, derby, title-race, league-tier, and other income factors.
+- **Spatial-event match analysis**: post-match reports derive pre-shot xG, shot maps, progression, pressing, action heatmaps, and completed-pass networks from the same event stream. Saved analysis remains available in archived reports and never uses the shot outcome to rewrite chance quality.
+- **Realism and reproducibility**: every fixture stores a deterministic seed. Long shots, shot height, goalkeeper reactions, tackles, penalties, corners, and strong-vs-weak performance are covered by seeded batch audits.
+- **Unified live causality**: coaching, weather, preparation, team talks, the actual lineup, and set-piece training feed the spatial simulation. The second half is calculated in 46–60, 61–75, and 76–90 windows, so substitutions and tactical changes affect only the remaining play.
+- **Pre-match gate causality**: attendance and gate modifiers use only information known before kickoff; match reports and the finance overview expose cup, derby, title-race, league-tier, and other income factors.
 - **Fast background simulation**: non-user fixtures retain the probabilistic engine so advancing a full round remains quick.
 
 ### Club management
@@ -182,7 +199,7 @@ Repository: https://github.com/as7er/vcfm
 - **Tactics**: formation, style, pressing, tempo, width, defensive line, slot roles, core player, and drag-and-drop changes.
 - **Training and youth**: training focus, intensity, match preparation, youth development, and assistant-manager delegation based on schedule and squad weaknesses.
 - **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Purchases, sales, renewals, and loans pass through the relevant clubs and players in staged reviews, counters, or rejections; players do not move before completion.
-- **Staff**: managers, scouts, and physios have ability, wages, and contracts. Hire free agents or approach employed staff with compensation.
+- **Staff**: managers, scouts, and physios have ability, wages, contracts, stable nationalities, and complete employment histories. Hire free agents or approach employed staff with compensation.
 - **Manager career**: board objectives, reputation, achievements, and job history. Sacking or resignation leads to unemployment and new offers; successful employed managers may receive prestige approaches.
 
 ### Operations and usability
@@ -191,16 +208,11 @@ Repository: https://github.com/as7er/vcfm
 - **Facilities**: stadium, training, youth, and medical upgrades affect revenue, development, recovery, and injuries.
 - **Information systems**: inbox, world news, media, scouting missions, shortlist, player talks, global search, and continuous player-profile browsing.
 - **Saves**: 3 slots, autosave, manual save, and JSON export/import. Older saves are migrated with defaults for new fields.
-- **v181 save reliability**: compression-worker failures synchronously persist each slot's newest snapshot, pending jobs flush before unload, and a versioned schema validates migrations and imports.
-- **v182 player pathways**: playing-time promises use availability, starts, substitute appearances, and actual minutes; repeated breaches affect morale, relationships, and willingness to stay. Match settlement now credits every real participant with an appearance and rating.
-- **v183 portraits**: procedural faces add face shape, ears, eye spacing, facial hair, and age tiers. Creation and rendering share one appearance source, and only diagnosed head or facial injuries alter the face.
-- **v184 portrait clarity**: list portraits use a consistent 32px grid, profile portraits increase to 96px, and pixel art uses hard-edge scaling with adaptive status badges.
-- **v185 dual-detail portraits**: profiles render a native 48×48 high-detail portrait from the same identity, while lists and the tactics board retain the compact 32×32 version.
-- **v186 portrait fix**: profile portraits now use one native 48×48 coordinate system, eliminating facial misalignment from fractional scaling, with safe fallback for invalid output.
-- **v187 facial polish**: profile portraits use clearer consistent eyes with pupil highlights, continuous symmetric jawlines, and sparse natural stubble.
-- **v188 delegation**: coaching staff can handle training, selection, tactics, matchday changes, and development. Formation, key-player, and development principles can be locked, while club-director mode gives the employed head coach sporting control without hidden match bonuses.
-- **v189 matchday control**: in club-director mode the head coach chooses the pre-match talk, half-time plan, substitutions, and live tactics. The coach re-evaluates at 60' and 75' using score, fitness, and availability; the spectator UI and APIs enforce the same permissions.
-- **v190 unified causality and reliability**: spatial matches now consume coaching, weather, preparation, talks, line-up context, and set-piece training; live matches calculate in 60'/75' windows with real substitutions. Delegated development, separate career records, AI debt actions, deep save validation, accessible modals, browser regression coverage, and passing/shooting/set-piece calibration are included.
+- **Save reliability**: compression-worker failures synchronously persist each slot's newest snapshot, pending jobs flush before unload, and a versioned schema with deep-reference and numeric checks protects migrations and imports.
+- **Player pathways**: playing-time promises use availability, starts, substitute appearances, and actual minutes; repeated breaches affect morale, relationships, and willingness to stay. Training, academy development, ageing, and real appearances all leave explainable records.
+- **Dual-detail portraits**: lists and the tactics board use 32×32 procedural faces; profiles render a native 48×48 high-detail portrait from the same identity at 96px. Injury appearance follows the actual diagnosis, with safe fallback for invalid output.
+- **Delegation and club-director mode**: coaching staff can handle training, selection, tactics, matchday changes, and development, with formation, key-player, and development principles available as locks. In club-director mode the head coach runs the team while the player manages transfers, contracts, finances, facilities, youth, and coaching appointments.
+- **Long-term operating reliability**: the player's manager career and the employed head coach have separate records, while AI clubs take explicit debt actions. Automated decisions use only real ability, fitness, form, schedules, and staff quality, without hidden win-probability or ability modifiers.
 - **Offline and performance**: Service Worker assets are precached independently so one failure cannot discard the batch; the large match view loads only when entering a match or archived report.
 - **Unified verification**: `node scripts/verify.mjs` runs the core audits, while `--full` adds the 24-match realism calibration. GitHub Actions covers pushes, pull requests, manual runs, and a schedule.
 
@@ -208,7 +220,9 @@ Repository: https://github.com/as7er/vcfm
 
 ES Modules must be served over HTTP; do not open `index.html` directly.
 
-On Windows, the included script clears the configured port, starts a no-store server, and opens the browser:
+The commands below require **Python 3**. The Windows launcher also requires **PowerShell 7** (`pwsh`); it stops any existing process listening on `127.0.0.1:8765`, then starts a no-store server and opens the browser.
+
+On Windows, use the included launcher:
 
 ```powershell
 pwsh -File start-local.ps1
@@ -226,12 +240,18 @@ Raw spatial-engine preview: `http://127.0.0.1:8765/sim-viewer.html`
 
 ### Validation and audits
 
+Development and validation are tested with **Node.js 22**. Install the development dependencies before the first run:
+
 ```bash
-node scripts/verify.mjs
-node scripts/verify.mjs --full
+npm ci
+npm test
+npm run test:full
+npm run test:browser
 ```
 
-The seeded realism audit measures goals, shot distance and conversion, tackles, fouls, penalties, corners, injuries, stalls, and strong-vs-weak performance. The v165 24-match equal-strength baseline produced 3.04 goals per match, 10.5% shot conversion, 37.5% shots from outside the box, and no goals from 30+ distance.
+`npm test` runs syntax checks and the core audits and can take several minutes. `npm run test:full` adds the seeded 24-match realism calibration. `npm run test:browser` uses the locally installed Microsoft Edge and starts a temporary Python server on `127.0.0.1:8876` to cover desktop/mobile layout, navigation, and modal focus.
+
+The realism audit measures goals, shot distance and conversion, tackles, fouls, penalties, corners, injuries, stalls, and strong-vs-weak performance. The unified runner can also be called directly as `node scripts/verify.mjs [--full]`.
 
 ### Stack
 
