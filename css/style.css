@@ -4894,6 +4894,9 @@ html[data-theme="light"] .form-pill.form-cold {
 }
 .staff-profile-subtitle { margin: 1rem 0 0.45rem; font-size: 0.95rem; }
 .staff-impact-list { display: grid; gap: 0.45rem; }
+.staff-history-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.staff-history-table th, .staff-history-table td { padding: 0.42rem 0.5rem; border-bottom: 1px solid var(--line); text-align: left; }
+.staff-history-table th { color: var(--muted); font-weight: 700; }
 .staff-impact-list > div {
   padding: 0.6rem 0.75rem;
   border-left: 3px solid var(--primary);

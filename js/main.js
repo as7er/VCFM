@@ -30,7 +30,7 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=190";
+import { nationFlagHtml } from "./flags.js?v=191";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -318,7 +318,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=190";
+} from "./avatar.js?v=191";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -406,7 +406,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=190").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=191").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -3143,6 +3143,25 @@ function staffRoleLabel(role, en) {
   return ROLES[role]?.label || role || "—";
 }
 
+function staffNationLabel(staff, en) {
+  const nation = NATIONALITIES.find((item) => item.code === staff?.nationality);
+  if (!nation) return en ? "Unknown nationality" : "国籍未记录";
+  return `${nationFlagHtml(nation.code)} ${en ? nation.nameEn : nation.name}`;
+}
+
+function staffHistoryHtml(staff, en) {
+  const rows = (Array.isArray(staff?.history) ? staff.history : []).slice().reverse().map((item) => {
+    const club = world?.clubs?.find((candidate) => candidate.id === item.clubId);
+    const clubName = club ? clubLinkHtml(club.id, clubDisplayName(club)) : escapeHtml(item.clubName || (en ? "Unknown club" : "未知俱乐部"));
+    const from = item.fromSeason != null ? String(item.fromSeason) : "—";
+    const to = item.toSeason != null ? String(item.toSeason) : en ? "Present" : "至今";
+    return `<tr><td>${clubName}</td><td>${escapeHtml(staffRoleLabel(item.role, en))}</td><td>${from}–${to}</td></tr>`;
+  });
+  return rows.length
+    ? `<table class="staff-history-table"><thead><tr><th>${en ? "Club" : "俱乐部"}</th><th>${en ? "Role" : "职位"}</th><th>${en ? "Period" : "任职时期"}</th></tr></thead><tbody>${rows.join("")}</tbody></table>`
+    : `<p class="muted">${en ? "No previous club record yet." : "暂无俱乐部任职记录。"}</p>`;
+}
+
 function showStaffModal(staffId, context = {}) {
   const found = findStaffById(staffId, context.clubId || null);
   if (!found) return;
@@ -3197,7 +3216,7 @@ function showStaffModal(staffId, context = {}) {
       <div>
         <div class="role">${escapeHtml(en ? roleCopy[staff.role]?.[0] || staff.role : staffRoleLabel(staff.role, false))}</div>
         <h2>${escapeHtml(staff.name)}</h2>
-        <p class="muted">${en ? `Age ${staff.age}` : `${staff.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${ovrClass(staff.rating)}">${staff.rating}</strong> / 20${
+        <p class="muted">${en ? `Age ${staff.age}` : `${staff.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${ovrClass(staff.rating)}">${staff.rating}</strong> / 20 · ${staffNationLabel(staff, en)}${
           staff.contractYears != null && staff.clubId
             ? ` · ${en ? "Contract" : "合同"} ${staff.contractYears}${en ? "y" : " 年"}`
             : staff.clubId == null
@@ -3213,6 +3232,8 @@ function showStaffModal(staffId, context = {}) {
       ${source === "market" ? `<span>${en ? "Signing fee" : "签约费"} <strong>${formatMoney(fee)}</strong></span>` : ""}
     </div>
     <p>${escapeHtml(en ? roleCopy[staff.role]?.[1] || "" : meta.desc || "")}</p>
+    <h3 class="staff-profile-subtitle">${en ? "Employment history" : "效力记录"}</h3>
+    ${staffHistoryHtml(staff, en)}
     <h3 class="staff-profile-subtitle">${en ? "Current impact" : "当前能力影响"}</h3>
     <div class="staff-impact-list">${lines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>
     <p class="hint">${escapeHtml(

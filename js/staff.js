@@ -1,6 +1,6 @@
 /** 教练组 / 球探 / 队医 — 按实力生成 + 合同与俱乐部间流动 */
 
-import { FIRST_NAMES, LAST_NAMES, DIVISIONS } from "./data.js";
+import { FIRST_NAMES, LAST_NAMES, DIVISIONS, NATIONALITIES } from "./data.js";
 import { formatMoney } from "./models.js";
 import { isTransferWindowOpen } from "./transfers.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
@@ -40,6 +40,8 @@ const STAFF_ROLES = ["coach", "scout", "doctor"];
 /** 职员质量标尺版本：旧档 ensureStaff 时按实力重校准一次 */
 export const STAFF_QUALITY_VERSION = 2;
 
+export const STAFF_PROFILE_VERSION = 1;
+
 function rand(a, b) {
   return Math.floor(Math.random() * (b - a + 1)) + a;
 }
@@ -51,6 +53,54 @@ function uid(prefix = "st") {
 }
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
+}
+
+function stableNationCode(staff) {
+  const id = String(staff?.id || staff?.name || "staff");
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return NATIONALITIES[hash % NATIONALITIES.length]?.code || "ENG";
+}
+
+export function closeStaffTenure(staff, world = null) {
+  if (!staff || !Array.isArray(staff.history)) return;
+  const active = staff.history.find((item) => item && item.toDay == null);
+  if (active) {
+    active.toDay = Number(world?.day) || active.fromDay || 1;
+    active.toSeason = Number(world?.season) || active.fromSeason || null;
+  }
+}
+
+export function ensureStaffProfile(staff, club = null, world = null) {
+  if (!staff) return staff;
+  if (!staff.nationality || !NATIONALITIES.some((item) => item.code === staff.nationality)) {
+    staff.nationality = stableNationCode(staff);
+  }
+  const nation = NATIONALITIES.find((item) => item.code === staff.nationality);
+  staff.nationName = nation?.name || staff.nationName || staff.nationality;
+  staff.nationNameEn = nation?.nameEn || staff.nationNameEn || staff.nationality;
+  staff.nationFlag = nation?.flag || staff.nationFlag || "🌍";
+  if (!Array.isArray(staff.history)) staff.history = [];
+  if (club?.id) {
+    const role = staff.role || "staff";
+    const active = staff.history.find((item) => item && item.toDay == null);
+    if (!active || active.clubId !== club.id || active.role !== role) {
+      if (active) {
+        active.toDay = Number(world?.day) || active.fromDay || 1;
+        active.toSeason = Number(world?.season) || active.fromSeason || null;
+      }
+      staff.history.push({
+        clubId: club.id,
+        role,
+        fromDay: Number(staff.joinedDay) || Number(world?.day) || 1,
+        fromSeason: Number(world?.season) || null,
+        toDay: null,
+        toSeason: null,
+      });
+    }
+  }
+  staff.profileVersion = STAFF_PROFILE_VERSION;
+  return staff;
 }
 
 function wageFromRating(rating) {
@@ -147,6 +197,7 @@ export function staffSigningFee(staff) {
 
 export function ensureStaffContract(staff, club = null) {
   if (!staff) return staff;
+  ensureStaffProfile(staff, club);
   if (staff.contractYears == null || staff.contractYears < 0) {
     staff.contractYears = defaultStaffContractYears(staff.rating);
   }
@@ -171,7 +222,10 @@ export function createStaff(role, rating = null, opts = {}) {
     age: rand(32, 62),
     contractYears: opts.contractYears != null ? opts.contractYears : defaultStaffContractYears(r),
     clubId: opts.clubId != null ? opts.clubId : null,
+    nationality: opts.nationality || stableNationCode({ id: `${role}-${Date.now()}-${Math.random()}` }),
+    history: [],
   };
+  ensureStaffProfile(staff, null);
   return staff;
 }
 
@@ -312,6 +366,7 @@ export function generateStaffMarket(count = 12) {
     const s = createStaff(pick(STAFF_ROLES), rating, { clubId: null, contractYears: 0 });
     s.clubId = null;
     s.contractYears = 0;
+    ensureStaffProfile(s);
     list.push(s);
   }
   return list.sort((a, b) => b.rating - a.rating);
@@ -321,6 +376,7 @@ export function refreshStaffMarket(world, count = 12) {
   ensureStaffMarket(world);
   // 保留仍是自由身的真实人员，只补随机候选人到 count
   const kept = world.staffMarket.filter((s) => s && s.clubId == null);
+  kept.forEach((s) => ensureStaffProfile(s));
   const need = Math.max(0, count - kept.length);
   const extra = need > 0 ? generateStaffMarket(need) : [];
   world.staffMarket = [...kept, ...extra].sort((a, b) => (b.rating || 0) - (a.rating || 0));
@@ -334,6 +390,8 @@ function pushFreeAgent(world, staff) {
   staff.clubId = null;
   // 自由身展示合同为 0
   staff.contractYears = 0;
+  closeStaffTenure(staff, world);
+  ensureStaffProfile(staff);
   if (!world.staffMarket.some((s) => s.id === staff.id)) {
     world.staffMarket.unshift(staff);
   }
@@ -388,7 +446,7 @@ export function fireStaff(worldOrClub, roleMaybe, roleArg) {
   const fundingError = staffCashFailure(world, club, cost, "解约补偿");
   if (fundingError) return { ok: false, msg: fundingError };
   recordFinanceEntry(club, -cost, { category: "staff", source: "staff-termination", season: world?.season ?? null, day: world?.day ?? null });
-  const released = { ...s, clubId: null, contractYears: 0 };
+  const released = { ...s, history: structuredClone(s.history || []), clubId: null, contractYears: 0 };
   club.staff[role] = makeCaretaker(club, role);
   if (world) pushFreeAgent(world, released);
   return {
@@ -417,11 +475,13 @@ export function hireStaff(world, club, candidate, fee = null) {
   const old = club.staff[role];
   recordFinanceEntry(club, -signFee, { category: "staff", source: "staff-signing", season: world?.season ?? null, day: world?.day ?? null });
   if (old) {
-    const released = { ...old, clubId: null, contractYears: 0 };
+    const released = { ...old, history: structuredClone(old.history || []), clubId: null, contractYears: 0 };
     pushFreeAgent(world, released);
   }
   const years = defaultStaffContractYears(candidate.rating);
   club.staff[role] = {
+    ...candidate,
+    history: structuredClone(candidate.history || []),
     id: candidate.id,
     name: candidate.name,
     role: candidate.role,
@@ -432,6 +492,7 @@ export function hireStaff(world, club, candidate, fee = null) {
     clubId: club.id,
     joinedDay: world?.day ?? 1,
   };
+  ensureStaffProfile(club.staff[role], club, world);
   removeFromMarket(world, candidate.id);
   return {
     ok: true,
@@ -775,7 +836,10 @@ export function completeStaffMove(world, approach) {
     fromClub.staff[role] = makeCaretaker(fromClub, role);
   }
 
+  closeStaffTenure(staff, world);
   buyer.staff[role] = {
+    ...staff,
+    history: structuredClone(staff.history || []),
     id: staff.id,
     name: staff.name,
     role,
@@ -786,6 +850,7 @@ export function completeStaffMove(world, approach) {
     clubId: buyer.id,
     joinedDay: world.day || 1,
   };
+  ensureStaffProfile(buyer.staff[role], buyer, world);
   removeFromMarket(world, staff.id);
 
   approach.status = "completed";
