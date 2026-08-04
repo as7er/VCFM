@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v193** · 持久化球探知识体系 |
+| 当前版本 | **v194** · 程序化俱乐部队徽 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -25,12 +25,12 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 仓库：https://github.com/as7er/vcfm
 
-### v193 更新亮点
+### v194 更新亮点
 
-- 球员、俱乐部、联赛和国家知识会随观察持久化；旧报告会随时间衰减，球员成长不会自动改写尚未更新的估计。
-- 球探任务可按位置、培养潜力/即战力/合同将尽和转会费预算筛选，候选排序只使用球探估计而非隐藏真实能力。
-- 球员资料、全局搜索、俱乐部与国家队名单、关注列表、转会市场和初始报价共用同一份能力、潜力与估值区间；高能力球探也必须先完成观察。
-- 存档 schema v3 校验球探知识结构；专项审计覆盖估计持久化、时效衰减、条件筛选和隐藏能力泄漏。
+- 198 家虚构俱乐部按既有品牌形状、图腾、球衣纹样、颜色与内部短码生成唯一且稳定的离线 SVG 队徽，不使用现实俱乐部资产或外部图片。
+- 开档选队、顶栏、俱乐部链接与资料、全局搜索和比赛计分板统一显示同一枚队徽；球衣与号码继续读取同一品牌配色。
+- 队徽使用固定尺寸与安全的 data URI，装饰性实例不会被辅助技术重复朗读，小尺寸列表支持延迟解码。
+- 专项审计覆盖 198 枚图形的唯一性、确定性、安全标记、关键界面接入和离线缓存。
 
 ### 快速开始
 
@@ -150,7 +150,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v193** · persistent scouting knowledge |
+| Current version | **v194** · procedural club crests |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -159,12 +159,12 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 Repository: https://github.com/as7er/vcfm
 
-### What's new in v193
+### What's new in v194
 
-- Player, club, competition, and nation knowledge persists after observation. Reports decay over time, and unobserved player development no longer rewrites saved estimates.
-- Assignments can target a position, development/first-team/expiring profiles, and a transfer-fee budget. Candidate ranking uses observed estimates rather than hidden true ability.
-- Profiles, global search, club and national-team squads, watchlists, the market, and opening bids share the same ability, potential, and value ranges. Even elite scouts need current observations.
-- Save schema v3 validates scouting records, with a dedicated audit for persistence, decay, criteria, and hidden-ability leaks.
+- All 198 fictional clubs now receive unique, deterministic offline SVG crests generated from their existing shape, symbol, kit pattern, colours, and internal code, without real-club assets or external images.
+- Career setup, the top bar, club links and profiles, global search, and the match scoreboard all show the same crest; kits and squad numbers continue to use the same brand colours.
+- Fixed dimensions prevent layout shifts, decorative instances stay silent to assistive technology, and compact lists use asynchronous image decoding.
+- A dedicated audit covers artwork uniqueness, deterministic output, safe markup, key UI integrations, and offline caching.
 
 ### Quick start
 

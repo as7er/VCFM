@@ -33,6 +33,19 @@ async function assertNoHorizontalOverflow(page, label) {
   );
 }
 
+async function assertCrestLoaded(locator, label) {
+  await locator.waitFor({ state: "visible" });
+  const image = await locator.evaluate((element) => ({
+    complete: element.complete,
+    naturalWidth: element.naturalWidth,
+    naturalHeight: element.naturalHeight,
+    source: element.currentSrc || element.src,
+  }));
+  assert.equal(image.complete, true, `${label} did not finish loading`);
+  assert.ok(image.naturalWidth > 0 && image.naturalHeight > 0, `${label} has no decoded pixels`);
+  assert.ok(image.source.startsWith("data:image/svg+xml"), `${label} must use an offline SVG data URI`);
+}
+
 const navGroupByTab = {
   dashboard: "overview",
   finance: "overview",
@@ -58,6 +71,7 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await assertCrestLoaded(page.locator("#start-club-preview .club-crest"), "career setup crest");
   await assertNoHorizontalOverflow(page, "desktop start screen");
   await page.fill("#input-manager", "Browser Audit");
   await page.click("#btn-new-game");
@@ -67,6 +81,7 @@ try {
     const hint = await page.locator("#start-hint").textContent().catch(() => "");
     throw new Error(`new game did not open: ${hint || "no start hint"}; ${pageErrors.join(" | ") || error.message}`);
   }
+  await assertCrestLoaded(page.locator("#club-name .club-crest"), "topbar crest");
   await assertNoHorizontalOverflow(page, "desktop dashboard");
 
   for (const tab of ["finance", "squad", "training", "tactics", "fixtures", "career"]) {
@@ -98,9 +113,11 @@ try {
 
   await openTab(page, "clubs");
   const externalClubRow = page.locator("#clubs-table tbody tr:not(.me)").first();
+  await assertCrestLoaded(externalClubRow.locator(".club-link-crest"), "club table crest");
   assert.match(await externalClubRow.locator("td").nth(5).innerText(), /^\d+-\d+$/);
   await externalClubRow.locator("[data-open-club]").click();
   await page.waitForSelector('#modal:not(.hidden) .club-modal-grid');
+  await assertCrestLoaded(page.locator('#modal:not(.hidden) .club-modal-crest'), "club profile crest");
   const externalPlayerAbility = page.locator(".club-modal-grid .compact-table tbody tr").first().locator("td").nth(4);
   assert.match(await externalPlayerAbility.innerText(), /^\d+-\d+$/);
   await page.keyboard.press("Escape");
@@ -112,6 +129,9 @@ try {
   await assertNoHorizontalOverflow(page, "mobile finance");
   await openTab(page, "dashboard");
   await assertNoHorizontalOverflow(page, "mobile dashboard");
+  await openTab(page, "clubs");
+  await assertCrestLoaded(page.locator("#clubs-table .club-link-crest").first(), "mobile club table crest");
+  await assertNoHorizontalOverflow(page, "mobile clubs");
   await page.locator("#btn-global-search").focus();
   await page.keyboard.press("Control+K");
   await page.waitForSelector('#modal:not(.hidden)[role="dialog"][aria-modal="true"]');
@@ -119,7 +139,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v193";
+const CACHE = "vcfm-v194";
 const ASSETS = [
   "./",
   "./index.html",
@@ -69,6 +69,7 @@ const ASSETS = [
   // 存档压缩 / Worker / 品牌（离线半残根因）
   "./js/compress.js",
   "./js/branding.js",
+  "./js/club-crest.js",
   "./js/save-worker.js",
   // 球员正式肖像资产池（manifest + 缩略图；大图按需缓存）
   "./manifest.webmanifest",

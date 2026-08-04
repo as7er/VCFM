@@ -4,7 +4,15 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v193**（持久化球探知识体系）
+> 缓存：**vcfm-v194**（程序化俱乐部队徽）
+
+## v194 程序化俱乐部队徽（2026-08-04）
+
+- 198 家虚构俱乐部按既有品牌形状、图腾、球衣纹样、颜色与内部短码生成唯一、稳定的离线 SVG 队徽，不引入现实俱乐部资产或外部图片
+- 开档选队、顶栏、俱乐部链接与资料、全局搜索和比赛计分板统一显示同一枚队徽，球衣与号码仍读取同一品牌颜色
+- 队徽通过安全的 SVG data URI 渲染；装饰性实例不重复朗读队名，小尺寸链接延迟解码且保持固定尺寸
+- 新增 `scripts/club-crest-audit.mjs`，覆盖 198 枚图形唯一性、确定性、安全标记、关键界面接入与离线缓存；缓存 `vcfm-v194`
+- 已验证：`node scripts/verify.mjs --full`、`node js/sim/_p5_integration.mjs`、`npm run test:browser` 与 `git diff --check`；1440×1000 和 390×844 实际截图无页面级横向溢出或元素重叠
 
 ## v193 持久化球探知识体系（2026-08-04）
 

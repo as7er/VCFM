@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=193" />
+  <link rel="stylesheet" href="css/style.css?v=194" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -86,6 +86,7 @@
           <label><span data-i18n="start.club">选择球队（该国最低级别）</span>
             <select id="select-club"></select>
           </label>
+          <div id="start-club-preview" class="start-club-preview" aria-live="polite"></div>
           <p class="hint" style="margin:0" data-i18n="start.leagueHint">五国联赛均可执教；每个新生涯必须从所选国家的最低开放级别起步。</p>
 
           <div class="slot-section">
@@ -1388,12 +1389,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=193"></script>
+  <script type="module" src="js/main.js?v=194"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v193";
+        var CURRENT_CACHE = "vcfm-v194";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1404,7 +1405,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=193").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=194").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1413,8 +1414,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v193")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v193", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v194")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v194", "1");
               location.reload();
             }
           } catch (e) {

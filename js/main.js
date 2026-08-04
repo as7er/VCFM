@@ -30,7 +30,8 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=193";
+import { nationFlagHtml } from "./flags.js?v=194";
+import { clubCrestHtml } from "./club-crest.js?v=194";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -326,7 +327,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=193";
+} from "./avatar.js?v=194";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -414,7 +415,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=193").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=194").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -899,6 +900,21 @@ function fillClubSelect() {
     )
     .join("");
   if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  renderStartClubPreview();
+}
+
+function renderStartClubPreview() {
+  const target = $("#start-club-preview");
+  const club = CLUB_TEMPLATES.find((item) => item.id === $("#select-club")?.value);
+  if (!target || !club) return;
+  const division = DIVISIONS[club.division || 3];
+  const divisionName = t(`div.${club.division || 3}`) || (getLang() === "en" ? division?.nameEn : division?.name) || "";
+  target.innerHTML = `
+    ${clubCrestHtml(club, { size: 56, className: "start-club-crest", decorative: true })}
+    <span>
+      <strong>${escapeHtml(clubDisplayName(club))}</strong>
+      <small>${escapeHtml(divisionName)} · ${escapeHtml(getLang() === "en" ? club.city?.en || "" : club.city?.zh || "")}</small>
+    </span>`;
 }
 
 function initStart() {
@@ -911,6 +927,8 @@ function initStart() {
       fillClubSelect();
     };
   }
+  const clubSel = $("#select-club");
+  if (clubSel) clubSel.onchange = renderStartClubPreview;
 
   refreshSlotUI();
   if (hasAnySave()) {
@@ -3374,8 +3392,7 @@ function careerStats(p) {
 function renderTopbar() {
   const club = getUserClub(world);
   const div = DIVISIONS[club.division || 3];
-  const kit = ensureKit(club);
-  $("#club-name").innerHTML = `<span class="kit-chip" style="${kitBadgeStyle(club)}" title="${kit.style}"></span> ${escapeHtml(clubDisplayName(club))}`;
+  $("#club-name").innerHTML = `${clubCrestHtml(club, { size: 30, className: "topbar-club-crest", decorative: true })}<span>${escapeHtml(clubDisplayName(club))}</span>`;
   const mgrAv = avatarHtml(
     { id: `mgr_${world.userClubId}_${world.managerName}`, name: world.managerName, age: 42 },
     { role: "manager", size: 32 }
@@ -5918,7 +5935,7 @@ function globalClubSearchRow(item) {
   const div = club.division || 3;
   const divName = t(`div.${div}`) || DIVISIONS[div]?.name || "";
   return `<button type="button" class="global-search-result" data-club-link="${escapeHtml(club.id)}">
-    <span class="kit-chip global-search-club-kit" style="${kitBadgeStyle(club)}"></span>
+    ${clubCrestHtml(club, { size: 36, className: "global-search-club-crest", decorative: true })}
     <span class="global-search-copy">
       <strong>${escapeHtml(clubDisplayName(club))}</strong>
       <span>${escapeHtml(divName)}${club.short ? ` · ${escapeHtml(club.short)}` : ""}</span>
@@ -6005,7 +6022,15 @@ function clubLinkHtml(clubId, label, extraClass = "") {
       ? clubDisplayShortName(club)
       : label;
   const title = name !== fullName ? ` title="${escapeHtml(fullName)}" aria-label="${escapeHtml(fullName)}"` : "";
-  return `<button type="button" class="club-link ${extraClass}" data-club-link="${escapeHtml(clubId)}"${title}>${escapeHtml(name)}</button>`;
+  const crest = club
+    ? clubCrestHtml(club, {
+        size: extraClass.includes("compact") ? 16 : 18,
+        className: "club-link-crest",
+        decorative: true,
+        lazy: true,
+      })
+    : "";
+  return `<button type="button" class="club-link ${extraClass}" data-club-link="${escapeHtml(clubId)}"${title}>${crest}<span class="club-link-label">${escapeHtml(name)}</span></button>`;
 }
 
 /** 可点击球员名 → showPlayerModal（全局 data-player-link 委托） */
@@ -6108,7 +6133,6 @@ function renderClubs() {
           ensureKit(c);
           return `<tr class="${me ? "me" : ""}">
             <td>
-              <span class="kit-chip" style="${kitBadgeStyle(c)}"></span>
               ${clubLinkHtml(c.id, clubDisplayName(c))}${me ? " ★" : ""}
             </td>
             <td>${escapeHtml(divName)}</td>
@@ -6244,7 +6268,7 @@ function showClubModal(clubId) {
 
   $("#modal-body").innerHTML = `
     <div class="club-modal-head">
-      <span class="kit-chip large" style="${kitBadgeStyle(club)}"></span>
+      ${clubCrestHtml(club, { size: 72, className: "club-modal-crest", decorative: true })}
       ${renderKitShirt(club, null, 52)}
       <div>
         <h2 style="margin:0 0 0.25rem">${escapeHtml(clubDisplayName(club))}${me ? " ★" : ""}</h2>
@@ -8540,7 +8564,7 @@ function hidePrematchBriefPanel() {
   }
 }
 
-/** FM 风格计分板：队名、球衣色、赛事 */
+/** FM-style scoreboard: club crests, names and competition context. */
 function setupMatchScoreboard(home, away, fixture) {
   ensureKit(home);
   ensureKit(away);
@@ -8558,16 +8582,8 @@ function setupMatchScoreboard(home, away, fixture) {
   setShort("#match-away-short", away);
   const hk = $("#match-home-kit");
   const ak = $("#match-away-kit");
-  if (hk) hk.style.background = kitBackground(ensureKit(home));
-  if (ak) {
-    const kit = ensureKit(away);
-    // 避免与主队撞色：优先副色
-    ak.style.background = kitBackground({
-      ...kit,
-      primary: kit.secondary || kit.primary,
-      secondary: kit.primary,
-    });
-  }
+  if (hk) hk.innerHTML = clubCrestHtml(home, { size: 30, className: "match-club-crest", decorative: true });
+  if (ak) ak.innerHTML = clubCrestHtml(away, { size: 30, className: "match-club-crest", decorative: true });
   const ctx = $("#match-context");
   if (ctx) {
     ctx.textContent =
