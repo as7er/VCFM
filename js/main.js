@@ -30,7 +30,7 @@ import {
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=192";
+import { nationFlagHtml } from "./flags.js?v=193";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -257,10 +257,12 @@ import {
   buildOpponentReport,
   formatOpponentReportHtml,
   opponentReportLogLines,
-  scoutFogLevel,
   scoutAttrRows,
   formatScoutOvrFog,
   formatScoutPotFog,
+  ensureScoutingKnowledge,
+  scoutPlayerSnapshot,
+  scoutingFreshnessLabel,
   previewBuyDeal,
   ensureDiscipline,
   isAvailable,
@@ -324,7 +326,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=192";
+} from "./avatar.js?v=193";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -412,7 +414,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=192").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=193").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -930,6 +932,7 @@ function initStart() {
       const slot = getActiveSlot();
       if (hasSave(slot) && !confirm(t("start.overwriteConfirm", { n: slot }))) return;
       world = createWorld(clubId, manager, getLang());
+      ensureScoutingKnowledge(world);
       ensureMedia(world);
       for (const c of world.clubs) ensureStaff(c);
       ensureWorldFinances(world);
@@ -1010,6 +1013,7 @@ function initStart() {
 /** 旧存档 / 缺字段兼容 */
 function repairWorldFields(w) {
   if (!w.retiredPlayers) w.retiredPlayers = [];
+  ensureScoutingKnowledge(w);
   ensureMedia(w);
   if (!Array.isArray(w.staffMarket)) refreshStaffMarket(w);
   try {
@@ -1107,11 +1111,16 @@ function repairPlayerPathways(w) {
   for (const player of club?.players || []) ensurePlayerPathway(player, club, w);
 }
 
+function repairScoutingKnowledge(w) {
+  ensureScoutingKnowledge(w);
+}
+
 function migrateWorld(w) {
   return migrateSaveSchema(w, {
     migrations: {
       1: repairWorldFields,
       2: repairPlayerPathways,
+      3: repairScoutingKnowledge,
     },
     ensureCurrent: repairWorldFields,
   });
@@ -1827,6 +1836,10 @@ function nationDetailHtml(code, competitionId = null, meta = null, record = null
               const intl = player.intl || {};
               const ev = eventStats.get(player.id);
               const mark = lastCalledUp ? " ★" : "";
+              const nationalScout = scoutPlayerSnapshot(world, player, getUserClub(world), {
+                ownPlayer: club?.id === world.userClubId,
+                club,
+              });
               const apps = player.stats?.apps || 0;
               const avgRating = apps > 0 && (player.stats?.ratingSum || 0) > 0 ? player.stats.ratingSum / apps : null;
               const lastRating = player.stats?.lastRating;
@@ -1847,7 +1860,7 @@ function nationDetailHtml(code, competitionId = null, meta = null, record = null
                   }
                 )}${mark}</span></td>
                 <td>${club ? clubLinkHtml(club.id, club.name) : "—"}</td>
-                <td>${player.ovr ?? "—"}</td>
+                <td>${escapeHtml(nationalScout?.ovrText || "—")}</td>
                 <td>${escapeHtml(form)}</td>
                 <td>${Math.round(player.fitness ?? 100)}%</td>
                 <td><strong>${Number(selectionScore || 0).toFixed(1)}</strong></td>
@@ -2611,7 +2624,7 @@ function renderTraining() {
     hint.textContent = tip;
   }
 
-  renderTrainingPrep(club, en);
+  renderTrainingPrep(club, en, coachControlled);
 
   const delegate = $("#btn-delegate-training");
   if (delegate) {
@@ -2651,7 +2664,7 @@ const PREP_MODE_ICONS = {
   setpiece: "🎯",
 };
 
-function renderTrainingPrep(club, en) {
+function renderTrainingPrep(club, en, coachControlled) {
   const boost = ensureTrainingBoost(club);
   const modeBox = $("#training-mode-list");
   if (modeBox) {
@@ -4251,18 +4264,21 @@ function showPlayerModal(playerId, context = {}) {
   const fogRows = scoutAttrRows(player, club, {
     ownPlayer: !isOther,
     lang: getLang() === "en" ? "en" : "zh",
+    world,
   });
+  const playerScout = isOther ? scoutPlayerSnapshot(world, player, club) : null;
 
   const pot = isOther
-    ? formatScoutPotFog(player, club, {
-        ownPlayer: false,
-        lang: getLang() === "en" ? "en" : "zh",
-      })
+      ? formatScoutPotFog(player, club, {
+          ownPlayer: false,
+          lang: getLang() === "en" ? "en" : "zh",
+          world,
+        })
     : player.potential != null
       ? String(player.potential)
       : "—";
   const ovrShow = isOther
-    ? formatScoutOvrFog(player, club, { ownPlayer: false })
+    ? formatScoutOvrFog(player, club, { ownPlayer: false, world })
     : String(player.ovr);
   ensurePlayerHistory(player);
   ensureIntl(player);
@@ -4352,7 +4368,7 @@ function showPlayerModal(playerId, context = {}) {
        ${isYouth ? ` · <span class="badge MID">${en ? "Academy" : "青训学院"}</span>` : player.fromYouth ? ` · <span class="badge MID">${en ? "Youth graduate" : "青训"}</span>` : ""}
        ${owningClub ? ` · ${clubLinkHtml(owningClub.id, clubDisplayName(owningClub))}` : ""}
        ${nationalCode ? ` · <span class="badge">${escapeHtml(en ? "National team" : "国家队")}</span>` : ""}
-      ${isOther ? ` · <span class="muted">${getLang() === "en" ? "Scout fog" : "球探可见"} L${scoutFogLevel(club)}</span>` : ""}
+      ${isOther ? ` · <span class="muted">${en ? "Knowledge" : "知识"} ${Math.round(playerScout.level)}/100 · ${escapeHtml(scoutingFreshnessLabel(playerScout, en ? "en" : "zh"))}</span>` : ""}
     </p>
       </div>
     </div>
@@ -5883,7 +5899,7 @@ function globalPlayerSearchRow(item, { academy = false } = {}) {
   const ownPlayer = club.id === world.userClubId;
   const ovr = ownPlayer
     ? String(player.ovr ?? playerOverall(player))
-    : formatScoutOvrFog(player, getUserClub(world), { ownPlayer: false });
+    : formatScoutOvrFog(player, getUserClub(world), { ownPlayer: false, world });
   const age = getLang() === "en" ? `Age ${player.age}` : `${player.age} 岁`;
   const source = academy ? t("search.youth") : clubDisplayName(club);
   return `<button type="button" class="global-search-result" data-player-link="${escapeHtml(player.id)}">
@@ -6021,6 +6037,22 @@ function squadAvgOvr(club) {
   return Math.round(ps.reduce((s, p) => s + (p.ovr || 0), 0) / ps.length);
 }
 
+function scoutedSquadAverage(club) {
+  const players = club?.players || [];
+  if (!players.length) return { estimate: 0, text: "0" };
+  if (club.id === world.userClubId) {
+    const exact = squadAvgOvr(club);
+    return { estimate: exact, text: String(exact) };
+  }
+  const userClub = getUserClub(world);
+  const snapshots = players.map((player) => scoutPlayerSnapshot(world, player, userClub, { club }));
+  const average = (key) => Math.round(snapshots.reduce((sum, item) => sum + item[key], 0) / snapshots.length);
+  return {
+    estimate: average("ovrEstimate"),
+    text: `${average("ovrLo")}-${average("ovrHi")}`,
+  };
+}
+
 function renderClubs() {
   if (!world) return;
   const tbody = $("#clubs-table tbody");
@@ -6072,7 +6104,7 @@ function renderClubs() {
           const me = c.id === world.userClubId;
           const info = rankMap.get(c.id);
           const divName = t("div." + (c.division || 3)) || DIVISIONS[c.division || 3]?.name || "";
-          const avg = squadAvgOvr(c);
+          const avg = scoutedSquadAverage(c);
           ensureKit(c);
           return `<tr class="${me ? "me" : ""}">
             <td>
@@ -6083,7 +6115,7 @@ function renderClubs() {
             <td>${info ? info.rank : "—"}</td>
             <td><strong>${info ? info.pts : 0}</strong></td>
             <td>${formatFormHtml(c.form)}</td>
-            <td class="${ovrClass(avg)}">${avg}</td>
+            <td class="${ovrClass(avg.estimate)}">${escapeHtml(avg.text)}</td>
             <td>${formatMoney(c.money || 0)}</td>
             <td><button type="button" class="btn small" data-open-club="${escapeHtml(c.id)}">${escapeHtml(t("clubs.view"))}</button></td>
           </tr>`;
@@ -6117,9 +6149,14 @@ function showClubModal(clubId) {
     gd: 0,
     pts: 0,
   };
-  const avg = squadAvgOvr(club);
-  const topPlayers = [...(club.players || [])]
-    .sort((a, b) => b.ovr - a.ovr)
+  const userClub = getUserClub(world);
+  const scoutedSquad = (club.players || []).map((player) => ({
+    player,
+    scouting: scoutPlayerSnapshot(world, player, userClub, { ownPlayer: me, club }),
+  }));
+  const avg = scoutedSquadAverage(club);
+  const topPlayers = scoutedSquad
+    .sort((a, b) => b.scouting.ovrEstimate - a.scouting.ovrEstimate)
     .slice(0, 16);
   const formation = club.tactics?.formation || "4-3-3";
   const styleKey = club.tactics?.style || "balanced";
@@ -6172,9 +6209,10 @@ function showClubModal(clubId) {
     : `<p class="muted" style="margin:0">${escapeHtml(t("clubs.noHonors"))}</p>`;
 
   const squadRows = topPlayers
-    .map((p) => {
+    .map(({ player: p, scouting }) => {
       const s = playerStats(p);
       const isGk = p.pos === "GK";
+      const ovrText = scouting.ovrText;
       return `<tr>
         <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${p.number ?? "—"}</span></td>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)}
@@ -6182,7 +6220,7 @@ function showClubModal(clubId) {
         </td>
         <td><span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span></td>
         <td>${p.age}</td>
-        <td class="${ovrClass(p.ovr)}"><strong>${p.ovr}</strong></td>
+        <td class="${ovrClass(scouting.ovrEstimate)}"><strong>${escapeHtml(ovrText)}</strong></td>
         <td title="${escapeHtml(isGk ? t("th.cs") : t("th.goals"))}">${isGk ? s.cleanSheets : s.goals}</td>
         <td title="${escapeHtml(isGk ? t("th.ga") : t("th.assists"))}">${isGk ? s.goalsConceded : s.assists}</td>
       </tr>`;
@@ -6218,7 +6256,7 @@ function showClubModal(clubId) {
         </p>
         <p class="muted" style="margin:0.25rem 0 0">
           ${escapeHtml(t("clubs.money"))} ${formatMoney(club.money || 0)}
-          · ${escapeHtml(t("clubs.squadAvg"))} <strong class="${ovrClass(avg)}">${avg}</strong>
+          · ${escapeHtml(t("clubs.squadAvg"))} <strong class="${ovrClass(avg.estimate)}">${escapeHtml(avg.text)}</strong>
           · ${escapeHtml(t("clubs.power"))} ${club.power ?? "—"}
           · ${escapeHtml(t("tac.formation"))} ${escapeHtml(formation)} · ${escapeHtml(styleLabel)}
         </p>
@@ -6746,6 +6784,19 @@ function renderTransferNegotiations() {
   });
 }
 
+function scoutMissionCriteriaLabel(filters = {}, en = false) {
+  const profiles = {
+    development: en ? "development" : "培养潜力",
+    first_team: en ? "first-team" : "即战力",
+    expiring: en ? "expiring" : "合同将尽",
+  };
+  const position = filters.position || (en ? "all positions" : "全部位置");
+  const budget = Number(filters.maxValue) > 0
+    ? `${en ? "up to" : "预算"} ${formatMoney(Number(filters.maxValue))}`
+    : en ? "no fee limit" : "不限转会费";
+  return `${position} · ${profiles[filters.profile] || profiles.development} · ${budget}`;
+}
+
 function renderTransfer() {
   ensureTransferWindow(world);
   const open = isTransferWindowOpen(world);
@@ -6764,15 +6815,20 @@ function renderTransfer() {
     const active = (world.scoutMissions || []).find((m) => m.status === "active");
     smStatus.textContent = active
       ? enTr
-        ? `Mission active · returns day ${active.doneDay}`
-        : `任务进行中 · 第 ${active.doneDay} 天回报`
+        ? `Mission active · returns day ${active.doneDay} · ${scoutMissionCriteriaLabel(active.filters, true)}`
+        : `任务进行中 · 第 ${active.doneDay} 天回报 · ${scoutMissionCriteriaLabel(active.filters)}`
       : enTr
         ? "No active mission — send scouts below."
         : "当前无任务 — 可派遣球探。";
   }
   document.querySelectorAll("[data-scout-mission]").forEach((btn) => {
+    btn.disabled = (world.scoutMissions || []).some((mission) => mission.status === "active");
     btn.onclick = () => {
-      const res = startScoutMission(world, btn.dataset.scoutMission);
+      const res = startScoutMission(world, btn.dataset.scoutMission, {
+        position: $("#scout-mission-pos")?.value || "",
+        profile: $("#scout-mission-profile")?.value || "development",
+        maxValue: Number($("#scout-mission-budget")?.value) || 0,
+      });
       toast(res.msg);
       if (res.ok) {
         saveGame(world);
@@ -6794,10 +6850,11 @@ function renderTransfer() {
         for (const c of world.clubs) {
           const p = c.players.find((x) => x.id === id);
           if (p) {
+            const knowledge = scoutPlayerSnapshot(world, p, getUserClub(world));
             rows.push(
               `<div class="scout-watch-row">${playerAvatarHtml(p, c, 32)} ${playerLinkHtml(p.id, p.name)}
                 <span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span>
-                <span class="muted">${escapeHtml(c.short || c.name)} · ${formatScoutOvr(world, p)} · ${formatScoutValue(world, p)}</span>
+                <span class="muted">${escapeHtml(c.short || c.name)} · ${formatScoutOvr(world, p)} · ${formatScoutValue(world, p)} · ${knowledge.confidence}% · ${escapeHtml(scoutingFreshnessLabel(knowledge, enTr ? "en" : "zh"))}</span>
               </div>`
             );
             break;
@@ -6885,7 +6942,7 @@ function renderTransfer() {
     watchFilter.addEventListener("change", () => renderTransfer());
   }
   mt.innerHTML = market
-    .map(({ player: p, club }) => {
+    .map(({ player: p, club, scouting }) => {
       const valTxt = formatScoutValue(world, p);
       const ovrTxt = formatScoutOvr(world, p);
       const negotiating = activeNegotiationIds.has(p.id);
@@ -6894,10 +6951,10 @@ function renderTransfer() {
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)} <span>${playerLinkHtml(p.id, p.name)}</span></td>
         <td>${nationLabel(p)}</td>
         <td><span class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</span></td>
-        <td class="${ovrClass(p.ovr)}">${ovrTxt}</td>
+        <td class="${ovrClass(scouting.ovrEstimate)}">${ovrTxt}</td>
         <td>${p.age}</td>
         <td>${clubLinkHtml(club.id, club.short)}</td>
-        <td title="${escapeHtml(en ? "Estimated value range" : "真实身价仅作参考区间")}">${valTxt}</td>
+        <td title="${escapeHtml(en ? "Scouted value range" : "球探估值区间")}">${valTxt}</td>
         <td class="tr-actions">
           <button class="btn small" data-player-link="${p.id}">${en ? "Info" : "详情"}</button>
           <button class="btn small primary" data-buy="${p.id}" data-from="${club.id}" ${

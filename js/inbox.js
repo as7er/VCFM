@@ -3,7 +3,7 @@
  * 与 news 并行：news 仍是时间线，inbox 是可处理事项。
  */
 
-import { formatMoney, estimateValue } from "./models.js";
+import { formatMoney } from "./models.js";
 import { ensureContract, needsContractAttention, renewOffer } from "./contracts.js";
 import { acceptPoachBid, rejectPoachBid, ensurePoachBids } from "./poaching.js";
 import { pushMedia } from "./media.js";
@@ -23,6 +23,10 @@ import {
   playingTimeRoleLabel,
   PLAYING_TIME_ROLES,
 } from "./player-pathway.js";
+import {
+  observeScoutingPlayer,
+  rankScoutingCandidates,
+} from "./scouting-knowledge.js";
 
 const CAT_LABEL = {
   board: "董事会",
@@ -756,29 +760,39 @@ function maybePlayerRequest(world, user) {
 }
 
 function maybeScoutTip(world, user) {
-  // 找市场上有潜力的外队球员
   const others = (world.clubs || []).filter((c) => c.id !== user.id);
   const pool = [];
   for (const c of others) {
     for (const p of c.players || []) {
-      if ((p.age || 30) > 24) continue;
-      if ((p.potential || p.ovr || 0) < 14) continue;
-      if ((p.injured || 0) > 0) continue;
-      pool.push({ p, c });
+      if ((world.scoutWatch || []).includes(p.id)) continue;
+      pool.push({ player: p, club: c });
     }
   }
-  if (!pool.length) return;
-  const hit = pool[Math.floor(Math.random() * Math.min(12, pool.length))];
-  const { p, c } = hit;
-  const val = p.value || estimateValue(p);
+  const ranked = rankScoutingCandidates(
+    world,
+    pool,
+    user,
+    { profile: "development", maxAge: 24 },
+    { projectedLevel: 34, seedSalt: `network-tip:${world.season}:${world.day}` }
+  );
+  const hit = ranked.find(({ player }) =>
+    !(world.inbox || []).some((mail) => mail.dedupeKey === `scout_${player.id}`)
+  );
+  if (!hit) return;
+  const { player: p, club: c } = hit;
+  const snapshot = observeScoutingPlayer(world, p, c, user, {
+    intensity: 34,
+    source: "scouting-network-tip",
+    seedSalt: `network-tip:${world.season}:${world.day}`,
+  });
   const key = `scout_${p.id}`;
   pushInbox(world, {
     category: "scout",
     priority: 1,
     title: `球探报告：关注 ${p.name}`,
     titleEn: `Scout report: watch ${p.name}`,
-    body: `${c.name} 的 ${p.name}（${p.pos} · ${p.age} 岁 · 能力约 ${p.ovr} / 潜力 ${p.potential || "?"}）。估值约 ${formatMoney(val)}。是否加入关注？`,
-    bodyEn: `${p.name} of ${c.nameEn || c.name} (${p.pos} · age ${p.age} · ability about ${p.ovr} / potential ${p.potential || "?"}). Estimated value ${formatMoney(val)}. Add to watchlist?`,
+    body: `${c.name} 的 ${p.name}（${p.pos} · ${p.age} 岁 · 能力估计 ${snapshot.ovrText} / 潜力 ${snapshot.potentialText}）。估值 ${formatMoney(snapshot.valueLo)}-${formatMoney(snapshot.valueHi)}。是否加入关注？`,
+    bodyEn: `${p.name} of ${c.nameEn || c.name} (${p.pos} · age ${p.age} · estimated ability ${snapshot.ovrText} / potential ${snapshot.potentialText}). Value ${formatMoney(snapshot.valueLo)}-${formatMoney(snapshot.valueHi)}. Add to watchlist?`,
     dedupeKey: key,
     expiresDay: (world.day || 0) + 14,
     ref: { kind: "scout", playerId: p.id, clubId: c.id },

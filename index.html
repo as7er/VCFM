@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=192" />
+  <link rel="stylesheet" href="css/style.css?v=193" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -1035,10 +1035,30 @@
               <h2 data-i18n="tr.poach">来自其他俱乐部的报价</h2>
               <div id="poach-bids" class="poach-bids">—</div>
               <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem" data-i18n="transfer.scoutMission">球探任务</h3>
+              <div class="filters scout-mission-filters" style="margin-bottom:0.5rem">
+                <select id="scout-mission-pos" aria-label="球探位置">
+                  <option value="" data-i18n="tr.allPos">全部位置</option>
+                  <option value="GK" data-i18n="pos.GK">门将</option>
+                  <option value="DEF" data-i18n="pos.DEF">后卫</option>
+                  <option value="MID" data-i18n="pos.MID">中场</option>
+                  <option value="ATT" data-i18n="pos.ATT">前锋</option>
+                </select>
+                <select id="scout-mission-profile" aria-label="球探目标">
+                  <option value="development" data-i18n="scout.profileDevelopment">培养潜力</option>
+                  <option value="first_team" data-i18n="scout.profileFirstTeam">即战力</option>
+                  <option value="expiring" data-i18n="scout.profileExpiring">合同将尽</option>
+                </select>
+                <select id="scout-mission-budget" aria-label="转会费预算">
+                  <option value="0" data-i18n="scout.budgetAny">不限转会费</option>
+                  <option value="500000">≤ €500K</option>
+                  <option value="1500000">≤ €1.5M</option>
+                  <option value="5000000">≤ €5M</option>
+                </select>
+              </div>
               <div class="scout-mission-btns" style="display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:0.5rem">
-                <button type="button" class="btn small" data-scout-mission="div3">乙级 · €15K</button>
-                <button type="button" class="btn small" data-scout-mission="div2">甲级 · €25K</button>
-                <button type="button" class="btn small" data-scout-mission="intl">跨级 · €40K</button>
+                <button type="button" class="btn small" data-scout-mission="div3" data-i18n="scout.scopeLower">低级别 · €15K</button>
+                <button type="button" class="btn small" data-scout-mission="div2" data-i18n="scout.scopeSecond">次级联赛 · €25K</button>
+                <button type="button" class="btn small" data-scout-mission="intl" data-i18n="scout.scopeTop">顶级联赛 · €40K</button>
               </div>
               <p class="hint" id="scout-mission-status" style="margin:0 0 0.65rem">—</p>
               <h3 style="margin:1rem 0 0.4rem;font-size:0.95rem" data-i18n="transfer.scoutWatch">球探关注</h3>
@@ -1368,12 +1388,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=192"></script>
+  <script type="module" src="js/main.js?v=193"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v192";
+        var CURRENT_CACHE = "vcfm-v193";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1384,7 +1404,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=192").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=193").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1393,8 +1413,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v192")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v192", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v193")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v193", "1");
               location.reload();
             }
           } catch (e) {

@@ -93,10 +93,21 @@ schema.migrateSaveSchema(legacy, {
       repairCalls++;
       migrationStages.push(2);
     },
+    3: (world) => {
+      repairCalls++;
+      migrationStages.push(3);
+      world.scoutingKnowledge = {
+        version: 1,
+        players: {},
+        clubs: {},
+        divisions: {},
+        nations: {},
+      };
+    },
   },
 });
-assert.equal(repairCalls, 2);
-assert.deepEqual(migrationStages, [1, 2]);
+assert.equal(repairCalls, 3);
+assert.deepEqual(migrationStages, [1, 2, 3]);
 assert.equal(legacy.schemaVersion, schema.CURRENT_SAVE_SCHEMA_VERSION);
 assert.equal(save.importSaveText(JSON.stringify(legacy)).day, 5);
 

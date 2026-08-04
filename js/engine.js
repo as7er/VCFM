@@ -262,6 +262,14 @@ import {
   formatScoutOvrFog,
   formatScoutPotFog,
 } from "./scoutreport.js";
+import {
+  ensureScoutingKnowledge,
+  observeScoutingPlayer,
+  rankScoutingCandidates,
+  scoutClubKnowledge,
+  scoutPlayerSnapshot,
+  scoutingFreshnessLabel,
+} from "./scouting-knowledge.js";
 import { resetSeasonDiscipline, ensureDiscipline, isAvailable } from "./discipline.js";
 import {
   processInboxDay,
@@ -370,6 +378,12 @@ export {
   scoutAttrRows,
   formatScoutOvrFog,
   formatScoutPotFog,
+  ensureScoutingKnowledge,
+  observeScoutingPlayer,
+  rankScoutingCandidates,
+  scoutClubKnowledge,
+  scoutPlayerSnapshot,
+  scoutingFreshnessLabel,
   ensureDiscipline,
   isAvailable,
   resetSeasonDiscipline,
@@ -1915,7 +1929,8 @@ export function previewBuyDeal(world, playerId, fromClubId, years = 3, wageMult 
   if (!player) return null;
   ensureStaff(user);
   ensureContract(player);
-  const price = Math.round(player.value * (1.08) * scoutBuyMod(user));
+  const knownValue = scoutPlayerSnapshot(world, player, user).valueEstimate;
+  const price = Math.round(knownValue * 1.08 * scoutBuyMod(user));
   const y = Math.max(1, Math.min(5, +years || 3));
   const wm = Math.max(0.9, Math.min(1.5, +wageMult || 1.1));
   const newWage = Math.max(player.wage || 800, Math.round(estimateWage(player) * wm));
@@ -2109,35 +2124,27 @@ export {
 export function scoutValueRange(world, player) {
   const user = getUserClub(world);
   ensureStaff(user);
-  const r = staffRatingSafe(user, "scout");
-  // rating 6–18 → 误差约 ±35% 到 ±8%
-  const err = Math.max(0.06, 0.42 - (r / 20) * 0.38);
-  const v = player.value || estimateValue(player);
-  // 用球员 id 做稳定抖动，避免每次刷新数字乱跳
-  let h = 0;
-  const id = String(player.id || "");
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  const bias = ((h % 1000) / 1000 - 0.5) * err * 0.5;
-  const center = Math.round(v * (1 + bias));
-  const lo = Math.max(50_000, Math.round(center * (1 - err) / 10_000) * 10_000);
-  const hi = Math.round(center * (1 + err) / 10_000) * 10_000;
-  return { lo, hi, err, rating: r };
+  const snapshot = scoutPlayerSnapshot(world, player, user);
+  const center = Math.max(1, snapshot.valueEstimate);
+  const err = Math.max(0, (snapshot.valueHi - snapshot.valueLo) / (center * 2));
+  return {
+    lo: snapshot.valueLo,
+    hi: snapshot.valueHi,
+    err,
+    rating: staffRatingSafe(user, "scout"),
+    confidence: snapshot.confidence,
+  };
 }
 
 export function formatScoutValue(world, player) {
-  const { lo, hi, rating } = scoutValueRange(world, player);
-  if (rating >= 16) return formatMoney(player.value || estimateValue(player));
+  const { lo, hi } = scoutValueRange(world, player);
   return formatMoney(lo) + "–" + formatMoney(hi);
 }
 
 export function formatScoutOvr(world, player) {
   const user = getUserClub(world);
   ensureStaff(user);
-  const r = staffRatingSafe(user, "scout");
-  const ovr = player.ovr || playerOverall(player);
-  if (r >= 16) return String(ovr);
-  const band = r >= 12 ? 1 : r >= 9 ? 2 : 3;
-  return Math.max(1, ovr - band) + "–" + Math.min(20, ovr + band);
+  return scoutPlayerSnapshot(world, player, user)?.ovrText || "-";
 }
 
 export function getMarketPlayers(world, posFilter = "") {
@@ -2148,10 +2155,15 @@ export function getMarketPlayers(world, posFilter = "") {
     for (const p of club.players) {
       if (posFilter && p.pos !== posFilter) continue;
       // 只挂牌部分球员：非绝对主力
-      list.push({ player: p, club });
+      list.push({ player: p, club, scouting: scoutPlayerSnapshot(world, p, user) });
     }
   }
-  list.sort((a, b) => b.player.ovr - a.player.ovr);
+  list.sort(
+    (a, b) =>
+      b.scouting.ovrEstimate - a.scouting.ovrEstimate ||
+      b.scouting.potentialEstimate - a.scouting.potentialEstimate ||
+      String(a.player.id).localeCompare(String(b.player.id))
+  );
   return list.slice(0, 40);
 }
 

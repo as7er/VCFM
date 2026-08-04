@@ -2,7 +2,7 @@
  * 世界动态、球探任务、赛季徽章、财政摘要
  */
 
-import { formatMoney, estimateValue } from "./models.js";
+import { formatMoney } from "./models.js";
 import { pushInbox, ensureInbox } from "./inbox.js";
 import { pushMedia } from "./media.js";
 import { ensureManagerCareer } from "./career.js";
@@ -13,18 +13,55 @@ import { isTransferWindowOpen } from "./transfers.js";
 import { DIVISIONS } from "./data.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { clubCashAvailability } from "./cash-reservations.js";
+import {
+  ensureScoutingKnowledge,
+  observeScoutingPlayer,
+  observeScoutingScope,
+  rankScoutingCandidates,
+} from "./scouting-knowledge.js";
 
 // ---------- 球探任务 ----------
 
 export function ensureScoutMissions(world) {
+  ensureScoutingKnowledge(world);
   if (!Array.isArray(world.scoutMissions)) world.scoutMissions = [];
   return world.scoutMissions;
 }
 
-/**
- * 派球探：region div 2/3 或 "intl"
- */
-export function startScoutMission(world, region = "div3") {
+function normalizeMissionFilters(filters = {}) {
+  const profile = ["development", "first_team", "expiring"].includes(filters.profile)
+    ? filters.profile
+    : "development";
+  const position = ["GK", "DEF", "MID", "ATT"].includes(filters.position)
+    ? filters.position
+    : "";
+  const maxValue = Math.max(0, Number(filters.maxValue) || 0);
+  return { profile, position, maxValue };
+}
+
+function missionRegionLabel(region, lang = "zh") {
+  const en = lang === "en";
+  if (region === "div2") return en ? "second tiers" : "次级联赛";
+  if (region === "intl") return en ? "top tiers" : "顶级联赛";
+  return en ? "lower tiers" : "低级别联赛";
+}
+
+function missionFilterLabel(filters, lang = "zh") {
+  const en = lang === "en";
+  const profile = {
+    development: en ? "development" : "培养潜力",
+    first_team: en ? "first-team ability" : "即战力",
+    expiring: en ? "expiring contracts" : "合同将尽",
+  }[filters.profile];
+  const position = filters.position || (en ? "all positions" : "全部位置");
+  const budget = filters.maxValue > 0
+    ? `${en ? "up to" : "预算"} ${formatMoney(filters.maxValue)}`
+    : en ? "no fee limit" : "不限转会费";
+  return `${position} · ${profile} · ${budget}`;
+}
+
+/** Send the scout to a competition scope with explicit recruitment criteria. */
+export function startScoutMission(world, region = "div3", filters = {}) {
   if (!world || world.sacked) return { ok: false, msg: "无法派遣" };
   ensureScoutMissions(world);
   if (world.scoutMissions.some((m) => m.status === "active")) {
@@ -32,6 +69,7 @@ export function startScoutMission(world, region = "div3") {
   }
   const club = world.clubs.find((c) => c.id === world.userClubId);
   if (!club) return { ok: false, msg: "无球队" };
+  const criteria = normalizeMissionFilters(filters);
   const cost = region === "div2" ? 25_000 : region === "intl" ? 40_000 : 15_000;
   const cash = clubCashAvailability(world, club, cost);
   if (!cash.ok) {
@@ -45,8 +83,9 @@ export function startScoutMission(world, region = "div3") {
   recordFinanceEntry(club, -cost, { category: "scouting", source: "scout-mission", season: world.season, day: world.day });
   const days = region === "intl" ? 10 : region === "div2" ? 7 : 5;
   const mission = {
-    id: `sm_${world.day}_${Date.now().toString(36)}`,
+    id: `sm_${world.season || 0}_${world.day}_${world.scoutMissions.length + 1}`,
     region,
+    filters: criteria,
     startDay: world.day,
     doneDay: world.day + days,
     status: "active",
@@ -54,11 +93,10 @@ export function startScoutMission(world, region = "div3") {
   };
   world.scoutMissions.unshift(mission);
   world.news = world.news || [];
-  const regLabel =
-    region === "div2" ? "甲级" : region === "intl" ? "海外/跨级" : "乙级";
+  const regLabel = missionRegionLabel(region);
   world.news.unshift({
     day: world.day,
-    text: `🔍 球探出发：前往${regLabel}搜寻（${days} 天，花费 ${formatMoney(cost)}）`,
+    text: `🔍 球探出发：前往${regLabel}搜寻 ${missionFilterLabel(criteria)}（${days} 天，花费 ${formatMoney(cost)}）`,
   });
   return { ok: true, msg: `球探已出发（${days} 天后回报）`, mission };
 }
@@ -78,48 +116,57 @@ function completeScoutMission(world, mission) {
   const user = world.clubs.find((c) => c.id === world.userClubId);
   if (!user) return;
   const region = mission.region;
-  let pool = [];
+  const pool = [];
   for (const c of world.clubs) {
     if (c.id === user.id) continue;
     const div = c.division || 3;
     const tier = DIVISIONS[div]?.tier || 3;
-    if (region === "div3" && tier < 2) continue;
+    if (region === "div3" && tier < 3) continue;
     if (region === "div2" && tier !== 2) continue;
     if (region === "intl" && tier !== 1) continue;
     for (const p of c.players || []) {
-      if ((p.age || 30) > 23) continue;
-      if ((p.potential || p.ovr || 0) < 13) continue;
-      pool.push({ p, c });
+      pool.push({ player: p, club: c });
     }
   }
-  if (!pool.length) {
+  const filters = normalizeMissionFilters(mission.filters);
+  const ranked = rankScoutingCandidates(world, pool, user, filters, {
+    seedSalt: mission.id,
+  });
+  if (!ranked.length) {
     pushInbox(world, {
       category: "scout",
       priority: 1,
       title: "球探任务结束：暂无亮点",
       titleEn: "Scout mission complete: no standout targets",
-      body: "本次出行未发现值得跟进的目标。",
-      bodyEn: "The scouting trip found no targets worth pursuing.",
+      body: `本次出行未发现符合“${missionFilterLabel(filters)}”的目标。`,
+      bodyEn: `The trip found no targets matching ${missionFilterLabel(filters, "en")}.`,
       dedupeKey: `sm_done_${mission.id}`,
       actions: [{ id: "ack", label: "知道了", labelEn: "OK" }],
     });
     return;
   }
-  pool.sort(
-    (a, b) =>
-      (b.p.potential || b.p.ovr) - (a.p.potential || a.p.ovr) || b.p.ovr - a.p.ovr
-  );
-  const hits = pool.slice(0, 3);
+  const visitedClubs = new Set();
+  for (const candidate of ranked.slice(0, 8)) {
+    if (visitedClubs.has(candidate.club.id)) continue;
+    visitedClubs.add(candidate.club.id);
+    observeScoutingScope(world, candidate.club, { gain: 6, source: "scout-mission-visit" });
+  }
+  const hits = ranked.slice(0, 3);
   world.scoutWatch = world.scoutWatch || [];
   const lines = [];
   const linesEn = [];
-  for (const { p, c } of hits) {
+  for (const { player: p, club: c } of hits) {
+    const snapshot = observeScoutingPlayer(world, p, c, user, {
+      intensity: region === "intl" ? 72 : region === "div2" ? 64 : 58,
+      source: "scout-mission",
+      seedSalt: mission.id,
+    });
     if (!world.scoutWatch.includes(p.id)) world.scoutWatch.unshift(p.id);
     lines.push(
-      `· ${p.name}（${c.short || c.name} · ${p.pos} · ${p.age} 岁 · 能力约 ${p.ovr}/潜 ${p.potential || "?"} · 估值约 ${formatMoney(p.value || estimateValue(p))}）`
+      `· ${p.name}（${c.short || c.name} · ${p.pos} · ${p.age} 岁 · 能力 ${snapshot.ovrText} / 潜力 ${snapshot.potentialText} · 估值 ${formatMoney(snapshot.valueLo)}-${formatMoney(snapshot.valueHi)}）`
     );
     linesEn.push(
-      `· ${p.name} (${c.short || c.nameEn || c.name} · ${p.pos} · age ${p.age} · ability about ${p.ovr}/potential ${p.potential || "?"} · value about ${formatMoney(p.value || estimateValue(p))})`
+      `· ${p.name} (${c.short || c.nameEn || c.name} · ${p.pos} · age ${p.age} · ability ${snapshot.ovrText} / potential ${snapshot.potentialText} · value ${formatMoney(snapshot.valueLo)}-${formatMoney(snapshot.valueHi)})`
     );
   }
   if (world.scoutWatch.length > 30) world.scoutWatch.length = 30;
@@ -128,14 +175,15 @@ function completeScoutMission(world, mission) {
     priority: 2,
     title: `球探回报：发现 ${hits.length} 名目标`,
     titleEn: `Scout report: ${hits.length} target(s) found`,
-    body: `已自动加入关注列表。\n${lines.join("\n")}`,
-    bodyEn: `Added to the watchlist automatically.\n${linesEn.join("\n")}`,
+    body: `任务条件：${missionFilterLabel(filters)}。以下均为本次观察估计，已自动加入关注列表。\n${lines.join("\n")}`,
+    bodyEn: `Assignment: ${missionFilterLabel(filters, "en")}. All figures are observed estimates; targets were added to the watchlist.\n${linesEn.join("\n")}`,
     dedupeKey: `sm_done_${mission.id}`,
-    ref: { kind: "scout_report", playerIds: hits.map((h) => h.p.id) },
+    ref: { kind: "scout_report", playerIds: hits.map((hit) => hit.player.id) },
     actions: [
       { id: "ack", label: "很好", labelEn: "Nice", primary: true },
     ],
   });
+  mission.resultPlayerIds = hits.map((hit) => hit.player.id);
   pushMedia(world, {
     outlet: "转会电报",
     headline: `${user.short || user.name} 球探网动作频繁`,

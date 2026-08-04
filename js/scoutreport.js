@@ -5,6 +5,11 @@
 import { POS_LABEL, FORMATIONS } from "./data.js";
 import { ensureStaff, staffRating } from "./staff.js";
 import { isAvailable } from "./discipline.js";
+import {
+  scoutClubKnowledge,
+  scoutPlayerSnapshot,
+  scoutingFreshnessLabel,
+} from "./scouting-knowledge.js";
 
 const STYLE_KEYS = ["balanced", "attack", "defend", "possession", "counter"];
 const FORMATION_KEYS = Object.keys(FORMATIONS || {
@@ -80,7 +85,7 @@ const SCOUT_RISKS_EN = {
   "短约，卖家可能坐地起价或球员自由身": "Short contract; the seller may demand more or risk losing him for free",
   目前伤缺: "Currently injured",
   成长空间有限: "Limited room for development",
-  "球探等级一般，数据区间较宽、属性多不可见": "Limited scouting quality; estimates are broad and many attributes remain hidden",
+  "观察样本有限，数据区间较宽、属性多不可见": "Limited observations; estimates are broad and many attributes remain hidden",
 };
 
 const SCOUT_RECOMMENDATIONS_EN = {
@@ -176,8 +181,9 @@ export function fogAttrValue(trueVal, fog, seed) {
  * 外队球员属性行（用于详情弹窗）
  * ownPlayer=true 时始终精确
  */
-export function scoutAttrRows(player, userClub, { ownPlayer = false, lang = "zh" } = {}) {
-  const fog = ownPlayer ? 3 : scoutFogLevel(userClub);
+export function scoutAttrRows(player, userClub, { ownPlayer = false, lang = "zh", world = null } = {}) {
+  const snapshot = scoutPlayerSnapshot(world, player, userClub, { ownPlayer });
+  const fog = ownPlayer ? 3 : snapshot?.fogLevel ?? 0;
   const a = player?.attrs || {};
   const labels = lang === "en" ? ATTR_LABELS_EN : ATTR_LABELS;
   const keys = [
@@ -210,7 +216,19 @@ export function scoutAttrRows(player, userClub, { ownPlayer = false, lang = "zh"
         : keys;
 
   return showKeys.map((k) => {
-    const fogged = fogAttrValue(a[k], fog, `${player?.id}_${k}`);
+    let fogged;
+    if (ownPlayer) {
+      fogged = fogAttrValue(a[k], 3, `${player?.id}_${k}`);
+    } else {
+      const estimate = snapshot?.attrs?.[k] || { estimate: 10, lo: 6, hi: 14, exact: false };
+      if (fog <= 0) {
+        const tier = estimate.estimate >= 16 ? "high" : estimate.estimate >= 12 ? "mid" : estimate.estimate >= 8 ? "low" : "weak";
+        const tierText = tier === "high" ? "高" : tier === "mid" ? "中" : tier === "low" ? "偏低" : "弱";
+        fogged = { ...estimate, text: tierText, tier };
+      } else {
+        fogged = { ...estimate, text: `${estimate.lo}-${estimate.hi}` };
+      }
+    }
     const text = lang === "en" && fogged.tier ? TIER_LABELS_EN[fogged.tier] : fogged.text;
     return {
       key: k,
@@ -221,51 +239,27 @@ export function scoutAttrRows(player, userClub, { ownPlayer = false, lang = "zh"
   });
 }
 
-export function formatScoutOvrFog(player, userClub, { ownPlayer = false } = {}) {
-  if (ownPlayer) return String(player.ovr ?? "—");
-  const fog = scoutFogLevel(userClub);
-  const ovr = player.ovr || 10;
-  if (fog >= 3) return String(ovr);
-  const band = fog === 2 ? 1 : fog === 1 ? 2 : 3;
-  const j = Math.floor(stableUnit(player.id + "_ovr") * 3) - 1;
-  const c = Math.max(1, Math.min(20, ovr + j));
-  return `${Math.max(1, c - band)}–${Math.min(20, c + band)}`;
+export function formatScoutOvrFog(player, userClub, { ownPlayer = false, world = null } = {}) {
+  const snapshot = scoutPlayerSnapshot(world, player, userClub, { ownPlayer });
+  return snapshot?.ovrText || "-";
 }
 
-export function formatScoutPotFog(player, userClub, { ownPlayer = false, lang = "zh" } = {}) {
-  if (ownPlayer) return player.potential != null ? String(player.potential) : "—";
-  const fog = scoutFogLevel(userClub);
-  const pot = player.potential != null ? player.potential : player.ovr || 10;
-  if (fog >= 3) return String(pot);
-  if (fog <= 0) {
-    if (pot >= 16) return lang === "en" ? "High" : "高";
-    if (pot >= 13) return lang === "en" ? "Medium-high" : "中高";
-    return lang === "en" ? "Average" : "一般";
-  }
-  const band = fog === 2 ? 1 : 2;
-  return `${Math.max(1, pot - band)}–${Math.min(20, pot + band)}`;
+export function formatScoutPotFog(player, userClub, { ownPlayer = false, world = null } = {}) {
+  const snapshot = scoutPlayerSnapshot(world, player, userClub, { ownPlayer });
+  return snapshot?.potentialText || "-";
 }
 
 export function buildScoutReport(world, player, userClub) {
   if (!player) return null;
   const r = staffRatingSafe(userClub, "scout");
-  const fog = scoutFogLevel(userClub);
-  const accuracy = Math.min(0.95, 0.45 + r / 25);
-  const trueVal = player.value || 0;
-  const spread = (1 - accuracy) * 0.45 + 0.08;
-  const lo = Math.round(trueVal * (1 - spread));
-  const hi = Math.round(trueVal * (1 + spread * 0.9));
-
-  const ovrSpread = Math.max(0, Math.round((16 - r) / 5));
-  const ovrLo = Math.max(1, player.ovr - ovrSpread);
-  const ovrHi = Math.min(20, player.ovr + ovrSpread);
-
-  const pot = player.potential != null ? player.potential : player.ovr;
-  const potLo = Math.max(ovrLo, pot - ovrSpread - 1);
-  const potHi = Math.min(20, pot + Math.max(0, ovrSpread - 1));
+  const snapshot = scoutPlayerSnapshot(world, player, userClub);
+  const fog = snapshot.fogLevel;
+  const knownOvr = snapshot.ovrEstimate;
+  const knownPotential = snapshot.potentialEstimate;
+  const knownValue = snapshot.valueEstimate;
 
   const tags = [];
-  if (player.age <= 21 && pot >= player.ovr + 2) tags.push("高潜新星");
+  if (player.age <= 21 && knownPotential >= knownOvr + 2) tags.push("高潜新星");
   if (player.age >= 32) tags.push("经验老将");
   if ((player.stats?.goals || 0) >= 8) tags.push("进球手");
   if ((player.stats?.assists || 0) >= 6) tags.push("创造者");
@@ -279,13 +273,13 @@ export function buildScoutReport(world, player, userClub) {
   if (player.age >= 30) risks.push("年龄偏大，转售价值可能下滑");
   if ((player.contractYears || 2) <= 1) risks.push("短约，卖家可能坐地起价或球员自由身");
   if ((player.injured || 0) > 0) risks.push("目前伤缺");
-  if (pot <= player.ovr) risks.push("成长空间有限");
-  if (r < 9) risks.push("球探等级一般，数据区间较宽、属性多不可见");
+  if (knownPotential <= knownOvr) risks.push("成长空间有限");
+  if (snapshot.confidence < 50) risks.push("观察样本有限，数据区间较宽、属性多不可见");
 
   const rec =
-    pot >= 15 && player.age <= 24
+    knownPotential >= 15 && player.age <= 24
       ? "强烈推荐跟进"
-      : player.ovr >= 14 && trueVal < 800000
+      : knownOvr >= 14 && knownValue < 800000
         ? "性价比可关注"
         : player.age >= 33
           ? "谨慎，短约过渡即可"
@@ -299,17 +293,22 @@ export function buildScoutReport(world, player, userClub) {
     age: player.age,
     scoutRating: r,
     fogLevel: fog,
-    valueLo: lo,
-    valueHi: hi,
-    ovrLo,
-    ovrHi,
-    potLo,
-    potHi,
+    knowledgeLevel: Math.round(snapshot.level),
+    observations: snapshot.observations,
+    stale: snapshot.stale,
+    freshnessZh: scoutingFreshnessLabel(snapshot, "zh"),
+    freshnessEn: scoutingFreshnessLabel(snapshot, "en"),
+    valueLo: snapshot.valueLo,
+    valueHi: snapshot.valueHi,
+    ovrLo: snapshot.ovrLo,
+    ovrHi: snapshot.ovrHi,
+    potLo: snapshot.potentialLo,
+    potHi: snapshot.potentialHi,
     tags,
     risks,
     recommendation: rec,
-    accuracy: Math.round(accuracy * 100),
-    attrs: scoutAttrRows(player, userClub, { ownPlayer: false }),
+    accuracy: snapshot.confidence,
+    attrs: scoutAttrRows(player, userClub, { ownPlayer: false, world }),
   };
 }
 
@@ -351,7 +350,7 @@ export function formatScoutReportHtml(rep, formatMoney, lang = "zh") {
     <div class="scout-report">
       <div class="scout-report-head">
         <strong>🔍 ${en ? "Scout report" : "球探报告"}</strong>
-        <span class="muted">${en ? "Confidence" : "可信度"} ~${rep.accuracy}% · ${en ? "Scout" : "球探"} ${rep.scoutRating}/16 · ${fogHint}</span>
+        <span class="muted">${en ? "Confidence" : "可信度"} ${rep.accuracy}% · ${en ? "Knowledge" : "知识"} ${rep.knowledgeLevel}/100 · ${en ? rep.freshnessEn : rep.freshnessZh} · ${fogHint}</span>
       </div>
       <p style="margin:0.35rem 0">
         ${en ? "Value" : "估值"} <strong>${formatMoney(rep.valueLo)} – ${formatMoney(rep.valueHi)}</strong>
@@ -396,7 +395,9 @@ export function buildOpponentReport(world, userClub, oppClub, fixture = null) {
   if (!userClub || !oppClub) return null;
   ensureStaff(userClub);
   const r = staffRatingSafe(userClub, "scout");
-  const fog = scoutFogLevel(userClub);
+  const staffFog = scoutFogLevel(userClub);
+  const clubKnowledge = scoutClubKnowledge(world, oppClub, userClub);
+  const fog = Math.min(staffFog, Math.max(1, clubKnowledge.fogLevel));
   const seedBase = `${fixture?.id || fixture?.day || world?.day || 0}_${userClub.id}_${oppClub.id}`;
 
   const trueForm = oppClub.tactics?.formation || "4-3-3";
@@ -445,10 +446,11 @@ export function buildOpponentReport(world, userClub, oppClub, fixture = null) {
   const dangerCount = fog <= 0 ? 1 : fog === 1 ? 2 : 3;
   const danger = [...(oppClub.players || [])]
     .filter((p) => isAvailable(p))
-    .sort((a, b) => (b.ovr || 0) - (a.ovr || 0))
+    .map((p) => ({ p, snapshot: scoutPlayerSnapshot(world, p, userClub) }))
+    .sort((a, b) => b.snapshot.ovrEstimate - a.snapshot.ovrEstimate)
     .slice(0, dangerCount)
-    .map((p, i) => {
-      const ovrTxt = formatScoutOvrFog(p, userClub, { ownPlayer: false });
+    .map(({ p }, i) => {
+      const ovrTxt = formatScoutOvrFog(p, userClub, { ownPlayer: false, world });
       const noteKeys = ["finisher", "creator", "engine", "wall", "speed"];
       const note = pickBySeed(noteKeys, seedBase + "_d" + p.id + i);
       const noteZh = {

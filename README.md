@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v192** · 真实俱乐部财政体系 |
+| 当前版本 | **v193** · 持久化球探知识体系 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -25,12 +25,12 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 仓库：https://github.com/as7er/vcfm
 
-### v192 更新亮点
+### v193 更新亮点
 
-- 国内杯与洲际赛事现在按参赛、赛果和晋级结算奖金；比赛日收入拆分为门票、零售和接待，全部使用同一份赛前上座数据。
-- 转会支持首付、分期、出场奖金、二次转会分成和按 15–21 岁培养履历分配的青训补偿；未来付款会进入财政义务和安全预算。
-- 每家俱乐部拥有多年赞助合同与下一周期报价；升级支持、两季降级保护和赞助价值变化共同反映联赛层级变动。
-- 融资会真实记录本金、利率、周利息和赛季还本；工资或债务超出收入承受能力时，俱乐部将被限制买入、自由签约和租入球员。
+- 球员、俱乐部、联赛和国家知识会随观察持久化；旧报告会随时间衰减，球员成长不会自动改写尚未更新的估计。
+- 球探任务可按位置、培养潜力/即战力/合同将尽和转会费预算筛选，候选排序只使用球探估计而非隐藏真实能力。
+- 球员资料、全局搜索、俱乐部与国家队名单、关注列表、转会市场和初始报价共用同一份能力、潜力与估值区间；高能力球探也必须先完成观察。
+- 存档 schema v3 校验球探知识结构；专项审计覆盖估计持久化、时效衰减、条件筛选和隐藏能力泄漏。
 
 ### 快速开始
 
@@ -150,7 +150,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v192** · realistic club finances |
+| Current version | **v193** · persistent scouting knowledge |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -159,12 +159,12 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 Repository: https://github.com/as7er/vcfm
 
-### What's new in v192
+### What's new in v193
 
-- Domestic cups and continental competitions now pay participation, result, and progression awards. Matchday revenue separates tickets, retail, and hospitality while using the same pre-match attendance.
-- Permanent transfers support upfront payments, installments, appearance bonuses, sell-on clauses, and training compensation based on each player's recorded development from ages 15–21. Future payments feed the finance obligations and safe budget.
-- Every club has multi-season sponsorship contracts and offers for the next cycle. Promotion support, two-season parachute payments, and sponsor-value changes reflect movement between league levels.
-- Financing records principal, rates, weekly interest, and seasonal amortization. Clubs whose wages or debt exceed sustainable revenue can be restricted from purchases, free-agent signings, and incoming loans.
+- Player, club, competition, and nation knowledge persists after observation. Reports decay over time, and unobserved player development no longer rewrites saved estimates.
+- Assignments can target a position, development/first-team/expiring profiles, and a transfer-fee budget. Candidate ranking uses observed estimates rather than hidden true ability.
+- Profiles, global search, club and national-team squads, watchlists, the market, and opening bids share the same ability, potential, and value ranges. Even elite scouts need current observations.
+- Save schema v3 validates scouting records, with a dedicated audit for persistence, decay, criteria, and hidden-ability leaks.
 
 ### Quick start
 

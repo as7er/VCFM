@@ -1,4 +1,4 @@
-export const CURRENT_SAVE_SCHEMA_VERSION = 2;
+export const CURRENT_SAVE_SCHEMA_VERSION = 3;
 
 function isRecord(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -178,6 +178,48 @@ export function validateSaveStructure(world) {
         "upfrontPct", "installmentCount", "appearanceBonus", "appearanceTarget", "sellOnPct",
       ]) {
         finiteIfPresent(negotiation[field], `${listName} ${negotiation.id} ${field}`);
+      }
+    }
+  }
+  if (world.scoutingKnowledge != null) {
+    const knowledge = world.scoutingKnowledge;
+    if (!isRecord(knowledge)) throw new Error("invalid save: scouting knowledge is invalid");
+    for (const group of ["players", "clubs", "divisions", "nations"]) {
+      if (!isRecord(knowledge[group])) {
+        throw new Error(`invalid save: scouting knowledge ${group} is invalid`);
+      }
+      for (const [key, item] of Object.entries(knowledge[group])) {
+        if (!key || !isRecord(item)) {
+          throw new Error(`invalid save: scouting knowledge ${group} contains an invalid record`);
+        }
+        for (const field of [
+          "level", "observations", "lastObservedSeason", "lastObservedDay",
+          "division", "ovrEstimate", "potentialEstimate", "valueEstimate",
+        ]) {
+          finiteIfPresent(item[field], `scouting knowledge ${group} ${key} ${field}`);
+        }
+        if (item.attrs != null) {
+          if (!isRecord(item.attrs)) {
+            throw new Error(`invalid save: scouting knowledge ${group} ${key} attributes are invalid`);
+          }
+          for (const [attribute, value] of Object.entries(item.attrs)) {
+            finiteIfPresent(value, `scouting knowledge ${group} ${key} attribute ${attribute}`);
+          }
+        }
+      }
+    }
+  } else if (Number(world.schemaVersion) >= 3) {
+    throw new Error("invalid save: scouting knowledge is missing");
+  }
+  if (world.scoutMissions != null) {
+    if (!Array.isArray(world.scoutMissions)) throw new Error("invalid save: scout missions are invalid");
+    for (const mission of world.scoutMissions) {
+      if (!isRecord(mission) || typeof mission.id !== "string" || !mission.id) {
+        throw new Error("invalid save: scout missions contain an invalid record");
+      }
+      for (const field of ["startDay", "doneDay", "cost", "filters.maxValue"]) {
+        const value = field === "filters.maxValue" ? mission.filters?.maxValue : mission[field];
+        finiteIfPresent(value, `scout mission ${mission.id} ${field}`);
       }
     }
   }

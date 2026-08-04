@@ -41,6 +41,8 @@ const navGroupByTab = {
   training: "team",
   tactics: "team",
   fixtures: "matches",
+  transfer: "transfer",
+  clubs: "world",
 };
 
 async function openTab(page, tab) {
@@ -79,7 +81,33 @@ try {
     }
   }
 
+  await openTab(page, "transfer");
+  await page.waitForSelector("#scout-mission-pos:visible");
+  assert.equal(await page.locator("#scout-mission-pos option").count(), 5);
+  assert.equal(await page.locator("#scout-mission-profile option").count(), 3);
+  assert.equal(await page.locator("#scout-mission-budget option").count(), 4);
+  await page.selectOption("#scout-mission-pos", "GK");
+  await page.selectOption("#scout-mission-profile", "first_team");
+  await page.selectOption("#scout-mission-budget", "500000");
+  await page.locator('[data-scout-mission="div3"]').click();
+  await page.waitForTimeout(250);
+  const scoutingStatus = await page.locator("#scout-mission-status").innerText();
+  assert.match(scoutingStatus, /GK.*即战力.*500/, pageErrors.join(" | ") || "scouting mission status did not update");
+  assert.equal(await page.locator("[data-scout-mission]:disabled").count(), 3);
+  await assertNoHorizontalOverflow(page, "desktop scouting mission");
+
+  await openTab(page, "clubs");
+  const externalClubRow = page.locator("#clubs-table tbody tr:not(.me)").first();
+  assert.match(await externalClubRow.locator("td").nth(5).innerText(), /^\d+-\d+$/);
+  await externalClubRow.locator("[data-open-club]").click();
+  await page.waitForSelector('#modal:not(.hidden) .club-modal-grid');
+  const externalPlayerAbility = page.locator(".club-modal-grid .compact-table tbody tr").first().locator("td").nth(4);
+  assert.match(await externalPlayerAbility.innerText(), /^\d+-\d+$/);
+  await page.keyboard.press("Escape");
+
   await page.setViewportSize({ width: 390, height: 844 });
+  await openTab(page, "transfer");
+  await assertNoHorizontalOverflow(page, "mobile scouting mission");
   await openTab(page, "finance");
   await assertNoHorizontalOverflow(page, "mobile finance");
   await openTab(page, "dashboard");
@@ -89,8 +117,9 @@ try {
   await page.waitForSelector('#modal:not(.hidden)[role="dialog"][aria-modal="true"]');
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
+  assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: finance rendering, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

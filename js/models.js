@@ -1710,6 +1710,16 @@ export function createWorld(userClubId, managerName, lang = "zh") {
     // 国家队赛事与历史；旧存档由 intl.ensureInternational 惰性迁移
     international: { version: 1, matches: [], competitions: {}, history: [], activeCompetitionId: null },
     poachBids: [],
+    scoutingKnowledge: {
+      version: 1,
+      initialized: false,
+      players: {},
+      clubs: {},
+      divisions: {},
+      nations: {},
+    },
+    scoutMissions: [],
+    scoutWatch: [],
     staffMarket: [],
     staffApproaches: [],
     managerCareer: {
