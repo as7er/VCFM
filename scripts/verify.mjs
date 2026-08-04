@@ -11,6 +11,8 @@ const checks = [
   "scripts/save-durability-audit.mjs",
   "scripts/save-schema-audit.mjs",
   "scripts/replay-ui-audit.mjs",
+  "scripts/match-presentation-audit.mjs",
+  "scripts/set-piece-presentation-audit.mjs",
   "scripts/lazy-load-audit.mjs",
   "scripts/player-pathway-audit.mjs",
   "scripts/delegation-audit.mjs",

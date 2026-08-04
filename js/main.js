@@ -28,10 +28,15 @@ import {
   teamTalkDesc,
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
+import {
+  nextDisplayedMinute,
+  PENALTY_SETUP_SEC,
+  eventTickerMs,
+} from "./match-presentation.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=196";
-import { clubCrestHtml } from "./club-crest.js?v=196";
+import { nationFlagHtml } from "./flags.js?v=198";
+import { clubCrestHtml } from "./club-crest.js?v=198";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -327,7 +332,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=196";
+} from "./avatar.js?v=198";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -415,7 +420,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=196").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=198").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -656,21 +661,31 @@ async function replayStoredGoal(index) {
     return;
   }
   matchPlayback.replaying = true;
+  const layout = document.querySelector(".match-layout");
+  const wasReportOnly = !!layout?.classList.contains("match-report-only");
   try {
     await ensureMatchPitch();
+    layout?.classList.remove("match-report-only");
+    matchView?.refreshLayout?.();
+    const pitchRoot = $("#match-pitch-root");
+    pitchRoot?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    await new Promise((resolve) => requestAnimationFrame(() => resolve()));
     const spd = Math.max(0.25, Number(matchSpeed) || 1);
     // 回看时略慢一点更好看；有场面快照则从同一帧接续
-    await matchView.playGoalHighlight(item.ev, item.snap, item.fixture, {
+    const played = await matchView.playGoalHighlight(item.ev, item.snap, item.fixture, {
       speed: Math.min(spd, 1),
       lang: getLang(),
       sleepFn: sleepPlayback,
       rewatch: true,
       scene: item.scene || null,
     });
+    if (!played) throw new Error("Goal replay could not enter playback state");
   } catch (err) {
     console.error(err);
     toast(getLang() === "en" ? "Replay failed" : "回放失败");
   } finally {
+    if (wasReportOnly) layout?.classList.add("match-report-only");
+    matchView?.refreshLayout?.();
     matchPlayback.replaying = false;
   }
 }
@@ -7320,12 +7335,13 @@ async function openPastMatchReport(key) {
   matchState = null;
   pendingSubs = [];
   matchPlayback.reviewMode = true;
+  document.querySelector(".match-layout")?.classList.remove("match-report-only");
 
   const home = world.clubs.find((c) => c.id === fixture.home);
   const away = world.clubs.find((c) => c.id === fixture.away);
   setupMatchScoreboard(home, away, fixture);
   setMatchScore(fixture.homeGoals ?? report.homeGoals ?? 0, fixture.awayGoals ?? report.awayGoals ?? 0);
-  setMatchMinute(90);
+  setMatchMinute(90, { reset: true });
   setMatchLiveState("ft");
   updateLiveStats(report);
   setMatchStatsPanelOpen(true);
@@ -7860,7 +7876,11 @@ function handleSimLiveEvent(ev, snap) {
   const fixture = pendingMatch;
   if (snap?.minute != null) setMatchMinute(snap.minute);
   if (snap?.homeGoals != null) setMatchScore(snap.homeGoals, snap.awayGoals);
-  if (snap?.home) updateLiveStats(snap);
+  // 高光事件的 snap 带的是整段模拟统计，按事件时刻切片后再显示。
+  if (snap?.home) {
+    const live = liveStatsThrough(snap.simT ?? null, snap.minute);
+    updateLiveStats({ ...snap, home: live.home, away: live.away });
+  }
 
   if (ev.type === "goal") {
     const scene = matchView?.captureSceneSnapshot?.() || null;
@@ -7894,13 +7914,13 @@ function handleSimLiveEvent(ev, snap) {
         matchView.setFmmTicker?.(
           lang === "en" ? "Great save!" : "精彩扑救！",
           "save",
-          1600
+          eventTickerMs("save", spd)
         );
       } else if (ev.type === "woodwork") {
         matchView.setFmmTicker?.(
           lang === "en" ? "Off the woodwork!" : "击中门框！",
           "wood",
-          1600
+          eventTickerMs("woodwork", spd)
         );
       } else {
         const nm = matchView.players?.find((p) => p.id === ev.playerId)?.name || "";
@@ -7913,7 +7933,7 @@ function handleSimLiveEvent(ev, snap) {
               ? "Chance!"
               : "威胁射门！",
           "shot",
-          1400
+          eventTickerMs("chance", spd)
         );
       }
     } else if (ev.type === "corner") {
@@ -7923,7 +7943,7 @@ function handleSimLiveEvent(ev, snap) {
       matchView.setFmmTicker?.(
         lang === "en" ? "Corner kick!" : "角球！",
         "info",
-        2000
+        eventTickerMs("corner", spd)
       );
       matchView.setBanner?.(lang === "en" ? "🚩 CORNER" : "🚩 角球", "info");
       setTimeout(() => matchView?.setBanner?.(""), 1600);
@@ -7931,12 +7951,23 @@ function handleSimLiveEvent(ev, snap) {
       matchView.setFmmTicker?.(
         lang === "en" ? "They think it was offside!" : "他认为这粒球越位在先!",
         "dispute",
-        2200
+        eventTickerMs("offside", spd)
       );
+    } else if (ev.type === "penalty") {
+      // 引擎判罚后要走完法定站位与助跑才出脚，判罚文案必须覆盖到主罚为止，
+      // 否则"获得点球"会在球还没踢出时就被射门/扑救文案顶掉。
+      const holdMs = eventTickerMs("penalty", spd);
+      matchView.setFmmTicker?.(
+        lang === "en" ? "Penalty awarded!" : "判罚点球！",
+        "warn",
+        holdMs
+      );
+      matchView.setBanner?.(lang === "en" ? "⚠ PENALTY" : "⚠ 点球", "warn");
+      setTimeout(() => matchView?.setBanner?.(""), holdMs * 0.75);
     } else if (ev.text && !["tick", "sim_frame", "goal"].includes(ev.type)) {
       // 一般事件：短时 ticker
       const clean = String(ev.text).replace(/^\[.*?\]\s*/, "").slice(0, 48);
-      if (clean) matchView.setFmmTicker?.(clean, "info", 1800);
+      if (clean) matchView.setFmmTicker?.(clean, "info", eventTickerMs(ev.type, spd));
     }
     matchView.onEvent(ev, snap, fixture);
     const holdMap = {
@@ -7950,38 +7981,94 @@ function handleSimLiveEvent(ev, snap) {
       coach: 400,
       context: 350,
       offside: 900,
+      // 点球：镜头停到主罚为止，让站位和助跑真的被看见。
+      penalty: PENALTY_SETUP_SEC * 1000,
     };
     const h = holdMap[ev.type];
     if (h) matchView.holdSimTimeline?.(h / Math.min(spd, 1.5));
   }
 }
 
-/** 刷新直播比分条 / 分钟 / 统计 */
-function refreshLiveHudFromState(minute) {
+/**
+ * 刷新直播比分条 / 分钟 / 统计
+ *
+ * 高光播放时整个半场其实已经模拟完毕，`matchState.stats` 存的是半场终值。
+ * 直接显示它会让开场几分钟就出现整段模拟的最终控球率和射门数，
+ * 所以有 simT 时按"截至当前画面时刻"重算，让数据条跟着画面推进。
+ * @param {number|null} minute 顶栏分钟
+ * @param {number|null} [simT] 当前画面对应的模拟秒
+ */
+function refreshLiveHudFromState(minute, simT = null) {
   if (!matchState) return;
   if (minute != null) setMatchMinute(minute);
   setMatchScore(matchState.hg, matchState.ag);
   if (!matchState.stats) return;
-  const ht = matchState.stats.home.possessionTicks;
-  const at = matchState.stats.away.possessionTicks;
-  const tot = ht + at || 1;
+  const live = liveStatsThrough(simT, minute);
   updateLiveStats({
-    home: {
-      xg: Math.round(matchState.stats.home.xg * 100) / 100,
-      shots: matchState.stats.home.shots,
-      shotsOn: matchState.stats.home.shotsOn,
-      possession: Math.round((ht / tot) * 100),
-    },
-    away: {
-      xg: Math.round(matchState.stats.away.xg * 100) / 100,
-      shots: matchState.stats.away.shots,
-      shotsOn: matchState.stats.away.shotsOn,
-      possession: 100 - Math.round((ht / tot) * 100),
-    },
+    home: live.home,
+    away: live.away,
     homeGoals: matchState.hg,
     awayGoals: matchState.ag,
     minute: minute ?? matchState.minute,
   });
+}
+
+/**
+ * 取"截至画面当前时刻"的双方数据。
+ * 空间引擎在场时按模拟时间切片；否则退回 state 累计值（概率引擎逐分钟记账，本身就同步）。
+ * @param {number|null} simT 模拟秒
+ * @param {number|null} minute 顶栏分钟，simT 缺失时用它折算
+ */
+function liveStatsThrough(simT, minute) {
+  const stats = matchState.stats;
+  const eng = matchState.simEng;
+  if (eng?.statsThrough) {
+    const t = Number.isFinite(Number(simT))
+      ? Number(simT)
+      : Number.isFinite(Number(minute))
+        ? Number(minute) * 60
+        : null;
+    if (t != null) {
+      const part = eng.statsThrough(t);
+      const hp = part.possessionSec.home;
+      const ap = part.possessionSec.away;
+      const tot = hp + ap;
+      // 开场前几秒还没有控球积分，此时不显示 0%/100% 这种失真读数。
+      const homePoss = tot > 1 ? Math.round((hp / tot) * 100) : 50;
+      return {
+        home: {
+          xg: Math.round(part.xg.home * 100) / 100,
+          shots: part.shots.home,
+          shotsOn: part.shotsOn.home,
+          possession: homePoss,
+        },
+        away: {
+          xg: Math.round(part.xg.away * 100) / 100,
+          shots: part.shots.away,
+          shotsOn: part.shotsOn.away,
+          possession: 100 - homePoss,
+        },
+      };
+    }
+  }
+  const ht = stats.home.possessionTicks;
+  const at = stats.away.possessionTicks;
+  const tot = ht + at || 1;
+  const homePoss = Math.round((ht / tot) * 100);
+  return {
+    home: {
+      xg: Math.round(stats.home.xg * 100) / 100,
+      shots: stats.home.shots,
+      shotsOn: stats.home.shotsOn,
+      possession: homePoss,
+    },
+    away: {
+      xg: Math.round(stats.away.xg * 100) / 100,
+      shots: stats.away.shots,
+      shotsOn: stats.away.shotsOn,
+      possession: 100 - homePoss,
+    },
+  };
 }
 
 /**
@@ -8020,7 +8107,7 @@ async function playHighlightPlanBridge(spec) {
       } catch (e) {
         console.warn(e);
       }
-      refreshLiveHudFromState(seg.toMin);
+      refreshLiveHudFromState(seg.toMin, seg.t1);
       // 跳过：极短过渡 + 明确提示（让人看出「确实在跳过平淡」）
       const gapMin = Math.max(0, (seg.toMin || 0) - (seg.fromMin || 0));
       const skipMs = fast
@@ -8055,7 +8142,7 @@ async function playHighlightPlanBridge(spec) {
         assistId: seg.assistId || null,
         scorerId: seg.scorerId || null,
         onSimT: (t, minute) => {
-          refreshLiveHudFromState(minute);
+          refreshLiveHudFromState(minute, t);
           try {
             spec.onSimT?.(t, minute);
           } catch (e) {
@@ -8063,7 +8150,7 @@ async function playHighlightPlanBridge(spec) {
           }
         },
       });
-      refreshLiveHudFromState(seg.toMin);
+      refreshLiveHudFromState(seg.toMin, seg.t1);
       // 直播：进球后 FMM 自动重播；快速只看高光窗本身（已含进球动态）
       if (
         !fast &&
@@ -8103,7 +8190,7 @@ async function playHighlightPlanBridge(spec) {
     } catch (_) {
       /* ignore */
     }
-    refreshLiveHudFromState(seg.toMin);
+    refreshLiveHudFromState(seg.toMin, seg.t1);
   }
 }
 
@@ -8493,7 +8580,7 @@ async function openMatch() {
   const user = getUserClub(world);
   setupMatchScoreboard(home, away, next);
   setMatchScore(0, 0);
-  setMatchMinute(0);
+  setMatchMinute(0, { reset: true });
   setMatchLiveState("pre");
   updateLiveStats(null);
   setMatchStatsPanelOpen(false);
@@ -8602,9 +8689,12 @@ function setMatchScore(hg, ag) {
   if (legacy) legacy.textContent = `${hg ?? 0} - ${ag ?? 0}`;
 }
 
-function setMatchMinute(min) {
+let displayedMatchMinute = 0;
+
+function setMatchMinute(min, { reset = false } = {}) {
+  displayedMatchMinute = nextDisplayedMinute(displayedMatchMinute, min, { reset });
   const el = $("#match-minute");
-  if (el) el.textContent = `${min ?? 0}'`;
+  if (el) el.textContent = `${Math.floor(displayedMatchMinute)}'`;
 }
 
 /**
@@ -9976,9 +10066,9 @@ function showMatchReport(report, opts = {}) {
   const rateSideHtml = (list, sideLabel) => {
     if (!list?.length) return "";
     const rows = list
-      .slice(0, 11)
       .map((x) => {
         const bits = [];
+        if (x.started === false) bits.push(getLang() === "en" ? "SUB" : "替补");
         if (x.goals) bits.push(`${x.goals}G`);
         if (x.assists) bits.push(`${x.assists}A`);
         if (x.saves) bits.push(`${x.saves}S`);

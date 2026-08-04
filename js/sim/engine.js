@@ -23,6 +23,12 @@ import {
   ensureCorePlayer,
 } from "./../models.js";
 import { estimateShotXg } from "./../match-analysis.js";
+import {
+  PENALTY_RUN_SEC,
+  PENALTY_KICK_SEC,
+  PENALTY_RESOLVE_SEC,
+  simMinuteOf,
+} from "./../match-presentation.js";
 
 // ————————————————————————————————————————————————————————————
 // 常量与工具
@@ -42,6 +48,13 @@ export const SIM = {
   CONTROL_RADIUS: 2.6, // 球员控球半径（百分比坐标）
   // 真实场地约按 105m×68m；把百分比坐标粗略当作"米级"处理，速度单位 = 场地%/秒
   MAX_PLAYER_SPEED: 6, // 顶级 pace 的最大移动速度（%/秒）；对齐真实纵穿全场约 14s
+  // 控球时间轴采样间隔（模拟秒）：直播按此还原截至当前画面的控球率
+  POSS_SAMPLE_SEC: 15,
+  // 点球分阶段时长（模拟秒），与表现层共用同一组时序：
+  // 界面的判罚文案和镜头停顿据此推导，才不会在球还没踢出时就被扑救文案顶掉。
+  PENALTY_RUN_SEC, // 判罚 → 开始助跑
+  PENALTY_KICK_SEC, // 判罚 → 出脚
+  PENALTY_RESOLVE_SEC, // 判罚 → 进球/扑救结算
 };
 
 function clamp(n, a, b) {
@@ -153,6 +166,9 @@ export class SimEngine {
       home: { shots: 0, passes: 0, poss: 0 },
       away: { shots: 0, passes: 0, poss: 0 },
     };
+    // 控球累计的稀疏采样（每 15 模拟秒一条），供直播按当前画面时刻还原
+    // 截至该时刻的控球率，而不是提前展示整段模拟的最终值。
+    this.possTimeline = [{ t: 0, home: 0, away: 0 }];
     // 死球恢复窗口：开球/重开后此刻前，持球方不被逼抢、不立刻起脚
     this.deadBallUntil = 0;
     // 进球庆祝（秒）：期间不立刻回中圈，队友聚拢后再开球
@@ -163,6 +179,7 @@ export class SimEngine {
     this.celebrateCornerX = 50;
     this.celebrateParticipants = null;
     this.cornerShapeUntil = 0;
+    this.pendingPenalty = null;
     // 正式开球（不靠"巧合触球"）
     this._kickoff("home");
   }
@@ -396,6 +413,14 @@ export class SimEngine {
       return;
     }
 
+    // 点球是独立死球阶段：先保持合法站位，再助跑、出脚和结算。
+    // 这段时间不运行普通决策/抢球，确保直播与回放能实际录到点球过程。
+    if (this.pendingPenalty) {
+      this._tickPenalty(dt);
+      this.t += dt;
+      return;
+    }
+
     // 1) 各 agent 决策 → 设定运动目标 / 触发传射
     const owner = this.ball.owner ? this.agentById(this.ball.owner) : null;
     // 传球/射门飞行中 owner 会暂时为空，但攻防阶段不能因此每脚球都切成“全员抢松球”。
@@ -424,12 +449,13 @@ export class SimEngine {
     ) {
       this.stats[this.possession].poss += dt;
     }
+    this._samplePossession();
     for (const a of this.agents) this._think(a, dt, owner, controlTeam, phaseActor);
     // 2) 积分运动
     for (const a of this.agents) this._integrate(a, dt);
-    // 2b) 近距离分离，减轻禁区「叠成一团」（多轮更干净）
-    this._separateAgents();
-    this._separateAgents();
+    // 2b) 近距离约束求解，避免禁区争抢时球员互相穿透或叠成一团。
+    // 阵型分散的帧首轮即退出，只有真正的禁区混战才用满迭代预算。
+    this._separateAgents(8);
     // 3) 球物理
     this._stepBall(dt);
     // 4) 接管/控球判定
@@ -2083,48 +2109,72 @@ export class SimEngine {
   }
 
   /**
-   * 出球员近距离互推，禁区更强。门将几乎不动。
-   * 根治「小禁区 3–4 个圆点糊成半透明一团」。
+   * 球员身体近距离非穿透约束（Gauss-Seidel 投影），禁区间距更大。
+   * 每人按自身机动权重分担修正量，门将权重极低因此几乎不被推离球门。
+   * 根治「小禁区十余个圆点糊成一团」与前锋和门将占据同一坐标。
    */
-  _separateAgents() {
+  _separateAgents(iterations = 1) {
     const n = this.agents.length;
     const minD = 2.85;
-    for (let i = 0; i < n; i++) {
-      const a = this.agents[i];
-      for (let j = i + 1; j < n; j++) {
-        const b = this.agents[j];
-        let dx = b.x - a.x;
-        let dy = b.y - a.y;
-        let d = Math.hypot(dx, dy);
-        // 完全同坐标不能直接跳过，否则两个圆点会永久粘在一起。
-        if (d < 1e-6) {
-          const sign = (i + j) % 2 ? 1 : -1;
-          dx = sign * 0.001;
-          dy = ((i * 3 + j) % 2 ? 1 : -1) * 0.001;
-          d = Math.hypot(dx, dy);
+    const maxPasses = Math.max(1, iterations);
+    for (let pass = 0; pass < maxPasses; pass++) {
+      let resolved = true;
+      for (let i = 0; i < n; i++) {
+        const a = this.agents[i];
+        if (a.sentOff) continue;
+        for (let j = i + 1; j < n; j++) {
+          const b = this.agents[j];
+          if (b.sentOff) continue;
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let d = Math.hypot(dx, dy);
+          // 完全同坐标也要给稳定法向，否则两个圆点会永久粘住。
+          if (d < 1e-6) {
+            const angle = ((i * 11 + j * 7) % 16) * (Math.PI / 8);
+            dx = Math.cos(angle) * 0.001;
+            dy = Math.sin(angle) * 0.001;
+            d = 0.001;
+          }
+          const inBox =
+            (a.y < 20 || a.y > 80) &&
+            (b.y < 20 || b.y > 80) &&
+            a.x > 22 &&
+            a.x < 78 &&
+            b.x > 22 &&
+            b.x < 78;
+          const need = inBox ? 3.35 : minD;
+          if (d >= need) continue;
+          resolved = false;
+          // 一次投影就补足整段重叠：留下残差会让多人堆叠始终收敛不到最小间距。
+          const push = need - d;
+          const ux = dx / d;
+          const uy = dy / d;
+          // 权重表示"愿意被推动的程度"，门将守在门线上因此接近不动。
+          // 每人分担的比例是自身权重占总权重的份额。
+          const aw = a.role === "GK" ? 0.08 : 1;
+          const bw = b.role === "GK" ? 0.08 : 1;
+          const den = aw + bw || 1;
+          const aShare = aw / den;
+          const bShare = bw / den;
+          a.x = clamp(a.x - ux * push * aShare, 2, 98);
+          a.y = clamp(a.y - uy * push * aShare, 2, 98);
+          b.x = clamp(b.x + ux * push * bShare, 2, 98);
+          b.y = clamp(b.y + uy * push * bShare, 2, 98);
+
+          // 去掉相向速度的法向分量，防止下一步立刻再次穿回彼此身体。
+          const closing = (b.vx - a.vx) * ux + (b.vy - a.vy) * uy;
+          if (closing < 0) {
+            const impulse = -closing;
+            a.vx -= ux * impulse * aShare;
+            a.vy -= uy * impulse * aShare;
+            b.vx += ux * impulse * bShare;
+            b.vy += uy * impulse * bShare;
+          }
         }
-        const inBox =
-          (a.y < 20 || a.y > 80) &&
-          (b.y < 20 || b.y > 80) &&
-          a.x > 22 &&
-          a.x < 78 &&
-          b.x > 22 &&
-          b.x < 78;
-        const need = inBox ? 3.35 : minD;
-        if (d >= need) continue;
-        const push = (need - d) * 0.5;
-        const ux = dx / d;
-        const uy = dy / d;
-        const aGk = a.role === "GK";
-        const bGk = b.role === "GK";
-        const aw = aGk ? 0.08 : 1;
-        const bw = bGk ? 0.08 : 1;
-        const den = aw + bw || 1;
-        a.x = clamp(a.x - ux * push * (bw / den), 2, 98);
-        a.y = clamp(a.y - uy * push * (bw / den), 2, 98);
-        b.x = clamp(b.x + ux * push * (aw / den), 2, 98);
-        b.y = clamp(b.y + uy * push * (aw / den), 2, 98);
       }
+      // 常态下阵型本就分散，首轮即无重叠可直接退出；
+      // 只有禁区混战这类真正拥堵的帧才会用满迭代预算。
+      if (resolved) break;
     }
   }
 
@@ -2966,8 +3016,7 @@ export class SimEngine {
   }
 
   /**
-   * 点球：罚球点单挑门将（不做助跑动画）。
-   * 按主罚者 finishing vs 门将 reflexes 结算进球/扑救/罚失，进球走 _goal。
+   * 点球：先建立合法站位，再由 step 推进助跑、射门飞行和结果。
    * @param {"home"|"away"} team 主罚方
    */
   _penaltyKick(team) {
@@ -2986,7 +3035,18 @@ export class SimEngine {
     const oppTeam = team === "home" ? "away" : "home";
     const gk = this.agents.find((a) => a.team === oppTeam && a.role === "GK") || null;
 
-    // 死球摆位：其余球员退到禁区弧顶外（已离场者不参与摆位）
+    if (!taker) {
+      // 兜底：没人可罚，直接门球给对方
+      this._restart("goalkick", oppTeam, 50, team === "home" ? 12 : 88);
+      return;
+    }
+
+    // 死球摆位：其余球员全部在禁区和罚球弧外分槽站立。
+    // 每队独立横向错位，避免双方落在同一点；纵向至少距罚球点 12 个坐标单位。
+    const staged = this.agents.filter(
+      (a) => !a.sentOff && a !== taker && a !== gk && a.role !== "GK"
+    );
+    const teamRanks = { home: 0, away: 0 };
     for (const a of this.agents) {
       if (a.sentOff) continue;
       a.vx = 0;
@@ -2994,13 +3054,20 @@ export class SimEngine {
       a.intent = null;
       a.pose = null;
       if (a === taker || a === gk) continue;
-      // 站到弧顶外（远离罚球点）
-      const backY = team === "home" ? 26 : 74;
-      a.y = clamp(backY + (this.random() - 0.5) * 6, 4, 96);
-      a.x = clamp(30 + this.random() * 40, 6, 94);
+      if (a.role === "GK") {
+        a.x = a.baseX;
+        a.y = a.baseY;
+      } else {
+        const rank = teamRanks[a.team]++;
+        const row = Math.floor(rank / 5);
+        const col = rank % 5;
+        const teamOffset = a.team === team ? -2.4 : 2.4;
+        a.x = clamp(25 + col * 12.5 + teamOffset, 8, 92);
+        a.y = team === "home" ? 24 + row * 5 : 76 - row * 5;
+      }
       a.tx = a.x;
       a.ty = a.y;
-      a.decisionUntil = this.t + 1.2;
+      a.decisionUntil = this.t + SIM.PENALTY_RESOLVE_SEC + 1.5;
       a.fsm = "home";
     }
     if (gk) {
@@ -3008,23 +3075,39 @@ export class SimEngine {
       gk.y = gk.baseY;
       gk.tx = gk.x;
       gk.ty = gk.y;
-    }
-    if (!taker) {
-      // 兜底：没人可罚，直接门球给对方
-      this._restart("goalkick", oppTeam, 50, team === "home" ? 12 : 88);
-      return;
+      gk.heading = team === "home" ? Math.PI / 2 : -Math.PI / 2;
+      gk.decisionUntil = this.t + SIM.PENALTY_RESOLVE_SEC + 1.5;
     }
     taker.x = 50;
     taker.y = spotY - dir * 4;
     taker.tx = taker.x;
     taker.ty = taker.y;
+    taker.vx = 0;
+    taker.vy = 0;
+    taker.heading = dir < 0 ? -Math.PI / 2 : Math.PI / 2;
+    taker.intent = null;
+    taker.fsm = "setpiece";
+    taker.decisionUntil = this.t + SIM.PENALTY_RESOLVE_SEC + 1.5;
 
     // 结算：finishing 决定命中，门将 reflexes 决定扑出，另有罚失（打偏/中框）
     const finish = taker.attr.finishing;
     const save = gk ? 0.5 * gk.attr.reflexes + 0.3 * gk.attr.handling : 0.2;
     const pScore = clamp(0.78 + (finish - 0.6) * 0.35 - save * 0.28, 0.5, 0.9);
     const r = this.random();
-    // 球先摆到点上（供直播看到）
+    const outcome =
+      r < pScore
+        ? "goal"
+        : r < pScore + (1 - pScore) * 0.7 && gk
+          ? "save"
+          : "miss";
+    const targetX = outcome === "miss"
+      ? r < 0.5
+        ? SIM.GOAL_X0 - 2
+        : SIM.GOAL_X1 + 2
+      : clamp(46.2 + ((r * 997) % 1) * 7.6, SIM.GOAL_X0 + 0.8, SIM.GOAL_X1 - 0.8);
+    const saveSide = outcome === "save" ? (this.random() < 0.5 ? 1 : -1) : 0;
+
+    // 球先摆到点上，供自适应录像捕捉完整定位球画面。
     b.x = 50;
     b.y = spotY;
     b.z = 0;
@@ -3034,39 +3117,153 @@ export class SimEngine {
     b.owner = null;
     b.lastKicker = taker.id;
     b.kickTeam = team;
-    b.state = "shot";
+    b.state = "penalty";
     b._shotAssistId = null;
     b.shotDistance = 11;
-    // 所有点球结果都记一脚射门（与 open play _shoot 对齐），供 shots/xG 同源
-    const penShotMeta = { penalty: true, distance: 11, x: 50, y: spotY };
+    this._clearBallTarget();
+    this.possession = team;
+    this.deadBallUntil = this.t + SIM.PENALTY_RESOLVE_SEC + 0.9;
+    this.pendingPenalty = {
+      team,
+      oppTeam,
+      takerId: taker.id,
+      gkId: gk?.id || null,
+      spotY,
+      dir,
+      startedAt: this.t,
+      runAt: this.t + SIM.PENALTY_RUN_SEC,
+      kickAt: this.t + SIM.PENALTY_KICK_SEC,
+      resolveAt: this.t + SIM.PENALTY_RESOLVE_SEC,
+      outcome,
+      targetX,
+      saveSide,
+      phase: "setup",
+      stagedIds: staged.map((a) => a.id),
+    };
+  }
 
-    if (r < pScore) {
-      this._emit("shot", taker, penShotMeta);
-      // 进球：钉在球门方向
-      b.y = team === "home" ? 0.6 : 99.4;
+  _tickPenalty(dt) {
+    const pen = this.pendingPenalty;
+    if (!pen) return;
+    const b = this.ball;
+    const taker = this.agentById(pen.takerId);
+    const gk = pen.gkId ? this.agentById(pen.gkId) : null;
+
+    if (pen.phase === "setup") {
+      b.x = 50;
+      b.y = pen.spotY;
+      b.z = 0;
+      b.vx = 0;
+      b.vy = 0;
+      b.vz = 0;
+      b.owner = null;
+      b.state = "penalty";
+
+      for (const id of pen.stagedIds) {
+        const a = this.agentById(id);
+        if (!a) continue;
+        a.vx = 0;
+        a.vy = 0;
+        a.tx = a.x;
+        a.ty = a.y;
+      }
+      if (gk) {
+        gk.x = 50;
+        gk.y = gk.baseY;
+        gk.tx = gk.x;
+        gk.ty = gk.y;
+        gk.vx = 0;
+        gk.vy = 0;
+      }
+      if (taker) {
+        const runProgress = clamp(
+          (this.t - pen.runAt) / Math.max(0.01, pen.kickAt - pen.runAt),
+          0,
+          1
+        );
+        taker.x = 50;
+        taker.y = pen.spotY - pen.dir * (4 - runProgress * 3.15);
+        taker.tx = taker.x;
+        taker.ty = taker.y;
+        taker.vx = 0;
+        taker.vy = runProgress > 0 ? pen.dir * 2.4 : 0;
+      }
+
+      if (this.t + dt >= pen.kickAt - 1e-9) {
+        pen.phase = "flight";
+        if (taker) {
+          taker.pose = "kick";
+          taker.poseDir = pen.dir;
+          taker.poseUntil = this.t + 0.55;
+          this._emit("shot", taker, {
+            penalty: true,
+            distance: 11,
+            x: 50,
+            y: pen.spotY,
+            offTarget: pen.outcome === "miss",
+          });
+        }
+        b.state = "shot";
+      }
+      return;
+    }
+
+    const flight = clamp(
+      (this.t - pen.kickAt) / Math.max(0.01, pen.resolveAt - pen.kickAt),
+      0,
+      1
+    );
+    const goalY = pen.team === "home" ? 0.8 : 99.2;
+    b.x = 50 + (pen.targetX - 50) * flight;
+    b.y = pen.spotY + (goalY - pen.spotY) * flight;
+    b.z = Math.sin(Math.PI * flight) * 0.45;
+    b.vx = 0;
+    b.vy = 0;
+    b.vz = 0;
+    b.owner = null;
+    b.state = "shot";
+
+    if (gk) {
+      const dive = clamp((flight - 0.2) / 0.8, 0, 1);
+      const goalTargetX = pen.outcome === "save" ? 50 + pen.saveSide * 6 : pen.targetX;
+      gk.x = 50 + (goalTargetX - 50) * dive * 0.85;
+      gk.y = gk.baseY;
+      gk.tx = gk.x;
+      gk.ty = gk.y;
+      if (dive > 0) {
+        gk.pose = "dive";
+        gk.poseDir = goalTargetX < 50 ? -1 : 1;
+        gk.poseUntil = pen.resolveAt + 0.5;
+      }
+    }
+
+    if (this.t + dt < pen.resolveAt - 1e-9) return;
+    this.pendingPenalty = null;
+    if (pen.outcome === "goal") {
+      b.x = pen.targetX;
+      b.y = goalY;
+      b.lastKicker = pen.takerId;
+      b.kickTeam = pen.team;
       b._penaltyGoal = true;
-      this._goal(team);
-    } else if (r < pScore + (1 - pScore) * 0.7 && gk) {
-      this._emit("shot", taker, penShotMeta);
-      // 门将扑出：球托向边路，转运动战
+      this._goal(pen.team);
+      return;
+    }
+    if (pen.outcome === "save" && gk) {
       this._emit("save", gk, { hold: false, penalty: true });
-      const side = this.random() < 0.5 ? 1 : -1;
-      b.x = 50 + side * 8;
-      b.y = spotY + dir * 3;
-      b.vx = side * 12;
-      b.vy = -dir * 6;
+      b.x = 50 + pen.saveSide * 8;
+      b.y = pen.spotY + pen.dir * 3;
+      b.vx = pen.saveSide * 12;
+      b.vy = -pen.dir * 6;
       b.z = 0.5;
       b.vz = 3;
       b.state = "loose";
       b.lastKicker = gk.id;
-      b.kickTeam = oppTeam;
+      b.kickTeam = pen.oppTeam;
       b.settleUntil = this.t + 0.6;
       this.deadBallUntil = this.t + 0.5;
-    } else {
-      // 罚失（打偏/中框出底线）：门球给对方
-      this._emit("shot", taker, { ...penShotMeta, offTarget: true });
-      this._restart("goalkick", oppTeam, 50, team === "home" ? 12 : 88);
+      return;
     }
+    this._restart("goalkick", pen.oppTeam, 50, pen.team === "home" ? 12 : 88);
   }
 
   /**
@@ -3139,6 +3336,7 @@ export class SimEngine {
    * @param {"corner"|"goalkick"|"throwin"|"offside"|"freekick"} type
    */
   _restart(type, restartTeam, x, y) {
+    this.pendingPenalty = null;
     const b = this.ball;
     b.x = x;
     b.y = y;
@@ -3740,6 +3938,70 @@ export class SimEngine {
   /**
    * 直接从空间模拟事件生成结果。进球、射手、助攻和直播帧共享同一事实来源。
    */
+  /** 按固定间隔记录控球累计值，让任意时刻的控球率可被还原 */
+  _samplePossession() {
+    const line = this.possTimeline;
+    const last = line[line.length - 1];
+    if (last && this.t - last.t < SIM.POSS_SAMPLE_SEC) return;
+    line.push({
+      t: this.t,
+      home: this.stats.home.poss || 0,
+      away: this.stats.away.poss || 0,
+    });
+  }
+
+  /**
+   * 截至某个模拟时刻的控球累计秒数（采样点之间线性插值）。
+   * 直播用它显示"到当前画面为止"的控球率，避免提前泄露整段最终数据。
+   * @param {number} t 模拟秒
+   */
+  possessionAt(t) {
+    const line = this.possTimeline;
+    if (!line?.length) return { home: 0, away: 0 };
+    if (t <= line[0].t) return { home: line[0].home, away: line[0].away };
+    const last = line[line.length - 1];
+    if (t >= last.t) {
+      // 采样点之后的部分仍未落点：直接用当前累计值，不做外推。
+      return t >= this.t
+        ? { home: this.stats.home.poss || 0, away: this.stats.away.poss || 0 }
+        : { home: last.home, away: last.away };
+    }
+    let lo = 0;
+    let hi = line.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (line[mid].t <= t) lo = mid;
+      else hi = mid;
+    }
+    const a = line[lo];
+    const b = line[hi];
+    const span = b.t - a.t;
+    const k = span > 1e-9 ? (t - a.t) / span : 0;
+    return {
+      home: a.home + (b.home - a.home) * k,
+      away: a.away + (b.away - a.away) * k,
+    };
+  }
+
+  /**
+   * 截至某个模拟时刻的累计统计，用于直播顶栏与数据条。
+   * 射门/射正/xG 由同一批事件按时间过滤重算，控球读控球时间轴，
+   * 因此画面在 20′时只会显示 20′之前发生过的事。
+   * @param {number} t 模拟秒
+   * @param {number} [tMin] 统计起点（默认全场累计）
+   */
+  statsThrough(t, tMin = 0) {
+    const upTo = Math.max(tMin, Number.isFinite(t) ? t : this.t);
+    const partial = this.directResult({ tMin, tMax: upTo });
+    const possUpTo = this.possessionAt(upTo);
+    const possFrom = this.possessionAt(tMin);
+    partial.possessionSec = {
+      home: Math.max(0, possUpTo.home - possFrom.home),
+      away: Math.max(0, possUpTo.away - possFrom.away),
+    };
+    return partial;
+  }
+
   directResult(opts = {}) {
     const tMin = opts.tMin ?? 0;
     const tMax = opts.tMax ?? Infinity;
@@ -3770,7 +4032,7 @@ export class SimEngine {
       result.shotsOn[goal.team]++;
       result.goals.push({
         team: goal.team,
-        minute: clamp(Math.floor(goal.t / 60) + 1, 1, 90),
+        minute: simMinuteOf(goal.t),
         scorerId: goal.agentId || null,
         assistId: goal.assistId || null,
         // 与 _goal 同源：点球不记助攻；乌龙不记射手进球/助攻

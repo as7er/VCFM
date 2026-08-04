@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { CLUB_TEMPLATES } from "../js/data.js";
 import { createWorld } from "../js/models.js";
 import { ensureWorldStaff } from "../js/staff.js";
@@ -42,6 +43,17 @@ assert.ok(
   ratings.some((row) => row.playerId === incoming.id),
   `incoming substitute must receive a rating (${side}: ${ratings.map((row) => row.playerId).join(", ")})`
 );
+assert.ok(ratings.length > 11, "post-match ratings must retain every player who appeared");
+assert.equal(
+  ratings.find((row) => row.playerId === out.id)?.started,
+  true,
+  "substituted starter must remain marked as a starter"
+);
+assert.equal(
+  ratings.find((row) => row.playerId === incoming.id)?.started,
+  false,
+  "incoming player must be marked as a substitute"
+);
 
 const outEntry = out.playingTime.history.at(-1);
 const inEntry = incoming.playingTime.history.at(-1);
@@ -49,6 +61,14 @@ assert.equal(outEntry.started, true);
 assert.equal(outEntry.minutes, 46);
 assert.equal(inEntry.started, false);
 assert.equal(inEntry.minutes, 44);
+
+const mainSource = readFileSync(new URL("../js/main.js", import.meta.url), "utf8");
+const rendererStart = mainSource.indexOf("const rateSideHtml");
+const rendererEnd = mainSource.indexOf("let ratingsHtml", rendererStart);
+const ratingsRenderer = mainSource.slice(rendererStart, rendererEnd);
+assert.ok(rendererStart >= 0 && rendererEnd > rendererStart, "ratings renderer must exist");
+assert.ok(!ratingsRenderer.includes(".slice(0, 11)"), "ratings UI must not truncate substitutes");
+assert.ok(ratingsRenderer.includes('x.started === false'), "ratings UI must identify substitutes");
 
 console.log(JSON.stringify({
   starter: { id: out.id, apps: out.stats.apps, minutes: outEntry.minutes },

@@ -219,6 +219,43 @@ test('FULL_TIME 是终态', () => {
   assert(fsm.is('FULL_TIME'), 'Should remain in FULL_TIME');
 });
 
+test('赛后进球回放可以临时离开并恢复终场状态', () => {
+  const fsm = new MatchViewFSM();
+  fsm.transition('PRE_MATCH');
+  fsm.transition('PLAYING', 'SIM_DRIVEN');
+  fsm.transition('FULL_TIME');
+
+  assert(
+    !fsm.transition('GOAL_SEQUENCE', 'STRIKE'),
+    'FULL_TIME should reject an ordinary goal sequence'
+  );
+  assert(
+    fsm.transition('GOAL_SEQUENCE', 'STRIKE', { replay: true }),
+    'FULL_TIME should allow an explicit replay'
+  );
+  assert(fsm.transition('GOAL_SEQUENCE', 'CELEBRATE'), 'Replay should reach celebration');
+  assert(
+    fsm.transition('FULL_TIME', null, { replayReturn: true }),
+    'Replay should restore FULL_TIME'
+  );
+});
+
+test('暂停的历史战报可以播放进球并恢复暂停状态', () => {
+  const fsm = new MatchViewFSM();
+  fsm.transition('PRE_MATCH');
+  fsm.transition('PAUSED');
+
+  assert(
+    fsm.transition('GOAL_SEQUENCE', 'STRIKE', { replay: true }),
+    'PAUSED report should allow an explicit replay'
+  );
+  fsm.transition('GOAL_SEQUENCE', 'CELEBRATE');
+  assert(
+    fsm.transition('PAUSED', null, { replayReturn: true }),
+    'Replay should restore PAUSED'
+  );
+});
+
 test('完整的比赛流程', () => {
   const fsm = new MatchViewFSM();
 

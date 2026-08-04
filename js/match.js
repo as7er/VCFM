@@ -1282,6 +1282,8 @@ async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighl
       }
       if (!silent && onEvent) {
         const snap = liveSnap(state, minute, null);
+        // 分钟边界事件也要带模拟时刻，直播数据条才能按画面进度切片统计。
+        snap.simT = minute * 60;
         for (const ev of state.events.slice(mark)) {
           ev._simLive = true;
           onEvent(ev, snap);
@@ -2704,6 +2706,7 @@ function applyMatchRatings(state) {
   const rateSide = (club, gf, ga, won, drew) => {
     const list = [];
     const xi = appearedPlayers(state, club);
+    const starters = new Set(state.startingLineups?.[sideKey(state, club)] || []);
     for (const p of xi) {
       if (!p) continue;
       const st = ensureStats(p);
@@ -2767,6 +2770,7 @@ function applyMatchRatings(state) {
         name: p.name,
         pos: p.pos,
         number: p.number,
+        started: starters.has(p.id),
         rating: r,
         goals: m.goals,
         assists: m.assists,

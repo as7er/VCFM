@@ -14,6 +14,7 @@
 
 import { FORMATIONS, playerDisplaySurname } from "./data.js";
 import { MatchViewFSM } from "./matchview-fsm.js";
+import { simMinuteOf } from "./match-presentation.js";
 import { coordSystem } from "./matchview-coords.js";
 import { GOAL_NARRATIVE, DirectorScript } from "./matchview-director.js";
 import {
@@ -627,7 +628,7 @@ export class MatchView {
 
         this.applySimSnapshotLerped(a, b, alpha);
 
-        const minute = Math.max(1, Math.min(90, Math.ceil(sp.simT / 60) || 1));
+        const minute = simMinuteOf(sp.simT);
         if (sp.onSimT && (sp.simT - sp.lastEmitT >= 0.12 || sp.simT >= tEnd)) {
           sp.lastEmitT = sp.simT;
           try {
@@ -3098,16 +3099,17 @@ export class MatchView {
           const push = ((minD - d) / 2) * (inBox ? 1.15 : 0.85);
           const ux = dx / d;
           const uy = dy / d;
-          // 门将少动
-          const aGk = a.pos === "GK" || a.role === "GK";
-          const bGk = b.pos === "GK" || b.role === "GK";
-          const aw = aGk ? 0.15 : 1;
-          const bw = bGk ? 0.15 : 1;
+          // 权重是"愿意被推动的程度"，门将守门线因此几乎不动；
+          // 每人按自身权重份额分担修正，与引擎 _separateAgents 同一套规则。
+          const aw = a.pos === "GK" || a.role === "GK" ? 0.15 : 1;
+          const bw = b.pos === "GK" || b.role === "GK" ? 0.15 : 1;
           const den = aw + bw || 1;
-          a.x = clamp(a.x - ux * push * (bw / den), 2, 98);
-          a.y = clamp(a.y - uy * push * (bw / den), 2, 98);
-          b.x = clamp(b.x + ux * push * (aw / den), 2, 98);
-          b.y = clamp(b.y + uy * push * (aw / den), 2, 98);
+          const aShare = aw / den;
+          const bShare = bw / den;
+          a.x = clamp(a.x - ux * push * aShare, 2, 98);
+          a.y = clamp(a.y - uy * push * aShare, 2, 98);
+          b.x = clamp(b.x + ux * push * bShare, 2, 98);
+          b.y = clamp(b.y + uy * push * bShare, 2, 98);
         }
       }
     }
@@ -6208,10 +6210,18 @@ export class MatchView {
 
   /**
    * 角球摆位：球钉角旗 + 主罚人 + 双方堆禁区 + 角球徽章
-   * sim 路径 / 直播事件共用（旧版只闪 🚩 导致「从没见过角球画面」）
+   *
+   * 仅用于没有空间帧的旧路径。空间引擎的 `_restart` 已经给角球排好合法分槽，
+   * 真实帧本身就包含正确站位；此时再摆拍会让整队先瞬移到预设坐标、
+   * 下一帧又被真实位置覆盖回去，也就是录像里看到的双重跳变与重复画面。
    */
   _stageCornerSetPiece(ev = {}, fixture = null) {
     if (!this._built) return;
+    if (this.simDrive) {
+      // 空间帧已带角球站位：只给镜头和徽章，不动球员坐标。
+      this._showCornerChrome();
+      return;
+    }
     const homeId = fixture?.home || this.home?.id;
     const attHome =
       ev.teamId != null
@@ -6243,9 +6253,24 @@ export class MatchView {
       taker = cands[0] || null;
     }
 
-    // 进攻：约 5 人进禁区，其余弧顶；防守 5 人盯人——别 20 人糊成一团
-    let attPacked = 0;
-    let defPacked = 0;
+    // 固定 5v5 禁区分槽，其他人留在弧顶。双方槽位交错，避免随机摆位重叠。
+    const stageY = (topY) => (attHome ? topY : 100 - topY);
+    const attackBox = [[35, 13], [43, 17], [50, 10], [57, 17], [65, 13]];
+    const attackEdge = [[27, 30], [39, 27], [50, 31], [61, 27], [73, 30]];
+    const defendBox = [[38, 16], [46, 12], [50, 19], [54, 12], [62, 16]];
+    const defendEdge = [[24, 34], [37, 31], [50, 35], [63, 31], [76, 34]];
+    const roleRank = (pl, attacking) =>
+      attacking
+        ? pl.pos === "ATT" || pl.role === "ATT" ? 0 : pl.pos === "MID" || pl.role === "MID" ? 1 : 2
+        : pl.pos === "DEF" || pl.role === "DEF" ? 0 : pl.pos === "MID" || pl.role === "MID" ? 1 : 2;
+    const attackers = this.players
+      .filter((pl) => pl.team === team && pl !== taker && pl.pos !== "GK" && pl.role !== "GK" && !pl.el.classList.contains("sent-off"))
+      .sort((a, b) => roleRank(a, true) - roleRank(b, true) || String(a.id).localeCompare(String(b.id)));
+    const defenders = this.players
+      .filter((pl) => pl.team !== team && pl.pos !== "GK" && pl.role !== "GK" && !pl.el.classList.contains("sent-off"))
+      .sort((a, b) => roleRank(a, false) - roleRank(b, false) || String(a.id).localeCompare(String(b.id)));
+    const attackIndex = new Map(attackers.map((pl, index) => [pl.id, index]));
+    const defendIndex = new Map(defenders.map((pl, index) => [pl.id, index]));
     for (const pl of this.players) {
       if (pl.el.classList.contains("sent-off")) continue;
       if (pl.pos === "GK" || pl.role === "GK") {
@@ -6263,37 +6288,20 @@ export class MatchView {
       }
       if (pl === taker) continue;
       if (pl.team === team) {
-        const pack = attPacked < 5;
-        if (pack) attPacked++;
-        const ang = (attPacked / 6) * Math.PI - Math.PI / 2;
-        pl.x = clamp(
-          pack
-            ? 50 + Math.cos(ang) * (10 + (attPacked % 3) * 4) + (left ? -2 : 2)
-            : 40 + Math.random() * 20,
-          18,
-          82
-        );
-        pl.y = clamp(
-          pack
-            ? boxY + Math.sin(ang) * 6 + (Math.random() - 0.5) * 3
-            : boxY + (attHome ? 12 : -12),
-          8,
-          92
-        );
-        if (pack) pl.el.classList.add("highlight");
+        const index = attackIndex.get(pl.id) ?? 0;
+        const slot = index < attackBox.length
+          ? attackBox[index]
+          : attackEdge[(index - attackBox.length) % attackEdge.length];
+        pl.x = slot[0];
+        pl.y = stageY(slot[1]);
+        if (index < attackBox.length) pl.el.classList.add("highlight");
       } else {
-        const pack = defPacked < 5;
-        if (pack) defPacked++;
-        pl.x = clamp(
-          pack ? 42 + defPacked * 3 + (Math.random() - 0.5) * 4 : pl.baseX ?? 50,
-          22,
-          78
-        );
-        pl.y = clamp(
-          pack ? boxY + (Math.random() - 0.5) * 5 : pl.baseY ?? 50,
-          8,
-          92
-        );
+        const index = defendIndex.get(pl.id) ?? 0;
+        const slot = index < defendBox.length
+          ? defendBox[index]
+          : defendEdge[(index - defendBox.length) % defendEdge.length];
+        pl.x = slot[0];
+        pl.y = stageY(slot[1]);
       }
       pl.tx = pl.x;
       pl.ty = pl.y;
@@ -6326,13 +6334,17 @@ export class MatchView {
     this.possession = team;
     this._ballTrail = [];
     this._applyBall();
-    this._visualUnstack(2);
+    this._visualUnstack(3);
 
+    this.fsm.transition('PLAYING', 'SCRIPTED');
+    this._showCornerChrome();
+  }
+
+  /** 角球的镜头、徽章与场地强调；不改动任何球员坐标 */
+  _showCornerChrome() {
     this.camMode = "box";
     this.camBoostUntil = performance.now() + 2400;
-    this.fsm.transition('PLAYING', 'SCRIPTED');
 
-    // 角球徽章
     if (this.replayBadgeEl) {
       this.replayBadgeEl.textContent =
         (typeof document !== "undefined" && document.documentElement?.lang === "en")
@@ -6768,10 +6780,9 @@ export class MatchView {
   }
 
   /** 进球后中圈开球：失球方门将拿球再轻传，少硬切 */
-  async _restartAfterGoal(attHome, { wait, lang = "zh" } = {}) {
+  async _restartAfterGoal(attHome, { wait, lang = "zh", replayReturn = null } = {}) {
     this.fieldEl?.classList.remove("mp-replay", "mp-replay-slow");
     this.replayBadgeEl?.classList.add("hidden");
-    this.fsm.transition('PLAYING', 'FREE_PLAY');
     this._celebrate = null;
     for (const pl of this.players) {
       pl.el.classList.remove("scorer", "highlight");
@@ -6784,12 +6795,10 @@ export class MatchView {
     this.scriptLock = false;
     this.attackPhase = null;
 
-    // 失球方开球
     const kickSide = attHome ? "away" : "home";
-    this.possession = kickSide;
+    this.possession = replayReturn?.possession || kickSide;
     this._resetShape();
     this._updatePossessionChrome();
-    // 球先到中圈，再交给门将附近后卫
     this.ball.x = 50;
     this.ball.y = 50;
     this.ball.tx = 50;
@@ -6797,6 +6806,27 @@ export class MatchView {
     this.ballState = "free";
     this._clearCarrier();
     this._applyBall();
+
+    if (replayReturn) {
+      this.fsm.transition(replayReturn.state, replayReturn.subState, { replayReturn: true });
+      this._legacyFrozen = replayReturn.frozen;
+      this.fieldEl?.classList.toggle("mp-ui-paused", replayReturn.frozen);
+      this.simDrive = replayReturn.simDrive;
+      this.fieldEl?.classList.toggle("mp-sim-drive", replayReturn.simDrive);
+      this.setBanner(
+        replayReturn.bannerText || (lang === "en" ? "FULL-TIME" : "完场回顾"),
+        "info"
+      );
+      this.setCaption("");
+      this._syncClickable();
+      this.refreshLayout?.();
+      return;
+    }
+
+    this.fsm.transition('PLAYING', 'FREE_PLAY');
+    this.possession = kickSide;
+    this._updatePossessionChrome();
+    // 球先到中圈，再交给门将附近后卫
     this.setBanner(lang === "en" ? "Kick-off" : "中圈开球", "info");
     this.setCaption(lang === "en" ? "Restart…" : "开球…", "info", 900);
     if (!this._rec?.active) this.startRecording();
@@ -6991,6 +7021,25 @@ export class MatchView {
     const dir = this._attackDir(team);
     const isRewatch = !!opts.rewatch;
     const scene = opts.scene || null;
+    const replayReturn =
+      isRewatch && ['FULL_TIME', 'PAUSED'].includes(this.fsm.current())
+        ? {
+            state: this.fsm.current(),
+            subState: this.fsm.subState,
+            frozen: this._legacyFrozen,
+            simDrive: this.simDrive,
+            possession: this.possession,
+            bannerText: this.bannerEl?.textContent || "",
+          }
+        : null;
+
+    // 赛后状态本身不推进动画；回放期间临时交给脚本驱动，结束后原样恢复。
+    if (replayReturn) {
+      this._legacyFrozen = false;
+      this.fieldEl?.classList.remove("mp-ui-paused");
+      this.simDrive = false;
+      this.fieldEl?.classList.remove("mp-sim-drive");
+    }
 
     // 回看：优先还原进球瞬间场面
     let restored = false;
@@ -7002,8 +7051,19 @@ export class MatchView {
     let ballX = this.ball.x;
     let ballY = this.ball.y;
 
-    this.fsm.transition('GOAL_SEQUENCE', 'STRIKE');
-    this.scriptLock = false;
+    const enteredReplay = this.fsm.transition('GOAL_SEQUENCE', 'STRIKE', {
+      replay: isRewatch,
+    });
+    if (!enteredReplay) {
+      if (replayReturn) {
+        this._legacyFrozen = replayReturn.frozen;
+        this.fieldEl?.classList.toggle("mp-ui-paused", replayReturn.frozen);
+        this.simDrive = replayReturn.simDrive;
+        this.fieldEl?.classList.toggle("mp-sim-drive", replayReturn.simDrive);
+      }
+      return false;
+    }
+    this._legacyScriptLock = false;
     this.hidePlayerCard();
     this.flight = null;
     this.ballFlightUntil = 0;
@@ -7394,6 +7454,7 @@ export class MatchView {
       "goal",
       0
     );
+    this.fsm.transition('GOAL_SEQUENCE', 'CELEBRATE');
     // 多帧插值庆祝（约 2.6s）
     const celeSteps = isRewatch ? 14 : 18;
     for (let i = 0; i < celeSteps; i++) {
@@ -7402,9 +7463,10 @@ export class MatchView {
       await wait(isRewatch ? 110 : 140);
     }
 
-    // —— 6) 开球（回看也复位，方便连点下一球） ——
+    // —— 6) 直播继续开球；赛后回看恢复完场画面 ——
     this._celebrate = null;
-    await this._restartAfterGoal(attHome, { wait, lang });
+    await this._restartAfterGoal(attHome, { wait, lang, replayReturn });
+    return true;
   }
 
   async replayEvents(events, fixture, { onStep, speed = 1, sleepFn } = {}) {

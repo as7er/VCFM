@@ -47,7 +47,7 @@ export class MatchViewFSM {
     }
 
     // 验证转换合法性
-    if (!this._isValidTransition(oldState, oldSubState, newState, newSubState)) {
+    if (!this._isValidTransition(oldState, oldSubState, newState, newSubState, data)) {
       console.warn(`[FSM] Invalid transition: ${oldState}${oldSubState ? `.${oldSubState}` : ''} -> ${newState}${newSubState ? `.${newSubState}` : ''}`);
       return false;
     }
@@ -68,7 +68,7 @@ export class MatchViewFSM {
   /**
    * 验证状态转换是否合法
    */
-  _isValidTransition(fromState, fromSub, toState, toSub) {
+  _isValidTransition(fromState, fromSub, toState, toSub, data = {}) {
     // IDLE 只能进入 PRE_MATCH
     if (fromState === 'IDLE') {
       return toState === 'PRE_MATCH';
@@ -96,12 +96,18 @@ export class MatchViewFSM {
         const toIdx = toSub ? order.indexOf(toSub) : -1;
         return toIdx >= fromIdx;
       }
-      // 庆祝完回到 PLAYING
-      return toState === 'PLAYING' && fromSub === 'CELEBRATE';
+      // 庆祝完回到比赛；赛后回放则恢复此前的完场/暂停状态
+      if (toState === 'PLAYING') return fromSub === 'CELEBRATE';
+      return (
+        data.replayReturn === true &&
+        fromSub === 'CELEBRATE' &&
+        ['PAUSED', 'FULL_TIME'].includes(toState)
+      );
     }
 
     // PAUSED 可以恢复到之前的状态（需要额外逻辑记录）
     if (fromState === 'PAUSED') {
+      if (toState === 'GOAL_SEQUENCE') return data.replay === true;
       return ['PLAYING', 'PRE_MATCH', 'HALF_TIME'].includes(toState);
     }
 
@@ -110,9 +116,9 @@ export class MatchViewFSM {
       return toState === 'PLAYING' || toState === 'PAUSED';
     }
 
-    // FULL_TIME 是终态
+    // FULL_TIME 对比赛流程是终态，只允许显式进入赛后进球回放
     if (fromState === 'FULL_TIME') {
-      return false;
+      return toState === 'GOAL_SEQUENCE' && data.replay === true;
     }
 
     return false;

@@ -7,6 +7,7 @@
  * AI 后台场次仍用 match.js 概率引擎（性能）。
  */
 import { SimEngine, SIM } from "./engine.js";
+import { simMinuteOf } from "../match-presentation.js";
 import {
   getLineupPlayers,
   ensureTactics,
@@ -131,10 +132,11 @@ export function resyncSimAfterHalfTime(state) {
   }
 }
 
-/** 模拟秒 → 比赛分钟（1..90） */
-function simTToMinute(tSec) {
-  return Math.max(1, Math.min(90, Math.round((tSec / (90 * 60)) * 90) || 1));
-}
+/**
+ * 模拟秒 → 比赛分钟（1..90）
+ * 与进球、播放帧顶栏共用 simMinuteOf，避免同一时刻算出不同分钟。
+ */
+const simTToMinute = simMinuteOf;
 
 /**
  * 直播帧录制策略（单遍、事件驱动）：
@@ -288,9 +290,11 @@ export function compactSimFrame(eng) {
   // 入网脉冲只发一帧，立即清掉，避免后续帧/跳段在错误位置重放网效
   const netHit = !!b._netHitPulse;
   if (netHit) b._netHitPulse = false;
-  // 角球等定位球：死球窗内标 setPiece，表现层可打角球徽章
+  // 定位球阶段直接随帧传给表现层，不能等事件文案临时摆拍。
   const setPiece =
-    b.state === "corner" ||
+    b.state === "penalty"
+      ? "penalty"
+      : b.state === "corner" ||
     (eng.deadBallUntil &&
       eng.t < eng.deadBallUntil &&
       (b.state === "corner" ||
@@ -312,7 +316,9 @@ export function compactSimFrame(eng) {
       owner: b.owner,
       state: b.state || null,
       netHit,
-      setPiece: setPiece || (b.state === "corner" ? "corner" : null),
+      setPiece:
+        setPiece ||
+        (b.state === "corner" ? "corner" : b.state === "penalty" ? "penalty" : null),
     },
     players: eng.agents.map((a) => {
       const poseOn = a.pose && eng.t < (a.poseUntil || 0);
@@ -534,7 +540,7 @@ export function buildHighlightSegments(frames, windows, tStart, tEnd) {
   let cursor = tStart;
   const wins = (windows || []).slice().sort((a, b) => a.t0 - b.t0);
 
-  const minOf = (t) => Math.max(1, Math.min(90, Math.ceil(t / 60) || 1));
+  const minOf = simMinuteOf;
 
   for (const w of wins) {
     const a = Math.max(tStart, w.t0);
