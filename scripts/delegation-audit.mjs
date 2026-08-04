@@ -61,6 +61,15 @@ function testWorld() {
   return { world, club, opponent };
 }
 
+function assertNoSubstituteReentry(events, clubId) {
+  const substitutions = events.filter((event) => event.type === "sub" && event.teamId === clubId);
+  const removed = new Set();
+  for (const substitution of substitutions) {
+    assert.ok(!removed.has(substitution.inId), "a substituted player must not return to the same match");
+    removed.add(substitution.outId);
+  }
+}
+
 {
   const { world, club } = testWorld();
   const delegation = ensureDelegation(world, club);
@@ -158,15 +167,46 @@ function testWorld() {
 }
 
 {
-  const { world, club } = testWorld();
+  const { world, club, opponent } = testWorld();
   assert.equal(setManagementMode(world, club, "club_director").ok, true);
   const state = createMatchSession(world, fixture());
   assert.equal(applyManagedTeamTalk(state, "pre").ok, true);
   await playFirstHalf(state);
-  await playSecondHalf(state);
+  const streamed = [];
+  await playSecondHalf(state, { onEvent: (event) => streamed.push(event) });
   assert.ok(["encourage", "calm", "demand", "solid", "control"].includes(state.teamTalks.ht));
   const reviews = state.events.filter((event) => event.managedDecision && event.phase === "matchday");
   assert.deepEqual(reviews.map((event) => event.minute), [60, 75]);
+  const scheduledSubs = state.events.filter(
+    (event) => event.type === "sub" && (event.minute === 60 || event.minute === 75)
+  );
+  assert.ok(scheduledSubs.some((event) => event.teamId === club.id), "delegated coach must use substitutions");
+  assert.ok(scheduledSubs.some((event) => event.teamId === opponent.id), "opposing coach must use substitutions");
+  assert.ok(
+    streamed.some((event) => event.type === "sub" && event.teamId === club.id),
+    "delegated substitutions must reach the live event stream"
+  );
+  assert.ok(
+    streamed.some((event) => event.type === "sub" && event.teamId === opponent.id),
+    "opponent substitutions must reach the live event stream"
+  );
+  assertNoSubstituteReentry(state.events, club.id);
+  assertNoSubstituteReentry(state.events, opponent.id);
+}
+
+{
+  const { world, club, opponent } = testWorld();
+  world.userClubId = "not-in-this-fixture";
+  const state = createMatchSession(world, fixture());
+  await playFirstHalf(state);
+  await playSecondHalf(state);
+  const scheduledSubs = state.events.filter(
+    (event) => event.type === "sub" && (event.minute === 60 || event.minute === 75)
+  );
+  assert.ok(scheduledSubs.some((event) => event.teamId === club.id), "home AI must review substitutions");
+  assert.ok(scheduledSubs.some((event) => event.teamId === opponent.id), "away AI must review substitutions");
+  assertNoSubstituteReentry(state.events, club.id);
+  assertNoSubstituteReentry(state.events, opponent.id);
 }
 
 console.log("delegation audit passed");

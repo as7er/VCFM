@@ -1066,24 +1066,9 @@ function wireSimInjuries(state) {
     const pending = state._simPendingSubs.filter((s) => s.team === sk);
     if (state.subsUsed[sk] + pending.length >= state.maxSubs) return null;
     const taken = new Set(pending.map((s) => s.inId));
-    const xiIds = new Set(club.tactics.lineup);
     const outP = club.players.find((p) => p.id === agent.id);
     if (!outP) return null; // 占位 agent（无真实球员）不换
-    const bench = club.players
-      .filter(
-        (p) =>
-          !xiIds.has(p.id) &&
-          !taken.has(p.id) &&
-          (!state.eligiblePlayerIds?.[sk] || state.eligiblePlayerIds[sk].has(p.id)) &&
-          (p.injured || 0) <= 0 &&
-          !state.sentOff[sk].has(p.id) &&
-          (p.fitness || 0) > 50
-      )
-      .sort((a, b) => {
-        const am = a.pos === outP.pos ? 5 : 0;
-        const bm = b.pos === outP.pos ? 5 : 0;
-        return b.ovr + bm - (a.ovr + am);
-      });
+    const bench = aiBenchCandidates(state, club, outP).filter((p) => !taken.has(p.id));
     const inn = bench[0];
     if (!inn) return null;
     state._simPendingSubs.push({ team: sk, outId: agent.id, inId: inn.id });
@@ -1690,27 +1675,86 @@ function tryInjury(state, minute) {
   }
 }
 
-function aiAutoSub(state, club, outId, minute) {
+function aiBenchCandidates(state, club, outP = null) {
   const sk = sideKey(state, club);
-  if (state.subsUsed[sk] >= state.maxSubs) return { ok: false, msg: "换人次数已用尽" };
   const xiIds = new Set(club.tactics.lineup);
-  const outP = club.players.find((p) => p.id === outId);
-  const bench = club.players
+  const subbedOutIds = new Set(
+    state.events
+      .filter((event) => event.type === "sub" && event.teamId === club.id && event.outId)
+      .map((event) => event.outId)
+  );
+  return club.players
     .filter(
       (p) =>
         !xiIds.has(p.id) &&
+        !subbedOutIds.has(p.id) &&
         (!state.eligiblePlayerIds?.[sk] || state.eligiblePlayerIds[sk].has(p.id)) &&
         (p.injured || 0) <= 0 &&
+        (p.suspendedMatches || 0) <= 0 &&
         !state.sentOff[sk].has(p.id) &&
         (p.fitness || 0) > 50
     )
     .sort((a, b) => {
-      const posMatch = outP && a.pos === outP.pos ? 5 : 0;
-      return b.ovr + posMatch - (a.ovr + (outP && b.pos === outP.pos ? 5 : 0));
+      const aScore = (a.ovr || 0) + (outP && a.pos === outP.pos ? 5 : 0) + (a.fitness || 0) * 0.01;
+      const bScore = (b.ovr || 0) + (outP && b.pos === outP.pos ? 5 : 0) + (b.fitness || 0) * 0.01;
+      return bScore - aScore || String(a.id).localeCompare(String(b.id));
     });
-  const inn = bench[0];
+}
+
+function aiAutoSub(state, club, outId, minute) {
+  const sk = sideKey(state, club);
+  if (state.subsUsed[sk] >= state.maxSubs) return { ok: false, msg: "换人次数已用尽" };
+  const outP = club.players.find((p) => p.id === outId);
+  const inn = aiBenchCandidates(state, club, outP)[0];
   if (!inn) return { ok: false, msg: "没有合格替补" };
   return applySubstitution(state, club, outId, inn.id, minute, true);
+}
+
+function aiSubTarget(state, club, minute, scoreGap) {
+  const entered = new Set(
+    state.events
+      .filter((event) => event.type === "sub" && event.teamId === club.id && event.inId)
+      .map((event) => event.inId)
+  );
+  const candidates = [];
+  for (const player of activeXi(state, club)) {
+    if (player.pos === "GK") continue;
+    const replacement = aiBenchCandidates(state, club, player)[0];
+    if (!replacement) continue;
+    const fitness = player.fitness ?? 100;
+    const booked = (state.yellowCount.get(player.id) || 0) > 0;
+    const benchDelta = clamp((replacement.ovr || 0) - (player.ovr || 0), -3, 3);
+    let priority = (100 - fitness) * 1.35 + benchDelta * 3;
+    if (booked) priority += 18;
+    if (replacement.pos !== player.pos) priority -= 12;
+    if (scoreGap < 0) priority += player.pos === "ATT" ? 7 : player.pos === "MID" ? 4 : 0;
+    if (scoreGap > 0) priority += player.pos === "ATT" ? 5 : player.pos === "MID" ? 3 : 1;
+    if (minute >= 75) priority += player.pos === "MID" ? 3 : 2;
+    if (entered.has(player.id)) priority -= 30;
+    candidates.push({ player, priority, fitness, booked });
+  }
+  candidates.sort(
+    (a, b) =>
+      b.priority - a.priority ||
+      a.fitness - b.fitness ||
+      String(a.player.id).localeCompare(String(b.player.id))
+  );
+  return candidates[0] || null;
+}
+
+function aiSubTargetCount(state, club, minute, scoreGap) {
+  const sk = sideKey(state, club);
+  const xi = activeXi(state, club);
+  const booked = xi.filter((player) => (state.yellowCount.get(player.id) || 0) > 0).length;
+  const lowFitness = xi.filter((player) => (player.fitness ?? 100) < 70).length;
+  let target = minute >= 75 ? 3 : 1;
+  if (minute === 60 && (scoreGap <= -2 || booked >= 2 || lowFitness >= 2) && chance(0.55)) {
+    target = 2;
+  }
+  if (minute >= 75 && (scoreGap !== 0 || lowFitness >= 2) && chance(0.55)) {
+    target = 4;
+  }
+  return clamp(Math.max(state.subsUsed[sk], target), 0, state.maxSubs);
 }
 
 /**
@@ -1897,38 +1941,70 @@ export function aiHalfTime(state) {
   recomputeSides(state);
 }
 
-/** 主教练在 60'/75' 评估体能、比分和比赛风险，决定是否继续轮换。 */
+/** AI 与经营模式主教练在 60'/75' 读取同一场上事实并作出临场决定。 */
 function coachInMatchReview(state, minute) {
   for (const club of [state.home, state.away]) {
-    if (club.id !== state.world.userClubId || !shouldStaffHandleMatchday(state.world, club)) continue;
+    const isUserClub = club.id === state.world.userClubId;
+    const managedUser = isUserClub && shouldStaffHandleMatchday(state.world, club);
+    if (isUserClub && !managedUser) continue;
     const sk = sideKey(state, club);
-    const xi = activeXi(state, club);
-    const tired = xi.filter((p) => (p.fitness || 100) < (minute >= 75 ? 62 : 55))
-      .sort((a, b) => (a.fitness || 0) - (b.fitness || 0));
     const myG = club === state.home ? state.hg : state.ag;
     const opG = club === state.home ? state.ag : state.hg;
-    let decision = "维持场上阵容，继续观察";
-    if (tired[0] && state.subsUsed[sk] < state.maxSubs) {
-      const result = aiAutoSub(state, club, tired[0].id, minute);
-      if (result?.ok) decision = `安排替补换下体能不足的 ${tired[0].name}`;
-    } else if (myG < opG && minute >= 60) {
+    const scoreGap = myG - opG;
+    const decisions = [];
+
+    if (scoreGap < 0) {
       club.tactics.style = "attack";
       club.tactics.pressing = Math.min(5, (club.tactics.pressing || 3) + 1);
       club.tactics.tempo = Math.min(5, (club.tactics.tempo || 3) + 1);
-      decision = "比分落后，增加压迫和进攻节奏";
-    } else if (myG > opG && minute >= 75) {
+      decisions.push("比分落后，增加压迫和进攻节奏");
+    } else if (scoreGap > 0 && minute >= 75) {
       club.tactics.style = "defend";
       club.tactics.pressing = Math.max(1, (club.tactics.pressing || 3) - 1);
       club.tactics.tempo = Math.max(1, (club.tactics.tempo || 3) - 1);
-      decision = "比分领先，降低风险并保护体能";
+      decisions.push("比分领先，降低风险并保护体能");
     }
-    pushEv(state, minute, "coach", `🧠 ${minute}' 主教练评估：${decision}`, {
-      teamId: club.id,
-      managedDecision: true,
-      phase: "matchday",
-      minute,
-    });
+
+    const targetCount = aiSubTargetCount(state, club, minute, scoreGap);
+    const replaced = [];
+    while (state.subsUsed[sk] < targetCount) {
+      const target = aiSubTarget(state, club, minute, scoreGap);
+      if (!target) break;
+      const result = aiAutoSub(state, club, target.player.id, minute);
+      if (!result?.ok) break;
+      const reason = target.booked
+        ? "黄牌风险"
+        : target.fitness < 72
+          ? "体能下降"
+          : scoreGap < 0
+            ? "加强进攻"
+            : scoreGap > 0
+              ? "控制比赛"
+              : "保持强度";
+      replaced.push(`${target.player.name}（${reason}）`);
+    }
+    if (replaced.length) decisions.push(`轮换 ${replaced.join("、")}`);
+    if (!decisions.length) decisions.push("维持场上阵容，继续观察");
+
+    if (managedUser) {
+      pushEv(state, minute, "coach", `🧠 ${minute}' 主教练评估：${decisions.join("；")}`, {
+        teamId: club.id,
+        managedDecision: true,
+        phase: "matchday",
+        minute,
+      });
+    }
     recomputeSides(state);
+  }
+}
+
+async function runLiveCoachReview(state, minute, opts = {}) {
+  const mark = state.events.length;
+  coachInMatchReview(state, minute);
+  if (!opts.onEvent) return;
+  const snap = liveSnap(state, minute);
+  for (const event of state.events.slice(mark)) {
+    await opts.onEvent(event, snap);
   }
 }
 
@@ -2260,17 +2336,19 @@ export async function playSecondHalf(state, opts = {}) {
   }
   state.phase = "h2";
   if (shouldUseSim(state)) {
-    const managed = state.userClub && shouldStaffHandleMatchday(state.world, state.userClub);
     // 所有直播比赛按指挥窗口分段。玩家在 46–60' 高光播放时做出的场边调整，
     // 会在尚未计算的 61–75' 生效；不再出现整半场预跑后的“假即时控制”。
     await simulatePeriodWithSim(state, 46, 60, opts);
-    if (managed) coachInMatchReview(state, 60);
+    await runLiveCoachReview(state, 60, opts);
     await simulatePeriodWithSim(state, 61, 75, opts);
-    if (managed) coachInMatchReview(state, 75);
+    await runLiveCoachReview(state, 75, opts);
     await simulatePeriodWithSim(state, 76, 90, opts);
   } else {
-    // 理论兜底：无用户参与的 state 走 AI 同步概率引擎（正常流程不会到这）
-    runMinutesSync(state, 46, 90);
+    runMinutesSync(state, 46, 60);
+    await runLiveCoachReview(state, 60, opts);
+    runMinutesSync(state, 61, 75);
+    await runLiveCoachReview(state, 75, opts);
+    runMinutesSync(state, 76, 90);
   }
   pushEv(
     state,
@@ -3070,15 +3148,11 @@ export function simulateMatchSync(world, fixture, opts = {}) {
     } else if (opts.htTalkId && state.userClub) {
       applyTeamTalk(state, opts.htTalkId, "ht");
     }
-    if (staffManaged) {
-      simulatePeriodWithSimSync(state, 46, 60);
-      coachInMatchReview(state, 60);
-      simulatePeriodWithSimSync(state, 61, 75);
-      coachInMatchReview(state, 75);
-      simulatePeriodWithSimSync(state, 76, 90);
-    } else {
-      simulatePeriodWithSimSync(state, 46, 90);
-    }
+    simulatePeriodWithSimSync(state, 46, 60);
+    coachInMatchReview(state, 60);
+    simulatePeriodWithSimSync(state, 61, 75);
+    coachInMatchReview(state, 75);
+    simulatePeriodWithSimSync(state, 76, 90);
   } else {
     runMinutesSync(state, 1, 45);
     pushEv(state, 45, "ht", `中场休息 ${home.name} ${state.hg} - ${state.ag} ${away.name}`);
@@ -3088,15 +3162,11 @@ export function simulateMatchSync(world, fixture, opts = {}) {
     } else if (opts.htTalkId && state.userClub) {
       applyTeamTalk(state, opts.htTalkId, "ht");
     }
-    if (staffManaged) {
-      runMinutesSync(state, 46, 60);
-      coachInMatchReview(state, 60);
-      runMinutesSync(state, 61, 75);
-      coachInMatchReview(state, 75);
-      runMinutesSync(state, 76, 90);
-    } else {
-      runMinutesSync(state, 46, 90);
-    }
+    runMinutesSync(state, 46, 60);
+    coachInMatchReview(state, 60);
+    runMinutesSync(state, 61, 75);
+    coachInMatchReview(state, 75);
+    runMinutesSync(state, 76, 90);
   }
   pushEv(state, 90, "ft", `全场结束 ${home.name} ${state.hg} - ${state.ag} ${away.name}`);
   return finalizeMatch(state);
