@@ -26,6 +26,8 @@ assert.equal(new Set(svgDocuments).size, CLUB_TEMPLATES.length, "all clubs need 
 
 for (const club of CLUB_TEMPLATES) {
   const svg = clubCrestSvg(club);
+  assert.match(club.crest.monogram, /^[A-Z]{3,4}$/, `${club.id} crest needs a readable 3-4 letter code`);
+  assert.equal(club.crest.monogram, club.shortName, `${club.id} crest and club code must match`);
   assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 64 64">/);
   assert.match(svg, /<clipPath/);
   assert.match(svg, /<text[^>]*letter-spacing="0"/);

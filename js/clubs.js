@@ -23,6 +23,82 @@ const STADIUM_SUFFIXES = [
 
 let brandingIndex = 0;
 const usedShortNames = new Set();
+const SHORT_NAME_BLOCKS = new Map([
+  ["AC", "AC"],
+  ["AS", "AS"],
+  ["CF", "CF"],
+  ["FC", "FC"],
+  ["SC", "SC"],
+  ["SV", "SV"],
+  ["VFR", "VFR"],
+]);
+const SHORT_NAME_CONNECTORS = new Set(["D", "DA", "DE", "DEL", "DI", "DO", "LA", "THE"]);
+const SHORT_NAME_ORGANIZATIONS = new Set([
+  ...SHORT_NAME_BLOCKS.keys(),
+  "ATHLETIC",
+  "ATLETICO",
+  "BOROUGH",
+  "CALCIO",
+  "CITY",
+  "CLUB",
+  "COUNTY",
+  "DEPORTIVO",
+  "EINTRACHT",
+  "FORTUNA",
+  "OLYMPIQUE",
+  "RACING",
+  "ROVERS",
+  "SPORTING",
+  "SPORTIVA",
+  "STADE",
+  "TOWN",
+  "UNION",
+  "UNIONE",
+  "UNITED",
+  "VALE",
+  "VIRTUS",
+  "WANDERERS",
+]);
+const SHORT_NAME_OVERRIDES = Object.freeze({
+  raven: "RBA",
+  village: "GHV",
+  harbor3: "WBW",
+  sol_4_02: "DVA",
+  sol_4_11: "MZS",
+  sol_4_16: "SCU",
+  sol_5_01: "MLD",
+  sol_5_10: "VDS",
+  eis_6_04: "EFA",
+  eis_6_10: "FWT",
+  eis_7_03: "VFG",
+  eis_7_09: "ESH",
+  eis_7_14: "EAH",
+  eis_7_16: "FMD",
+  bel_8_02: "FMV",
+  bel_8_09: "AUN",
+  bel_8_14: "UMA",
+  bel_8_17: "CMC",
+  bel_9_04: "UVS",
+  bel_9_05: "VCS",
+  bel_9_11: "VMC",
+  bel_9_12: "AVO",
+  bel_9_15: "UCR",
+  bel_9_17: "AMA",
+  lum_10_01: "FBM",
+  lum_10_03: "OMC",
+  lum_10_13: "MDR",
+  lum_10_17: "UMT",
+  lum_10_18: "SVC",
+  lum_11_03: "UPL",
+  lum_11_04: "SHR",
+  lum_11_05: "CLV",
+  lum_11_08: "ORP",
+  lum_11_09: "UBP",
+  lum_11_14: "UBR",
+  lum_11_15: "SRZ",
+  lum_11_16: "FHB",
+  lum_11_18: "OVD",
+});
 
 function contrastText(hex) {
   const h = String(hex || "").replace("#", "");
@@ -44,20 +120,64 @@ function cityFromChineseName(name) {
     .trim();
 }
 
-function makeShortName(countryCode, cityEn, index) {
-  const compact = cityEn
+function shortNameTokens(value) {
+  return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^A-Za-z]/g, "")
-    .toUpperCase();
-  const prefix = countryCode[0];
-  let code = (prefix + compact.slice(0, 3)).padEnd(3, "X").slice(0, 4);
-  let attempt = 0;
-  while (usedShortNames.has(code)) {
-    const suffix = String.fromCharCode(65 + ((index + attempt) % 26));
-    code = (prefix + compact.slice(0, 2) + suffix).padEnd(3, "X").slice(0, 4);
-    attempt++;
+    .replace(/['’]/g, " ")
+    .replace(/[^A-Za-z]+/g, " ")
+    .trim()
+    .toUpperCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function makeShortName(nameEn, cityEn, clubId) {
+  const override = SHORT_NAME_OVERRIDES[clubId];
+  if (override) {
+    if (usedShortNames.has(override)) throw new Error(`Duplicate club short name override: ${override}`);
+    usedShortNames.add(override);
+    return override;
   }
+
+  const nameTokens = shortNameTokens(nameEn).filter((token) => !SHORT_NAME_CONNECTORS.has(token));
+  const cityTokens = shortNameTokens(cityEn).filter((token) => !SHORT_NAME_CONNECTORS.has(token));
+  const identityTokens = nameTokens.filter((token) => !SHORT_NAME_ORGANIZATIONS.has(token));
+  const identityCompact = (cityTokens.length ? cityTokens : identityTokens.length ? identityTokens : nameTokens).join("");
+  const initialism = nameTokens
+    .map((token) => SHORT_NAME_BLOCKS.get(token) || token[0])
+    .join("")
+    .slice(0, 4);
+  const organization = nameTokens
+    .filter((token) => SHORT_NAME_ORGANIZATIONS.has(token))
+    .map((token) => SHORT_NAME_BLOCKS.get(token) || token[0])
+    .join("");
+  const firstIdentityIndex = nameTokens.findIndex((token) => !SHORT_NAME_ORGANIZATIONS.has(token));
+  const firstOrganizationIndex = nameTokens.findIndex((token) => SHORT_NAME_ORGANIZATIONS.has(token));
+  const coreThree = identityCompact.slice(0, 3);
+  const candidates = [];
+  const add = (code) => {
+    const normalized = String(code || "").replace(/[^A-Z]/g, "").slice(0, 4);
+    if (/^[A-Z]{3,4}$/.test(normalized) && !candidates.includes(normalized)) candidates.push(normalized);
+  };
+
+  if (initialism.length >= 3) add(initialism);
+  add(coreThree);
+  if (organization && firstOrganizationIndex >= 0 && firstOrganizationIndex < firstIdentityIndex) {
+    const organizationPrefix = organization.length >= 2 ? organization.slice(0, 2) : organization[0];
+    add(`${organizationPrefix}${identityCompact.slice(0, 3 - organizationPrefix.length)}`);
+  }
+  if (organization) add(`${coreThree}${organization[0]}`);
+  for (const char of identityCompact.slice(1)) add(`${initialism.slice(0, 3)}${char}`);
+  add(identityCompact.slice(0, 4));
+  const consonants = identityCompact[0] + identityCompact.slice(1).replace(/[AEIOU]/g, "");
+  add(consonants.slice(0, 3));
+  add(consonants.slice(0, 4));
+  add(`${initialism}${identityCompact.slice(1)}`);
+  for (const char of identityCompact.slice(2)) add(`${coreThree}${char}`);
+
+  const code = candidates.find((candidate) => !usedShortNames.has(candidate));
+  if (!code) throw new Error(`Unable to create a unique club short name for ${clubId}`);
   usedShortNames.add(code);
   return code;
 }
@@ -124,7 +244,7 @@ function buildBranding(base, renamed, division, countryId) {
   const countryCode = COUNTRY_BRANDING[countryId].countryCode;
   const cityEn = cityFromEnglishName(nameEn);
   const cityZh = cityFromChineseName(nameZh);
-  const shortName = makeShortName(countryCode, cityEn, index);
+  const shortName = makeShortName(nameEn, cityEn, base.id);
   const primary = BRAND_COLORS[index % BRAND_COLORS.length];
   let secondary = BRAND_COLORS[(index * 7 + Math.floor(index / BRAND_COLORS.length) * 5 + 9) % BRAND_COLORS.length];
   if (secondary === primary) secondary = BRAND_COLORS[(index + 11) % BRAND_COLORS.length];

@@ -144,7 +144,7 @@ export function localizedClubName(club, lang = "zh") {
   return localizedName({ nameZh: club.nameZh || club.name, nameEn: club.nameEn || club.name }, lang);
 }
 
-/** Readable localized short name; the four-letter shortName remains an internal/crest code. */
+/** Readable localized short name; the 3-4 letter shortName remains an internal/crest code. */
 export function localizedClubShortName(club, lang = "zh") {
   if (!club) return "";
   const branding = club.branding || {};
@@ -200,5 +200,5 @@ export function isCssColor(value) {
 }
 
 export function isValidShortName(value) {
-  return typeof value === "string" && /^[A-Z]{2,4}$/.test(value);
+  return typeof value === "string" && /^[A-Z]{3,4}$/.test(value);
 }

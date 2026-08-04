@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v194** · 程序化俱乐部队徽 |
+| 当前版本 | **v195** · 自然俱乐部简称 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -25,12 +25,12 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 仓库：https://github.com/as7er/vcfm
 
-### v194 更新亮点
+### v195 更新亮点
 
-- 198 家虚构俱乐部按既有品牌形状、图腾、球衣纹样、颜色与内部短码生成唯一且稳定的离线 SVG 队徽，不使用现实俱乐部资产或外部图片。
-- 开档选队、顶栏、俱乐部链接与资料、全局搜索和比赛计分板统一显示同一枚队徽；球衣与号码继续读取同一品牌配色。
-- 队徽使用固定尺寸与安全的 data URI，装饰性实例不会被辅助技术重复朗读，小尺寸列表支持延迟解码。
-- 专项审计覆盖 198 枚图形的唯一性、确定性、安全标记、关键界面接入和离线缓存。
+- 俱乐部内部简称和队徽文字不再强制添加国家代码首字母，首字符现在直接用于区分俱乐部身份。
+- 简称统一为 3–4 位，优先保留 `FC`、`CF`、`AC`、`AS`、`SV`、`VfR` 等真实组织字母块、多词首字母和核心地名三字码。
+- 198 队简称全局唯一，其中 179 个三字码、19 个四字码；少量机械冲突结果经过显式校准，不使用数字或任意字母填充。
+- 旧存档加载时会同步更新简称和队徽文字，不改变俱乐部 ID、赛程、比赛历史或其他引用。
 
 ### 快速开始
 
@@ -150,7 +150,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v194** · procedural club crests |
+| Current version | **v195** · natural club codes |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -159,12 +159,12 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 Repository: https://github.com/as7er/vcfm
 
-### What's new in v194
+### What's new in v195
 
-- All 198 fictional clubs now receive unique, deterministic offline SVG crests generated from their existing shape, symbol, kit pattern, colours, and internal code, without real-club assets or external images.
-- Career setup, the top bar, club links and profiles, global search, and the match scoreboard all show the same crest; kits and squad numbers continue to use the same brand colours.
-- Fixed dimensions prevent layout shifts, decorative instances stay silent to assistive technology, and compact lists use asynchronous image decoding.
-- A dedicated audit covers artwork uniqueness, deterministic output, safe markup, key UI integrations, and offline caching.
+- Club codes and crest monograms no longer receive a mandatory country-code prefix, so the first character now identifies the club itself.
+- Codes use 3–4 letters and preserve natural football forms such as `FC`, `CF`, `AC`, `AS`, `SV`, and `VfR`, multi-word initials, or a recognisable three-letter place code.
+- All 198 codes are globally unique: 179 use three letters and 19 use four. Explicit curation resolves the few mechanical collisions without digits or arbitrary padding.
+- Existing saves refresh the club code and matching crest monogram without changing club IDs, fixtures, match history, or other references.
 
 ### Quick start
 

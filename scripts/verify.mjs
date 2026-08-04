@@ -19,6 +19,7 @@ const checks = [
   "scripts/match-appearance-audit.mjs",
   "scripts/reality-audit.mjs",
   "scripts/branding-audit.mjs",
+  "scripts/club-short-name-audit.mjs",
   "scripts/club-crest-audit.mjs",
   "scripts/intl-audit.mjs",
   "scripts/finance-audit.mjs",
