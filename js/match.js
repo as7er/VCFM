@@ -10,6 +10,10 @@ import {
   ensureTactics,
   ensureLineupRoles,
   ensureCorePlayer,
+  ensureCaptain,
+  ensureSetPieceTakers,
+  ensureLineupResponsibilities,
+  getSetPieceTakerId,
   formatMoney,
   ensurePlayerHistory,
   ensureLeagueStats,
@@ -611,6 +615,10 @@ export function createMatchSession(world, fixture) {
   // 避免「只有用户队会回撤内切/绝对进攻权」的单方面表现
   ensureCorePlayer(home);
   ensureCorePlayer(away);
+  ensureCaptain(home);
+  ensureCaptain(away);
+  ensureSetPieceTakers(home);
+  ensureSetPieceTakers(away);
 
   const competitionType =
     fixture.competitionType || (fixture.competition === "cup" ? "domestic-cup" : "league");
@@ -858,6 +866,54 @@ function pickScorer(xi, state, club) {
   });
 }
 
+function pickPenaltyTaker(xi, club) {
+  const assignedId = getSetPieceTakerId(club, "penalty");
+  const assigned = assignedId ? xi.find((p) => p.id === assignedId && p.pos !== "GK") : null;
+  if (assigned) return assigned;
+  const pool = xi.filter((p) => p.pos !== "GK");
+  return weightedPick(pool.length ? pool : xi, (p) => {
+    const a = p.attrs || {};
+    ensurePlayerRelation(p);
+    return (
+      ((a.finishing || 10) * 0.38 +
+        (a.shooting || 10) * 0.26 +
+        (a.decisions || 10) * 0.2 +
+        (a.kicking || 10) * 0.1 +
+        (p.ovr || 10) * 0.06 +
+        rng() * 1.5) *
+      relationMatchNudge(p)
+    );
+  });
+}
+
+function penaltyConversionChance(taker) {
+  const a = taker?.attrs || {};
+  const skill =
+    (a.finishing || 10) * 0.38 +
+    (a.shooting || 10) * 0.24 +
+    (a.decisions || 10) * 0.22 +
+    (a.kicking || 10) * 0.1 +
+    (taker?.ovr || 10) * 0.06;
+  return clamp(0.66 + (skill - 10) * 0.019, 0.66, 0.86);
+}
+
+function cornerThreatMod(club, xi) {
+  const takerId = getSetPieceTakerId(club, "corner");
+  const taker = takerId ? xi.find((p) => p.id === takerId) : null;
+  const crosser = taker || xi.filter((p) => p.pos !== "GK").sort((a, b) => (b.attrs?.crossing || 10) - (a.attrs?.crossing || 10))[0];
+  const targets = xi.filter((p) => p.pos !== "GK" && p.id !== crosser?.id);
+  const aerial =
+    targets.length
+      ? targets
+          .map((p) => (p.attrs?.heading || 10) * 0.44 + (p.attrs?.strength || 10) * 0.24 + ((p.heightCm || 180) - 180) * 0.11)
+          .sort((a, b) => b - a)
+          .slice(0, 4)
+          .reduce((sum, value) => sum + value, 0) / Math.min(4, targets.length)
+      : 10;
+  const delivery = (crosser?.attrs?.crossing || 10) * 0.5 + (crosser?.attrs?.passing || 10) * 0.22 + (crosser?.attrs?.decisions || 10) * 0.12;
+  return clamp(0.82 + ((delivery + aerial) / 2 - 10) * 0.035, 0.72, 1.24);
+}
+
 function pickAssister(xi, scorer, state, club) {
   const pool = xi.filter((p) => p.id !== scorer.id && p.pos !== "GK");
   if (!pool.length || chance(0.28)) return null;
@@ -885,9 +941,9 @@ function pickGk(xi) {
   return xi.find((p) => p.pos === "GK") || xi[0] || null;
 }
 
-function addGoal(state, minute, club, xi, { penalty = false } = {}) {
+function addGoal(state, minute, club, xi, { penalty = false, scorer: forcedScorer = null } = {}) {
   const sk = sideKey(state, club);
-  const scorer = pickScorer(xi, state, club);
+  const scorer = forcedScorer || (penalty ? pickPenaltyTaker(xi, club) : pickScorer(xi, state, club));
   if (!scorer) return;
   const assister = penalty ? null : pickAssister(xi, scorer, state, club);
   if (sk === "home") state.hg++;
@@ -1497,14 +1553,15 @@ function tryAttack(state, minute, club, opp, atk, def, xgPer90) {
 
   // 角球
   if (chance(0.035 * (state.derby ? 1.2 : 1))) {
+    const cornerMod = cornerThreatMod(club, xi);
     st.corners++;
     pushEv(state, minute, "corner", `🚩 ${minute}' ${club.short} 获得角球`, { teamId: club.id });
-    if (chance(0.18)) {
+    if (chance(0.18 * cornerMod)) {
       // 角球转化威胁
       st.shots++;
       const xg = 0.08 + rng() * 0.12;
       st.xg += xg;
-      if (chance(0.35 + atk / (atk + def) * 0.15)) {
+      if (chance(0.35 + atk / (atk + def) * 0.15 + (cornerMod - 1) * 0.1)) {
         addGoal(state, minute, club, xi);
         return;
       }
@@ -1534,13 +1591,15 @@ function tryAttack(state, minute, club, opp, atk, def, xgPer90) {
 
   // 点球（罕见）
   if (chance(0.018 * (state.derby ? 1.3 : 1))) {
+    const taker = pickPenaltyTaker(xi, club);
     st.fouls++;
     state.stats[oppSk].fouls++;
     pushEv(state, minute, "penalty", `❗ ${minute}' 点球！${club.short} 获得主罚机会`, {
       teamId: club.id,
+      playerId: taker?.id || null,
     });
-    if (chance(0.78)) {
-      addGoal(state, minute, club, xi, { penalty: true });
+    if (chance(penaltyConversionChance(taker))) {
+      addGoal(state, minute, club, xi, { penalty: true, scorer: taker });
     } else {
       st.shotsOn++;
       const gk = pickGk(oppXi);
@@ -1784,6 +1843,7 @@ export function applySubstitution(state, club, outId, inId, minute, silent = fal
   club.tactics.lineup = lineup;
   // 角色挂在槽位：换人继承该槽职责
   ensureLineupRoles(club);
+  ensureLineupResponsibilities(club);
   state.subsUsed[sk]++;
   state.injuredOut.delete(outId); // 已换下
   if (state.simEng) state._simNeedsResync = true;
@@ -2034,11 +2094,13 @@ export function applyUserHalfTime(state, orders = {}) {
     // 换阵型：重排首发 + 重置默认角色
     ensureMatchLineup(club, { eligibleIds: state.eligiblePlayerIds?.[state.userSide] });
     ensureLineupRoles(club, { reset: true });
+    ensureLineupResponsibilities(club);
     formChanged = true;
   } else if (orders.formation && FORMATIONS[orders.formation]) {
     t.formation = orders.formation;
     ensureMatchLineup(club, { eligibleIds: state.eligiblePlayerIds?.[state.userSide] });
     ensureLineupRoles(club);
+    ensureLineupResponsibilities(club);
   }
 
   // 应用中场角色指令（在换阵型之后）

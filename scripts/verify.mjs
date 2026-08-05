@@ -13,6 +13,7 @@ const checks = [
   "scripts/replay-ui-audit.mjs",
   "scripts/match-presentation-audit.mjs",
   "scripts/set-piece-presentation-audit.mjs",
+  "scripts/player-traits-set-pieces-audit.mjs",
   "scripts/lazy-load-audit.mjs",
   "scripts/player-pathway-audit.mjs",
   "scripts/delegation-audit.mjs",

@@ -17,6 +17,9 @@ const ATTRIBUTE_KEYS = [
   "strength",
   "stamina",
   "vision",
+  "heading",
+  "crossing",
+  "decisions",
   "reflexes",
   "handling",
   "positioning",
@@ -198,10 +201,22 @@ function knowledgeRecord(world, player) {
 }
 
 function range20(center, band) {
+  const estimate = clamp(Math.round(center), 1, 20);
+  const radius = Math.max(0, Math.round(band));
+  let lo = estimate - radius;
+  let hi = estimate + radius;
+  if (lo < 1) {
+    hi = Math.min(20, hi + (1 - lo));
+    lo = 1;
+  }
+  if (hi > 20) {
+    lo = Math.max(1, lo - (hi - 20));
+    hi = 20;
+  }
   return {
-    estimate: clamp(Math.round(center), 1, 20),
-    lo: clamp(Math.round(center) - band, 1, 20),
-    hi: clamp(Math.round(center) + band, 1, 20),
+    estimate,
+    lo,
+    hi,
   };
 }
 

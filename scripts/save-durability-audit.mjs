@@ -111,6 +111,26 @@ assert.deepEqual(migrationStages, [1, 2, 3]);
 assert.equal(legacy.schemaVersion, schema.CURRENT_SAVE_SCHEMA_VERSION);
 assert.equal(save.importSaveText(JSON.stringify(legacy)).day, 5);
 
+const currentMissingKnowledge = makeWorld(6);
+currentMissingKnowledge.schemaVersion = schema.CURRENT_SAVE_SCHEMA_VERSION;
+assert.throws(
+  () => schema.validateSaveStructure(currentMissingKnowledge),
+  /scouting knowledge is missing/
+);
+schema.migrateSaveSchema(currentMissingKnowledge, {
+  ensureCurrent: (world) => {
+    world.scoutingKnowledge = {
+      version: 1,
+      players: {},
+      clubs: {},
+      divisions: {},
+      nations: {},
+    };
+  },
+});
+assert.equal(currentMissingKnowledge.schemaVersion, schema.CURRENT_SAVE_SCHEMA_VERSION);
+assert.ok(currentMissingKnowledge.scoutingKnowledge);
+
 assert.throws(
   () => save.importSaveText(JSON.stringify({ ...legacy, userClubId: "missing" })),
   /managed club/

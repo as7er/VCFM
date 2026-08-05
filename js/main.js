@@ -35,8 +35,8 @@ import {
 } from "./match-presentation.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=198";
-import { clubCrestHtml } from "./club-crest.js?v=198";
+import { nationFlagHtml } from "./flags.js?v=199";
+import { clubCrestHtml } from "./club-crest.js?v=199";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -80,6 +80,12 @@ function nationLabel(p) {
   }
   return "—";
 }
+
+function preferredFootLabel(foot, en = getLang() === "en") {
+  if (foot === "left") return en ? "Left" : "左脚";
+  if (foot === "both") return en ? "Both" : "双脚";
+  return en ? "Right" : "右脚";
+}
 import {
   createWorld,
   autoLineup,
@@ -90,6 +96,7 @@ import {
   fillYouthSquad,
   ensurePlayerHistory,
   ensureRealisticPlayerTalent,
+  ensureFootballProfile,
   calibrateWorldAbilityDistribution,
   ABILITY_DISTRIBUTION_VERSION,
   emptyMatchStats,
@@ -106,6 +113,11 @@ import {
   ensureTactics,
   getCorePlayerId,
   setCorePlayerId,
+  getCaptainId,
+  setCaptainId,
+  getSetPieceTakerId,
+  setSetPieceTakerId,
+  ensureLineupResponsibilities,
   assignSquadNumbers,
   kitBackground,
   ensurePlayerNumber,
@@ -332,7 +344,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=198";
+} from "./avatar.js?v=199";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -420,7 +432,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=198").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=199").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1092,6 +1104,7 @@ function repairWorldFields(w) {
     for (const p of c.players || []) {
       if (p.potential == null) p.potential = Math.min(20, (p.ovr || 10) + 1);
       ensureRealisticPlayerTalent(p);
+      ensureFootballProfile(p);
       ensurePlayerHistory(p);
       ensureIntl(p);
       ensureHonors(p);
@@ -1101,6 +1114,7 @@ function repairWorldFields(w) {
     for (const p of c.youth.players || []) {
       if (p.potential == null) p.potential = Math.min(20, (p.ovr || 10) + 1);
       ensureRealisticPlayerTalent(p);
+      ensureFootballProfile(p);
       ensurePlayerHistory(p);
       ensureIntl(p);
       ensureHonors(p);
@@ -1112,10 +1126,12 @@ function repairWorldFields(w) {
   }
   for (const p of w.freeAgents || []) {
     ensureRealisticPlayerTalent(p);
+    ensureFootballProfile(p);
     ensurePlayerInjury(p);
   }
   for (const p of w.retiredPlayers || []) {
     ensureRealisticPlayerTalent(p);
+    ensureFootballProfile(p);
     ensurePlayerInjury(p);
   }
   ensureCompetitions(w);
@@ -4291,6 +4307,7 @@ function showPlayerModal(playerId, context = {}) {
   const displayTeam = nationalCode ? nationalTeamView(nationalCode) : owningClub;
   let displayNumber = nationalCode ? nationalNumber : player.number;
 
+  ensureFootballProfile(player);
   const a = player.attrs;
   const isOther = !!fromOther;
   const fogRows = scoutAttrRows(player, club, {
@@ -4397,6 +4414,8 @@ function showPlayerModal(playerId, context = {}) {
        · ${nationLabel(player)}
        · ${en ? `Age ${player.age}` : `${player.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${isOther ? "" : ovrClass(player.ovr)}">${escapeHtml(ovrShow)}</strong>
        · ${en ? "Potential" : "潜力"} <strong>${escapeHtml(String(pot))}</strong>
+       · ${en ? "Foot" : "惯用脚"} ${escapeHtml(preferredFootLabel(player.preferredFoot, en))}
+       · ${en ? "Height" : "身高"} ${Number(player.heightCm) || "—"}cm
        ${isYouth ? ` · <span class="badge MID">${en ? "Academy" : "青训学院"}</span>` : player.fromYouth ? ` · <span class="badge MID">${en ? "Youth graduate" : "青训"}</span>` : ""}
        ${owningClub ? ` · ${clubLinkHtml(owningClub.id, clubDisplayName(owningClub))}` : ""}
        ${nationalCode ? ` · <span class="badge">${escapeHtml(en ? "National team" : "国家队")}</span>` : ""}
@@ -5170,6 +5189,94 @@ function renderTacPresets() {
     .join("");
 }
 
+const SET_PIECE_UI = Object.freeze([
+  { type: "penalty", labelKey: "tac.penaltyTaker" },
+  { type: "directFreeKick", labelKey: "tac.freeKickTaker" },
+  { type: "corner", labelKey: "tac.cornerTaker" },
+]);
+
+function responsibilityOptionLabel(player, kind, en) {
+  if (!player) return "—";
+  const a = player.attrs || {};
+  const num = player.number != null ? `#${player.number} ` : "";
+  const base = `${num}${playerDisplaySurname(player.name, player.nationality)} · ${positionLabel(player.pos)}`;
+  if (kind === "captain") {
+    return `${base} · ${en ? "DEC" : "决"} ${a.decisions || 10}`;
+  }
+  if (kind === "penalty") {
+    return `${base} · ${en ? "FIN" : "终"} ${a.finishing || 10} · ${en ? "DEC" : "决"} ${a.decisions || 10}`;
+  }
+  if (kind === "corner") {
+    return `${base} · ${en ? "CRS" : "传中"} ${a.crossing || 10} · ${en ? "PAS" : "传"} ${a.passing || 10}`;
+  }
+  return `${base} · ${en ? "KCK" : "脚法"} ${a.kicking || 10} · ${en ? "SHT" : "射"} ${a.shooting || 10}`;
+}
+
+function renderTacticsResponsibilities(club, { coachControlled = false } = {}) {
+  const host = $("#tac-responsibilities");
+  if (!host) return;
+  ensureLineupResponsibilities(club);
+  const en = getLang() === "en";
+  const xi = getLineupPlayers(club);
+  const outfield = xi.filter((p) => p.pos !== "GK");
+  const optionHtml = (players, selected, kind) =>
+    players
+      .map(
+        (p) =>
+          `<option value="${escapeHtml(p.id)}"${p.id === selected ? " selected" : ""}>${escapeHtml(
+            responsibilityOptionLabel(p, kind, en)
+          )}</option>`
+      )
+      .join("");
+  const captainId = getCaptainId(club);
+  const rows = [
+    `<label class="tac-responsibility-row">
+      <span>${escapeHtml(t("tac.captain"))}</span>
+      <select data-tac-captain ${coachControlled ? "disabled" : ""}>
+        ${optionHtml(xi, captainId, "captain")}
+      </select>
+    </label>`,
+    ...SET_PIECE_UI.map((item) => {
+      const id = getSetPieceTakerId(club, item.type);
+      return `<label class="tac-responsibility-row">
+        <span>${escapeHtml(t(item.labelKey))}</span>
+        <select data-tac-setpiece="${escapeHtml(item.type)}" ${coachControlled ? "disabled" : ""}>
+          ${optionHtml(outfield, id, item.type)}
+        </select>
+      </label>`;
+    }),
+  ];
+  host.innerHTML = rows.join("");
+  if (coachControlled) return;
+  host.querySelector("[data-tac-captain]")?.addEventListener("change", (e) => {
+    const res = setCaptainId(club, e.target.value);
+    if (!res.ok) {
+      toast(res.msg || t("tac.responsibilityFail"));
+      renderTactics();
+      return;
+    }
+    saveGame(world);
+    renderTactics();
+    const p = club.players.find((x) => x.id === res.captainId);
+    toast(t("tac.captainSet", { name: p?.name || "" }));
+  });
+  host.querySelectorAll("[data-tac-setpiece]").forEach((select) => {
+    select.addEventListener("change", (e) => {
+      const type = e.target.getAttribute("data-tac-setpiece");
+      const res = setSetPieceTakerId(club, type, e.target.value);
+      if (!res.ok) {
+        toast(res.msg || t("tac.responsibilityFail"));
+        renderTactics();
+        return;
+      }
+      saveGame(world);
+      renderTactics();
+      const p = club.players.find((x) => x.id === res.playerId);
+      toast(t("tac.setPieceSet", { name: p?.name || "" }));
+    });
+  });
+}
+
 function renderTacticsSummary() {
   const el = $("#tac-summary");
   if (!el || !world) return;
@@ -5590,6 +5697,7 @@ function renderTactics() {
     autoLineup(club, { eligibleIds: nextEligibility.ids });
   }
   ensureLineupRoles(club);
+  ensureLineupResponsibilities(club);
   const coreId = getCorePlayerId(club);
   const players = getLineupPlayers(club);
   const pitch = $("#pitch");
@@ -5614,6 +5722,7 @@ function renderTactics() {
       coreDisp.textContent = en ? "Not set — tap ⭐ on the pitch" : "未指定 — 在战术板点 ⭐";
     }
   }
+  renderTacticsResponsibilities(club, { coachControlled });
   pitch.innerHTML = formation.slots
     .map((slot, i) => {
       const p = players[i];

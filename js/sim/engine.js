@@ -21,6 +21,10 @@ import {
   ensureTactics,
   ensureLineupRoles,
   ensureCorePlayer,
+  ensureLineupResponsibilities,
+  ensureFootballProfile,
+  getCaptainId,
+  getSetPieceTakerId,
 } from "./../models.js";
 import { estimateShotXg } from "./../match-analysis.js";
 import {
@@ -69,6 +73,10 @@ function norm(v) {
   // 压缩两端仍保留强弱差异，同时给低级别球员基本职业能力下限。
   const raw = clamp((v ?? 10) / 20, 0.05, 1);
   return clamp(0.28 + raw * 0.64, 0.3, 0.92);
+}
+
+function heightAerial(heightCm) {
+  return clamp(((Number(heightCm) || 180) - 168) / 34, 0, 1);
 }
 
 /**
@@ -191,6 +199,7 @@ export class SimEngine {
       ensureTactics(club);
       ensureLineupRoles(club);
       ensureCorePlayer(club);
+      ensureLineupResponsibilities(club);
     }
     const form = FORMATIONS[club?.tactics?.formation] || FORMATIONS["4-3-3"];
     const slots = form.slots || [];
@@ -200,6 +209,7 @@ export class SimEngine {
     for (let i = 0; i < Math.min(11, slots.length); i++) {
       const slot = slots[i];
       const p = assigned[i] || xi[i] || null;
+      if (p) ensureFootballProfile(p);
       const base = slotToPitch(slot, isHome);
       const a = p?.attrs || {};
       // 战术角色以阵型槽为准（槽是 GK 就必须按门将 AI 站门）
@@ -251,7 +261,12 @@ export class SimEngine {
           reflexes: norm(a.reflexes),
           handling: norm(a.handling),
           kicking: norm(a.kicking),
+          heading: norm(a.heading),
+          crossing: norm(a.crossing),
+          decisions: norm(a.decisions),
         },
+        heightCm: Number(p?.heightCm) || 180,
+        preferredFoot: p?.preferredFoot || "right",
         // —— 决策缓存（P1 用）——
         decisionUntil: 0, // 到该时间前沿用上次决策
         attackThinkUntil: 0,
@@ -261,6 +276,7 @@ export class SimEngine {
         fitness: p?.fitness ?? 100,
         // 核心球员：战术指定，享有进攻绝对权（梅西/C罗式）
         isCore: false,
+        isCaptain: false,
       });
     }
     // 标记核心（每队最多一人；主客都确保有，见 ensureCorePlayer）
@@ -291,6 +307,11 @@ export class SimEngine {
     if (coreId) {
       const core = this.agents.find((x) => x.id === coreId && x.team === teamTag);
       if (core) core.isCore = true;
+    }
+    const captainId = getCaptainId(club);
+    if (captainId) {
+      const captain = this.agents.find((x) => x.id === captainId && x.team === teamTag);
+      if (captain) captain.isCaptain = true;
     }
   }
 
@@ -339,6 +360,29 @@ export class SimEngine {
     return this.agents.find((a) => a.id === id) || null;
   }
 
+  _clubForTeam(team) {
+    return team === "home" ? this.home : this.away;
+  }
+
+  _setPieceTaker(team, type) {
+    const club = this._clubForTeam(team);
+    const id = club ? getSetPieceTakerId(club, type) : null;
+    if (!id) return null;
+    return this.agents.find((a) => a.id === id && a.team === team && a.role !== "GK" && !a.sentOff) || null;
+  }
+
+  _aerialAbility(a) {
+    if (!a) return 0.5;
+    return clamp(
+      (a.attr.heading || 0.5) * 0.46 +
+        (a.attr.strength || 0.5) * 0.25 +
+        heightAerial(a.heightCm) * 0.22 +
+        (a.attr.positioning || 0.5) * 0.07,
+      0.18,
+      0.98
+    );
+  }
+
   _clearBallTarget() {
     if (!this.ball) return;
     this.ball.receiverId = null;
@@ -368,8 +412,9 @@ export class SimEngine {
 
   _nextControlDecision(a) {
     const tempo = this._tacticLevel(a.team, "tempo");
-    const base = clamp(1.9 - (tempo - 3) * 0.18, 1.35, 2.45);
-    const spread = clamp(1.7 - (tempo - 3) * 0.1, 1.1, 2.1);
+    const decisions = a?.attr?.decisions || 0.58;
+    const base = clamp(1.9 - (tempo - 3) * 0.18 - (decisions - 0.58) * 0.32, 1.22, 2.5);
+    const spread = clamp(1.7 - (tempo - 3) * 0.1 - (decisions - 0.58) * 0.34, 0.95, 2.15);
     return this.t + base + this.random() * spread;
   }
 
@@ -971,6 +1016,22 @@ export class SimEngine {
           return;
         }
       }
+      const nearAttackingByline = a.team === "home" ? a.y < 5.5 : a.y > 94.5;
+      const trappedAtByline = nearAttackingByline && Math.abs(a.x - goalX) > 8;
+      if (trappedAtByline && (pressure > 0.45 || cdBlocked || dGoal > 11)) {
+        const cutback = this._bestCutback(a);
+        if (cutback) {
+          this._pass(a, cutback);
+          return;
+        }
+        a.intent = {
+          type: "dribble",
+          tx: clamp(a.x + (goalX - a.x) * 0.65, 8, 92),
+          ty: clamp(goalY - dir * 14, 3, 97),
+        };
+        a.fsm = "carry";
+        return;
+      }
       // 核心 / 边锋：内切带进去
       const tuckIn = isWing ? 0.55 + cutInProgress * 0.1 : core ? 0.55 : 0.4;
       a.intent = {
@@ -1012,7 +1073,7 @@ export class SimEngine {
     // ——————————— 边后卫高位：优先传中/回做 —— 
     if (isFb && dGoal < 42 && (a.baseX < 30 || a.baseX > 70)) {
       const cross = this._bestCross(a);
-      if (cross && this.t >= (a.crossCdUntil || 0) && this.random() < 0.55 + a.attr.passing * 0.25) {
+      if (cross && this.t >= (a.crossCdUntil || 0) && this.random() < 0.55 + (a.attr.crossing || a.attr.passing) * 0.25) {
         a.crossCdUntil = this.t + 2.5;
         this._pass(a, cross);
         return;
@@ -1055,7 +1116,7 @@ export class SimEngine {
       if (cross) {
         options.push({
           key: { act: "pass", target: cross },
-          w: (0.2 + cross.value) * (0.5 + 0.5 * a.attr.passing) * (dGoal < 45 ? 1.2 : 0.7),
+          w: (0.2 + cross.value) * (0.5 + 0.5 * (a.attr.crossing || a.attr.passing)) * (dGoal < 45 ? 1.2 : 0.7),
         });
       }
     }
@@ -1065,7 +1126,7 @@ export class SimEngine {
       if (cross) {
         options.push({
           key: { act: "pass", target: cross },
-          w: (0.12 + cross.value * 0.85) * (0.4 + 0.5 * a.attr.passing) * (pressure > 0.45 ? 1.15 : 0.75),
+          w: (0.12 + cross.value * 0.85) * (0.4 + 0.5 * (a.attr.crossing || a.attr.passing)) * (pressure > 0.45 ? 1.15 : 0.75),
         });
       }
     }
@@ -1118,8 +1179,13 @@ export class SimEngine {
     }
     options.push({ key: { act: "hold" }, w: 0.12 + pressure * 0.2 + (core ? 0.05 : 0) });
 
-    // 核心决策更果断（温度更低 → 更偏高分动作，但盘带/射门分已抬高）
-    const choice = weightedPick(options, core ? 0.28 : isWing ? 0.3 : 0.35, this.random) || { act: "hold" };
+    // 核心/高决策球员更果断（温度更低 → 更偏高分动作，但仍保留比赛随机性）
+    const decisionTemp = clamp(
+      (core ? 0.28 : isWing ? 0.3 : 0.35) - ((a.attr.decisions || 0.58) - 0.58) * 0.14,
+      0.22,
+      0.38
+    );
+    const choice = weightedPick(options, decisionTemp, this.random) || { act: "hold" };
     if (choice.act === "pass") {
       this._pass(a, choice.target);
     } else if (choice.act === "longshot") {
@@ -1172,17 +1238,55 @@ export class SimEngine {
       const opposite = Math.abs(m.x - a.x) > 12 ? 1.25 : 0.85;
       const roleB = m.role === "ATT" ? 1.35 : m.role === "MID" ? 1.05 : 0.7;
       const coreB = m.isCore ? 1.4 : 1;
+      const aerialB = 0.72 + this._aerialAbility(m) * 0.72;
+      const deliveryB = clamp(
+        0.76 + (a.attr.crossing || a.attr.passing || 0.55) * 0.36 + (a.attr.decisions || 0.55) * 0.1,
+        0.82,
+        1.2
+      );
       const value =
         (0.4 + clamp(1 - dGoalM / 32, 0, 1)) *
         this._laneSafety(a, m) *
         opposite *
         roleB *
-        coreB;
+        coreB *
+        aerialB *
+        deliveryB;
       // 落点：禁区内前点/中点，不是脚下
       const tx = clamp(m.x * 0.55 + 50 * 0.45 + (this.random() - 0.5) * 6, 28, 72);
       const ty = clamp(goalY - dir * (8 + this.random() * 6), 4, 96);
       if (!best || value > best.value) {
         best = { agent: m, value, through: true, tx, ty, cross: true };
+      }
+    }
+    return best;
+  }
+
+  /** 底线附近的倒三角/回做，防止低角度持球者继续撞向边界。 */
+  _bestCutback(a) {
+    const dir = this.attackDir(a.team);
+    const goalY = this.targetGoalY(a.team);
+    let best = null;
+    for (const m of this.agents) {
+      if (m === a || m.team !== a.team || m.role === "GK" || m.sentOff) continue;
+      const behind = (m.y - a.y) * dir;
+      if (behind > -4 || behind < -32) continue;
+      const dGoalM = dist(m.x, m.y, 50, goalY);
+      if (dGoalM > 34) continue;
+      const d = dist(a.x, a.y, m.x, m.y);
+      if (d < 7 || d > 38) continue;
+      const central = 1 - Math.min(1, Math.abs(m.x - 50) / 42);
+      const roleB = m.role === "ATT" ? 1.2 : m.role === "MID" ? 1.1 : 0.72;
+      const safety = this._laneSafety(a, m);
+      const value =
+        (0.28 + central * 0.48 + clamp(1 - dGoalM / 34, 0, 1) * 0.22) *
+        safety *
+        roleB *
+        (0.82 + (a.attr.decisions || 0.55) * 0.18);
+      const tx = clamp(m.x + (50 - m.x) * 0.18, 18, 82);
+      const ty = clamp(m.y - dir * 1.5, 6, 94);
+      if (!best || value > best.value) {
+        best = { agent: m, value, through: false, tx, ty, cutback: true };
       }
     }
     return best;
@@ -1360,12 +1464,17 @@ export class SimEngine {
     const dx = tx - b.x;
     const dy = ty - b.y;
     const d = Math.hypot(dx, dy) || 1;
+    const isCross = !!passTo.cross;
+    const isThrough = !!passTo.through;
+    const technique = isCross
+      ? clamp((a.attr.crossing || a.attr.passing || 0.55) * 0.68 + (a.attr.passing || 0.55) * 0.18 + (a.attr.kicking || 0.55) * 0.14, 0.3, 0.95)
+      : a.attr.passing || 0.55;
     // 传球速度：距离越远越快，受 passing 影响精度（加噪声）
-    const passSpeed = clamp(18 + d * 0.7, 18, 42) * (0.85 + 0.15 * a.attr.passing);
+    const passSpeed = clamp(18 + d * 0.7, 18, 42) * (0.85 + 0.15 * technique);
     // 精度噪声：passing 越低越偏
     // 普通职业球员的基础脚法不应让近中距离传球像随机解围；压力与线路风险
     // 已由决策/拦截系统体现，这里只保留随 passing 变化的温和落点误差。
-    const err = (1 - a.attr.passing) * 3.8;
+    const err = (1 - technique) * (isCross ? 4.5 : 3.8);
     const nx = (this.random() - 0.5) * err;
     const ny = (this.random() - 0.5) * err;
     b.owner = null;
@@ -1376,8 +1485,6 @@ export class SimEngine {
     b.targetY = ty;
     b.expectedAt = this.t + clamp(d / Math.max(1, passSpeed) * 1.12, 0.2, 1.8);
     // 空中弧线（vz 对 g=18：peak≈vz²/36；传中 ~5–7，长传 ~3，短传贴地）
-    const isCross = !!passTo.cross;
-    const isThrough = !!passTo.through;
     let loft = 0;
     if (isCross && fromCorner) {
       // 角球到落点时应已降到可争顶高度；固定 14–18 的旧 loft 会让球越过落点后
@@ -1445,13 +1552,19 @@ export class SimEngine {
     const goalY = this.targetGoalY(a.team);
     const dGoal = dist(a.x, a.y, 50, goalY);
     const long = dGoal > 22;
+    const freekick = !!extraMeta?.freekick;
     // 球队级节奏上限：强队长期围攻时也不能每几十秒起脚一次。
     // 这是模拟时间的进攻周期，不是表现层的墙钟等待。
     this._teamShotUntil[a.team] = this.t + 520 + this.random() * 300;
     // 近：finishing；远：shooting。远射噪声更大，容易打飞/被扑
-    const skill = long
-      ? 0.35 * a.attr.finishing + 0.65 * a.attr.shooting
-      : 0.7 * a.attr.finishing + 0.3 * a.attr.shooting;
+    const skill = freekick
+      ? 0.42 * (a.attr.kicking || 0.55) +
+        0.32 * (a.attr.shooting || 0.55) +
+        0.16 * (a.attr.decisions || 0.55) +
+        0.1 * (a.attr.finishing || 0.55)
+      : long
+        ? 0.35 * a.attr.finishing + 0.65 * a.attr.shooting
+        : 0.7 * a.attr.finishing + 0.3 * a.attr.shooting;
     // 近距：误差缩小（更好的「该进就进」），但绝不强制夹进门框
     // aimX 在 [50-err/2, 50+err/2] 均匀分布；门宽只有 12。
     // 旧 err 常小于门宽，等于“每脚必射正”，此前只是被普通接管逻辑意外掩盖。
@@ -1481,14 +1594,14 @@ export class SimEngine {
     }
     // 传控改善后禁区内起脚质量更高；保留约 12% 的统一落点离散，避免
     // 等强样本回到 3.3 球/场以上，同时不通过 UI 或赛后缩放篡改结果。
-    err *= 1.12;
+    err *= freekick ? 1.08 : 1.22;
     const aimX = 50 + (this.random() - 0.5) * err;
     const dx = aimX - b.x;
     const dy = goalY - b.y;
     const d = Math.hypot(dx, dy) || 1;
     // 远射初速略高，才像抽射
     const power = clamp(
-      (long ? 42 : 38) + a.attr.shooting * (long ? 16 : 14),
+      (long ? 42 : 38) + (freekick ? a.attr.kicking : a.attr.shooting) * (long ? 16 : 14),
       long ? 40 : 38,
       long ? 58 : 55
     );
@@ -2717,12 +2830,20 @@ export class SimEngine {
       const wasPass = b.state === "pass";
       const intendedReceive =
         wasPass && best.team === b.kickTeam && best.id === b.receiverId;
-      let ctl = intendedReceive
-        ? 0.9 + 0.12 * best.attr.dribbling
-        : 0.66 + 0.3 * best.attr.dribbling;
-      if (wasPass && b.isCrossPass) ctl -= intendedReceive ? 0.16 : 0.22;
+      let ctl;
+      if (wasPass && b.isCrossPass) {
+        const aerial = this._aerialAbility(best);
+        ctl = intendedReceive
+          ? 0.58 + 0.35 * aerial + 0.08 * (best.attr.decisions || 0.55)
+          : 0.42 + 0.34 * aerial + 0.06 * (best.attr.positioning || 0.55);
+      } else {
+        ctl = intendedReceive
+          ? 0.9 + 0.12 * best.attr.dribbling
+          : 0.66 + 0.3 * best.attr.dribbling;
+      }
       if (best.role === "GK") ctl = 0.75 + 0.22 * (best.attr.handling || 0.5);
-      const p = clamp(ctl - speed / (intendedReceive ? 210 : 125), 0.15, 0.99);
+      const speedScale = wasPass && b.isCrossPass ? (intendedReceive ? 180 : 135) : (intendedReceive ? 210 : 125);
+      const p = clamp(ctl - speed / speedScale, 0.15, 0.99);
       if (this.random() < p) {
         const passFrom = b.lastKicker;
         const intendedId = b.receiverId;
@@ -2806,6 +2927,8 @@ export class SimEngine {
   substituteAgent(outId, player) {
     const a = this.agents.find((x) => x.id === outId);
     if (!a || !player) return false;
+    const wasCaptain = a.isCaptain;
+    ensureFootballProfile(player);
     const attrs = player.attrs || {};
     a.id = player.id;
     a.player = player;
@@ -2826,12 +2949,31 @@ export class SimEngine {
       reflexes: norm(attrs.reflexes),
       handling: norm(attrs.handling),
       kicking: norm(attrs.kicking),
+      heading: norm(attrs.heading),
+      crossing: norm(attrs.crossing),
+      decisions: norm(attrs.decisions),
     };
+    a.heightCm = Number(player.heightCm) || 180;
+    a.preferredFoot = player.preferredFoot || "right";
     a.fitness = player.fitness ?? 100;
     a.sentOff = false;
     a.injuredOff = false;
     a._yellows = 0;
     a.isCore = false;
+    a.isCaptain = !wasCaptain && getCaptainId(a.club) === a.id;
+    if (wasCaptain) {
+      const candidates = this.agents
+        .filter((x) => x.team === a.team && x !== a && !x.sentOff && !x.injuredOff)
+        .sort(
+          (x, y) =>
+            (y.attr.decisions || 0) + (y.attr.positioning || 0) -
+            ((x.attr.decisions || 0) + (x.attr.positioning || 0))
+        );
+      for (const teammate of this.agents) {
+        if (teammate.team === a.team) teammate.isCaptain = false;
+      }
+      (candidates[0] || a).isCaptain = true;
+    }
     // 从中线边缘进场，跑回基准位
     a.x = a.baseX < 50 ? 1 : 99;
     a.y = 50;
@@ -2961,7 +3103,7 @@ export class SimEngine {
     );
     pFoul *= this._teamModifier(defender.team, "foul");
     // 后卫在禁区内会收脚，但不应把点球压低两个数量级。
-    if (inBox) pFoul *= 0.08;
+    if (inBox) pFoul *= 0.16;
     if (this.random() >= pFoul) return false;
 
     // 被侵犯方获得球权重启
@@ -3023,13 +3165,23 @@ export class SimEngine {
     const b = this.ball;
     const dir = this.attackDir(team); // 主罚方进攻方向
     const spotY = team === "home" ? 12 : 88; // 罚球点（对方禁区内）
-    // 主罚者：核心优先，否则本队 finishing 最高的非门将
+    // 主罚者：战术职责优先，否则按点球相关属性排序
+    const assignedTaker = this._setPieceTaker(team, "penalty");
     const takers = this.agents
       .filter((a) => a.team === team && a.role !== "GK" && !a.sentOff)
       .sort(
         (a, c) =>
+          (c === assignedTaker ? 1 : 0) - (a === assignedTaker ? 1 : 0) ||
+          ((c.attr.finishing || 0.5) * 0.38 +
+            (c.attr.shooting || 0.5) * 0.24 +
+            (c.attr.decisions || 0.5) * 0.22 +
+            (c.attr.kicking || 0.5) * 0.1) -
+            ((a.attr.finishing || 0.5) * 0.38 +
+              (a.attr.shooting || 0.5) * 0.24 +
+              (a.attr.decisions || 0.5) * 0.22 +
+              (a.attr.kicking || 0.5) * 0.1) ||
           (c.isCore ? 1 : 0) - (a.isCore ? 1 : 0) ||
-          c.attr.finishing - a.attr.finishing
+          String(a.id).localeCompare(String(c.id))
       );
     const taker = takers[0] || null;
     const oppTeam = team === "home" ? "away" : "home";
@@ -3089,10 +3241,15 @@ export class SimEngine {
     taker.fsm = "setpiece";
     taker.decisionUntil = this.t + SIM.PENALTY_RESOLVE_SEC + 1.5;
 
-    // 结算：finishing 决定命中，门将 reflexes 决定扑出，另有罚失（打偏/中框）
-    const finish = taker.attr.finishing;
-    const save = gk ? 0.5 * gk.attr.reflexes + 0.3 * gk.attr.handling : 0.2;
-    const pScore = clamp(0.78 + (finish - 0.6) * 0.35 - save * 0.28, 0.5, 0.9);
+    // 结算：终结/射门/决策/脚法决定质量，门将 reflexes/handling 决定扑出。
+    const penSkill =
+      (taker.attr.finishing || 0.55) * 0.38 +
+      (taker.attr.shooting || 0.55) * 0.24 +
+      (taker.attr.decisions || 0.55) * 0.22 +
+      (taker.attr.kicking || 0.55) * 0.1 +
+      (taker.isCore ? 0.015 : 0);
+    const save = gk ? 0.55 * gk.attr.reflexes + 0.28 * gk.attr.handling : 0.2;
+    const pScore = clamp(0.77 + (penSkill - 0.6) * 0.34 - save * 0.22, 0.55, 0.9);
     const r = this.random();
     const outcome =
       r < pScore
@@ -3373,17 +3530,22 @@ export class SimEngine {
         (a) => a.team === restartTeam && a.role !== "GK" && !a.sentOff
       );
       const cornerSide = x < 50 ? 0 : 100;
-      cornerTaker = attackOutfield
-        .slice()
-        .sort((a, b) => {
-          const roleA = a.role === "MID" ? 0 : a.role === "DEF" ? 4 : 8;
-          const roleB = b.role === "MID" ? 0 : b.role === "DEF" ? 4 : 8;
-          return (
-            Math.abs(a.baseX - cornerSide) + roleA -
-              (Math.abs(b.baseX - cornerSide) + roleB) ||
-            String(a.id).localeCompare(String(b.id))
-          );
-        })[0] || null;
+      const assignedCornerTaker = this._setPieceTaker(restartTeam, "corner");
+      cornerTaker =
+        assignedCornerTaker ||
+        attackOutfield
+          .slice()
+          .sort((a, b) => {
+            const roleA = a.role === "MID" ? 0 : a.role === "DEF" ? 4 : 8;
+            const roleB = b.role === "MID" ? 0 : b.role === "DEF" ? 4 : 8;
+            const skillA = (a.attr.crossing || 0.55) * 4 + (a.attr.passing || 0.55) * 2;
+            const skillB = (b.attr.crossing || 0.55) * 4 + (b.attr.passing || 0.55) * 2;
+            return (
+              Math.abs(a.baseX - cornerSide) + roleA - skillA -
+                (Math.abs(b.baseX - cornerSide) + roleB - skillB) ||
+              String(a.id).localeCompare(String(b.id))
+            );
+          })[0] || null;
 
       const roleOrder = (a) => (a.role === "ATT" ? 0 : a.role === "MID" ? 1 : 2);
       const attackers = attackOutfield
@@ -3444,12 +3606,22 @@ export class SimEngine {
         const defOut = this.agents.filter(
           (a) => a.team !== restartTeam && a.role !== "GK" && !a.sentOff
         );
-        // 主罚者：直接任意球看 kicking/shooting，传中型看 passing/kicking
+        // 主罚者：战术职责优先；直接任意球看 kicking/shooting，传中型看 crossing/passing/kicking
+        const assignedFkTaker = this._setPieceTaker(restartTeam, "directFreeKick");
         const takerScore =
           fkClass === "direct"
-            ? (p) => 0.5 * p.attr.kicking + 0.35 * p.attr.shooting + 0.15 * p.attr.passing
-            : (p) => 0.55 * p.attr.passing + 0.45 * p.attr.kicking;
+            ? (p) =>
+                0.44 * (p?.attr?.kicking || 0.55) +
+                0.32 * (p?.attr?.shooting || 0.55) +
+                0.14 * (p?.attr?.crossing || 0.55) +
+                0.1 * (p?.attr?.decisions || 0.55)
+            : (p) =>
+                0.42 * (p?.attr?.crossing || 0.55) +
+                0.25 * (p?.attr?.passing || 0.55) +
+                0.2 * (p?.attr?.kicking || 0.55) +
+                0.13 * (p?.attr?.decisions || 0.55);
         fkTaker =
+          assignedFkTaker ||
           atkOut
             .slice()
             .sort(
@@ -3533,7 +3705,8 @@ export class SimEngine {
           fkClass === "direct"
             ? clamp(
                 (dGoalFk < 18 ? 0.85 : dGoalFk < 24 ? 0.62 : 0.45) *
-                  (0.45 + 0.55 * angFk),
+                  (0.45 + 0.55 * angFk) *
+                  (0.86 + takerScore(fkTaker || { attr: {} }) * 0.24),
                 0.1,
                 0.85
               )

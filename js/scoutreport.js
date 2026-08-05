@@ -36,6 +36,9 @@ const ATTR_LABELS = {
   strength: "力量",
   stamina: "体能",
   vision: "视野",
+  heading: "头球",
+  crossing: "传中",
+  decisions: "决策",
   reflexes: "反应",
   handling: "手控",
   positioning: "站位",
@@ -55,6 +58,9 @@ const ATTR_LABELS_EN = {
   strength: "Strength",
   stamina: "Stamina",
   vision: "Vision",
+  heading: "Heading",
+  crossing: "Crossing",
+  decisions: "Decisions",
   reflexes: "Reflexes",
   handling: "Handling",
   positioning: "Positioning",
@@ -199,6 +205,9 @@ export function scoutAttrRows(player, userClub, { ownPlayer = false, lang = "zh"
     "strength",
     "stamina",
     "vision",
+    "heading",
+    "crossing",
+    "decisions",
   ];
   if (player?.pos === "GK") {
     keys.push("reflexes", "handling", "positioning", "kicking");
@@ -211,7 +220,21 @@ export function scoutAttrRows(player, userClub, { ownPlayer = false, lang = "zh"
         : ["pace", "shooting", "passing", "defending", "physical"]
       : fog === 1
         ? keys.filter((k) =>
-            ["pace", "shooting", "passing", "dribbling", "defending", "physical", "finishing", "tackling", "reflexes", "handling"].includes(k)
+            [
+              "pace",
+              "shooting",
+              "passing",
+              "dribbling",
+              "defending",
+              "physical",
+              "finishing",
+              "tackling",
+              "heading",
+              "crossing",
+              "decisions",
+              "reflexes",
+              "handling",
+            ].includes(k)
           )
         : keys;
 

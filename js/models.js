@@ -62,6 +62,12 @@ function gauss(mean, spread) {
 const TALENT_MODEL_VERSION = 1;
 const TALENT_REFERENCE = 18;
 const TALENT_SCALE = 1;
+const FOOTBALL_PROFILE_VERSION = 1;
+const VALID_FEET = new Set(["right", "left", "both"]);
+
+function clampNumber(v, a, b) {
+  return Math.max(a, Math.min(b, Math.round(v)));
+}
 
 /** 将现实国家队层级温和映射到个人属性，不覆盖俱乐部自身的实力档位。 */
 export function nationalTalentOffset(code) {
@@ -106,6 +112,150 @@ function migrateAttribute(value, offset, seed) {
   const fraction = Math.abs(offset - whole);
   const extra = fraction > 0 && stableUnit(seed) < fraction ? Math.sign(offset) : 0;
   return clamp((Number(value) || 1) + whole + extra);
+}
+
+function stableGaussian(seed) {
+  const u = Math.max(0.000001, stableUnit(`${seed}:u`));
+  const v = stableUnit(`${seed}:v`);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function profileAttr(p, key, fallback = 10) {
+  return Number(p?.attrs?.[key]) || fallback;
+}
+
+function profileNoise(p, key, amount = 1.2) {
+  return (stableUnit(`${p?.id || p?.name || ""}:${key}:profile-noise`) - 0.5) * amount;
+}
+
+function inferHeightCm(p) {
+  const cfg =
+    p?.pos === "GK"
+      ? { mean: 190, spread: 5.5, min: 180, max: 203 }
+      : p?.pos === "DEF"
+        ? { mean: 185, spread: 6, min: 174, max: 200 }
+        : p?.pos === "ATT"
+          ? { mean: 181, spread: 6.5, min: 169, max: 198 }
+          : { mean: 178, spread: 6, min: 166, max: 193 };
+  return clampNumber(cfg.mean + stableGaussian(`${p?.id || p?.name || ""}:height:v${FOOTBALL_PROFILE_VERSION}`) * cfg.spread, cfg.min, cfg.max);
+}
+
+function inferPreferredFoot(p) {
+  const roll = stableUnit(`${p?.id || p?.name || ""}:foot:v${FOOTBALL_PROFILE_VERSION}`);
+  if (roll < 0.72) return "right";
+  if (roll < 0.91) return "left";
+  return "both";
+}
+
+function inferHeading(p) {
+  const a = p?.attrs || {};
+  const height = Number(p?.heightCm) || inferHeightCm(p);
+  const aerialBonus = (height - 180) / 6;
+  let raw;
+  if (p?.pos === "GK") {
+    raw = profileAttr(p, "handling") * 0.28 + profileAttr(p, "kicking") * 0.18 + profileAttr(p, "strength") * 0.24 + 3.2;
+  } else if (p?.pos === "DEF") {
+    raw =
+      profileAttr(p, "marking") * 0.22 +
+      profileAttr(p, "positioning") * 0.18 +
+      profileAttr(p, "strength") * 0.28 +
+      profileAttr(p, "physical") * 0.14 +
+      profileAttr(p, "tackling") * 0.1 +
+      1.6;
+  } else if (p?.pos === "ATT") {
+    raw =
+      profileAttr(p, "finishing") * 0.24 +
+      profileAttr(p, "shooting") * 0.14 +
+      profileAttr(p, "strength") * 0.24 +
+      profileAttr(p, "physical") * 0.16 +
+      profileAttr(p, "positioning") * 0.12 +
+      1.3;
+  } else {
+    raw =
+      profileAttr(p, "positioning") * 0.22 +
+      profileAttr(p, "strength") * 0.2 +
+      profileAttr(p, "physical") * 0.16 +
+      profileAttr(p, "passing") * 0.12 +
+      profileAttr(p, "vision") * 0.1 +
+      1.1;
+  }
+  return clamp(raw + aerialBonus + profileNoise(p, "heading"));
+}
+
+function inferCrossing(p) {
+  let raw =
+    profileAttr(p, "passing") * 0.36 +
+    profileAttr(p, "vision") * 0.18 +
+    profileAttr(p, "kicking") * 0.14 +
+    profileAttr(p, "dribbling") * 0.12 +
+    profileAttr(p, "pace") * 0.08 +
+    1.6;
+  if (p?.pos === "GK") raw -= 2.5;
+  if (p?.pos === "MID") raw += 0.8;
+  if (p?.pos === "ATT") raw += 0.2;
+  return clamp(raw + profileNoise(p, "crossing"));
+}
+
+function inferDecisions(p) {
+  let raw =
+    profileAttr(p, "vision") * 0.25 +
+    profileAttr(p, "positioning") * 0.22 +
+    profileAttr(p, "passing") * 0.16 +
+    profileAttr(p, "stamina") * 0.1 +
+    profileAttr(p, "defending") * 0.08 +
+    profileAttr(p, "ovr", Number(p?.ovr) || 10) * 0.08 +
+    1.2;
+  if (Number(p?.age || 0) >= 30) raw += 0.7;
+  if (Number(p?.age || 0) <= 19) raw -= 0.4;
+  return clamp(raw + profileNoise(p, "decisions"));
+}
+
+export function ensureFootballProfile(p) {
+  if (!p) return false;
+  if (!p.attrs || typeof p.attrs !== "object") p.attrs = {};
+  let changed = false;
+  const height = Number(p.heightCm);
+  if (!Number.isFinite(height) || height < 150 || height > 215) {
+    p.heightCm = inferHeightCm(p);
+    changed = true;
+  } else {
+    const next = clampNumber(height, 150, 215);
+    if (next !== height) changed = true;
+    p.heightCm = next;
+  }
+  if (!VALID_FEET.has(p.preferredFoot)) {
+    p.preferredFoot = inferPreferredFoot(p);
+    changed = true;
+  }
+  if (!Number.isFinite(Number(p.attrs.heading))) {
+    p.attrs.heading = inferHeading(p);
+    changed = true;
+  } else {
+    const next = clamp(p.attrs.heading);
+    if (next !== p.attrs.heading) changed = true;
+    p.attrs.heading = next;
+  }
+  if (!Number.isFinite(Number(p.attrs.crossing))) {
+    p.attrs.crossing = inferCrossing(p);
+    changed = true;
+  } else {
+    const next = clamp(p.attrs.crossing);
+    if (next !== p.attrs.crossing) changed = true;
+    p.attrs.crossing = next;
+  }
+  if (!Number.isFinite(Number(p.attrs.decisions))) {
+    p.attrs.decisions = inferDecisions(p);
+    changed = true;
+  } else {
+    const next = clamp(p.attrs.decisions);
+    if (next !== p.attrs.decisions) changed = true;
+    p.attrs.decisions = next;
+  }
+  if ((p.footballProfileVersion || 0) < FOOTBALL_PROFILE_VERSION) {
+    p.footballProfileVersion = FOOTBALL_PROFILE_VERSION;
+    changed = true;
+  }
+  return changed;
 }
 
 /**
@@ -779,6 +929,7 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     p.hairColor = look.hairColor;
     p.hairStyle = look.hairStyle;
   }
+  ensureFootballProfile(p);
   p.ovr = playerOverall(p);
   // 潜力：青年略高于当前，成年接近当前
   if (isYouth) {
@@ -1155,6 +1306,14 @@ export function defaultTactics() {
      * 须在首发中；null 表示未指定
      */
     corePlayerId: null,
+    /** 队长须在首发中；null 表示开赛前自动选择 */
+    captainId: null,
+    /** 定位球职责须在首发中；缺失时按真实属性自动选择 */
+    setPieces: {
+      penaltyId: null,
+      directFreeKickId: null,
+      cornerId: null,
+    },
   };
 }
 
@@ -1237,6 +1396,205 @@ export function setCorePlayerId(club, playerId) {
   return { ok: true, corePlayerId: playerId };
 }
 
+export const SET_PIECE_TYPES = Object.freeze(["penalty", "directFreeKick", "corner"]);
+const SET_PIECE_FIELDS = Object.freeze({
+  penalty: "penaltyId",
+  directFreeKick: "directFreeKickId",
+  corner: "cornerId",
+});
+
+function normalizeSetPieces(t) {
+  if (!t.setPieces || typeof t.setPieces !== "object") t.setPieces = {};
+  for (const field of Object.values(SET_PIECE_FIELDS)) {
+    if (t.setPieces[field] === undefined) t.setPieces[field] = null;
+  }
+  return t.setPieces;
+}
+
+function lineupPlayerMap(club) {
+  return new Map((club?.players || []).map((p) => [p.id, p]));
+}
+
+function starterPlayers(club, { outfield = false } = {}) {
+  const map = lineupPlayerMap(club);
+  return (club?.tactics?.lineup || [])
+    .map((id) => map.get(id))
+    .filter((p) => p && (!outfield || p.pos !== "GK"));
+}
+
+function starterHas(club, playerId, { outfield = false } = {}) {
+  if (!playerId) return false;
+  const map = lineupPlayerMap(club);
+  const p = map.get(playerId);
+  if (!p || (outfield && p.pos === "GK")) return false;
+  return (club?.tactics?.lineup || []).includes(playerId);
+}
+
+function scoreCaptainCandidate(p) {
+  const a = p?.attrs || {};
+  const posMul = p?.pos === "DEF" ? 1.08 : p?.pos === "MID" ? 1.05 : p?.pos === "GK" ? 1.0 : 0.96;
+  const age = Math.max(17, Math.min(36, Number(p?.age) || 24));
+  const experience = Math.max(0, Math.min(5, age - 24)) + Math.max(0, Math.min(3, Number(p?.career?.apps || 0) / 80));
+  const skill =
+    (Number(a.decisions) || 10) * 0.32 +
+    (Number(a.positioning) || 10) * 0.16 +
+    (Number(a.stamina) || 10) * 0.12 +
+    (Number(a.vision) || 10) * 0.1 +
+    (Number(p?.ovr) || 10) * 0.2 +
+    (Number(p?.morale) || 70) * 0.025 +
+    experience;
+  return skill * posMul;
+}
+
+function scoreSetPieceCandidate(p, type) {
+  const a = p?.attrs || {};
+  if (type === "penalty") {
+    return (
+      (Number(a.finishing) || 10) * 0.36 +
+      (Number(a.shooting) || 10) * 0.26 +
+      (Number(a.decisions) || 10) * 0.18 +
+      (Number(a.kicking) || 10) * 0.1 +
+      (Number(p?.ovr) || 10) * 0.1
+    );
+  }
+  if (type === "corner") {
+    return (
+      (Number(a.crossing) || 10) * 0.44 +
+      (Number(a.passing) || 10) * 0.22 +
+      (Number(a.vision) || 10) * 0.12 +
+      (Number(a.kicking) || 10) * 0.12 +
+      (Number(a.decisions) || 10) * 0.1
+    );
+  }
+  return (
+    (Number(a.kicking) || 10) * 0.28 +
+    (Number(a.shooting) || 10) * 0.24 +
+    (Number(a.crossing) || 10) * 0.16 +
+    (Number(a.passing) || 10) * 0.14 +
+    (Number(a.decisions) || 10) * 0.1 +
+    (Number(a.vision) || 10) * 0.08
+  );
+}
+
+export function getCaptainId(club) {
+  ensureTactics(club);
+  const id = club.tactics.captainId || null;
+  if (!id) return null;
+  if (!starterHas(club, id)) {
+    club.tactics.captainId = null;
+    return null;
+  }
+  return id;
+}
+
+export function pickAutoCaptainId(club) {
+  ensureTactics(club);
+  const xi = starterPlayers(club);
+  if (!xi.length) return null;
+  let best = null;
+  let bestScore = -1;
+  for (const p of xi) {
+    const score = scoreCaptainCandidate(p);
+    if (score > bestScore) {
+      bestScore = score;
+      best = p.id;
+    }
+  }
+  return best;
+}
+
+export function ensureCaptain(club, { force = false } = {}) {
+  ensureTactics(club);
+  if (!force) {
+    const cur = getCaptainId(club);
+    if (cur) return cur;
+  }
+  const id = pickAutoCaptainId(club);
+  club.tactics.captainId = id;
+  return id;
+}
+
+export function setCaptainId(club, playerId) {
+  ensureTactics(club);
+  if (!playerId) {
+    club.tactics.captainId = null;
+    return { ok: true, captainId: null };
+  }
+  if (!starterHas(club, playerId)) {
+    return { ok: false, msg: "队长须在首发十一人中" };
+  }
+  club.tactics.captainId = playerId;
+  return { ok: true, captainId: playerId };
+}
+
+export function getSetPieceTakerId(club, type) {
+  ensureTactics(club);
+  const field = SET_PIECE_FIELDS[type];
+  if (!field) return null;
+  const id = club.tactics.setPieces?.[field] || null;
+  if (!id) return null;
+  if (!starterHas(club, id, { outfield: true })) {
+    club.tactics.setPieces[field] = null;
+    return null;
+  }
+  return id;
+}
+
+export function pickAutoSetPieceTakerId(club, type) {
+  ensureTactics(club);
+  if (!SET_PIECE_FIELDS[type]) return null;
+  const xi = starterPlayers(club, { outfield: true });
+  if (!xi.length) return null;
+  let best = null;
+  let bestScore = -1;
+  for (const p of xi) {
+    const score = scoreSetPieceCandidate(p, type);
+    if (score > bestScore) {
+      bestScore = score;
+      best = p.id;
+    }
+  }
+  return best;
+}
+
+export function ensureSetPieceTakers(club, { force = false } = {}) {
+  ensureTactics(club);
+  normalizeSetPieces(club.tactics);
+  const out = {};
+  for (const type of SET_PIECE_TYPES) {
+    const field = SET_PIECE_FIELDS[type];
+    const cur = !force ? getSetPieceTakerId(club, type) : null;
+    const id = cur || pickAutoSetPieceTakerId(club, type);
+    club.tactics.setPieces[field] = id;
+    out[type] = id;
+  }
+  return out;
+}
+
+export function setSetPieceTakerId(club, type, playerId) {
+  ensureTactics(club);
+  const field = SET_PIECE_FIELDS[type];
+  if (!field) return { ok: false, msg: "无效定位球类型" };
+  if (!playerId) {
+    club.tactics.setPieces[field] = null;
+    return { ok: true, type, playerId: null };
+  }
+  if (!starterHas(club, playerId, { outfield: true })) {
+    return { ok: false, msg: "定位球主罚者须在首发非门将中" };
+  }
+  club.tactics.setPieces[field] = playerId;
+  return { ok: true, type, playerId };
+}
+
+export function ensureLineupResponsibilities(club, { force = false } = {}) {
+  ensureCaptain(club, { force });
+  ensureSetPieceTakers(club, { force });
+  return {
+    captainId: club?.tactics?.captainId || null,
+    setPieces: { ...(club?.tactics?.setPieces || {}) },
+  };
+}
+
 /**
  * 规范化 / 补齐槽位角色数组（不回调 ensureTactics，避免循环）
  * @param {object} club
@@ -1289,16 +1647,23 @@ export function ensureTactics(club) {
     if (!Array.isArray(t.lineup)) t.lineup = [];
     if (!Array.isArray(t.roles)) t.roles = [];
     if (t.corePlayerId === undefined) t.corePlayerId = null;
+    if (t.captainId === undefined) t.captainId = null;
+    normalizeSetPieces(t);
     t.pressing = Math.max(1, Math.min(5, +t.pressing || 3));
     t.tempo = Math.max(1, Math.min(5, +t.tempo || 3));
     t.width = Math.max(1, Math.min(5, +t.width || 3));
     t.defensiveLine = Math.max(1, Math.min(5, +t.defensiveLine || 3));
   }
+  normalizeSetPieces(club.tactics);
   ensureLineupRoles(club);
-  // 核心须在首发
-  if (club.tactics.corePlayerId) {
-    const xi = new Set(club.tactics.lineup || []);
-    if (!xi.has(club.tactics.corePlayerId)) club.tactics.corePlayerId = null;
+  // 核心、队长和定位球职责须在当前首发中
+  const xi = new Set(club.tactics.lineup || []);
+  if (club.tactics.corePlayerId && !xi.has(club.tactics.corePlayerId)) club.tactics.corePlayerId = null;
+  if (club.tactics.captainId && !xi.has(club.tactics.captainId)) club.tactics.captainId = null;
+  for (const field of Object.values(SET_PIECE_FIELDS)) {
+    if (club.tactics.setPieces[field] && !xi.has(club.tactics.setPieces[field])) {
+      club.tactics.setPieces[field] = null;
+    }
   }
   return club.tactics;
 }
@@ -1473,6 +1838,7 @@ export function autoLineup(club, options = {}) {
   }
   club.tactics.lineup = lineup.filter(Boolean);
   ensureLineupRoles(club, { reset: true });
+  ensureLineupResponsibilities(club, { force: true });
   return club.tactics.lineup;
 }
 
@@ -1538,6 +1904,7 @@ export function ensureMatchLineup(club, { forceAuto = false, day = null, importa
   }
   club.tactics.lineup = next;
   ensureLineupRoles(club);
+  ensureLineupResponsibilities(club);
   return next;
 }
 
@@ -1577,6 +1944,7 @@ export function swapLineupSlots(club, slotA, slotB) {
   club.tactics.lineup = lineup;
   // 角色挂在槽位上：换人不换职责（更接近「这个位置怎么踢」）
   ensureLineupRoles(club);
+  ensureLineupResponsibilities(club);
   return { ok: true };
 }
 
@@ -1617,6 +1985,7 @@ export function setLineupSlot(club, slotIndex, playerId) {
   }
   club.tactics.lineup = lineup.filter((id, i) => i < need);
   ensureLineupRoles(club);
+  ensureLineupResponsibilities(club);
   const slotPos = formation.slots[idx]?.pos;
   const outOfPos = slotPos && player.pos && player.pos !== slotPos;
   return { ok: true, outOfPos, slotPos, playerPos: player.pos };

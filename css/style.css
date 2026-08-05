@@ -1169,6 +1169,40 @@ html[data-theme="light"] .pitch {
   font-size: 0.88rem;
   line-height: 1.35;
 }
+.tac-responsibility-block {
+  margin: 0.55rem 0 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg2) 82%, transparent);
+}
+.tac-responsibilities {
+  display: grid;
+  gap: 0.42rem;
+  margin-top: 0.48rem;
+}
+.tac-responsibility-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 0.42fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 0.84rem;
+}
+.tac-responsibility-row > span {
+  color: var(--muted);
+  font-weight: 700;
+}
+.tac-responsibility-row select {
+  min-width: 0;
+  width: 100%;
+}
+@media (max-width: 560px) {
+  .tac-responsibility-row {
+    grid-template-columns: 1fr;
+    gap: 0.18rem;
+  }
+}
 .tac-core-btn {
   appearance: none;
   border: 1px solid rgba(148, 163, 184, 0.35);

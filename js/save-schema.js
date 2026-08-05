@@ -23,7 +23,7 @@ function validateSponsorshipContract(contract, label) {
   }
 }
 
-export function validateSaveStructure(world) {
+export function validateSaveStructure(world, options = {}) {
   if (!isRecord(world)) throw new Error("invalid save: root must be an object");
   if (!Array.isArray(world.clubs) || world.clubs.length === 0) {
     throw new Error("invalid save: clubs are missing");
@@ -208,7 +208,7 @@ export function validateSaveStructure(world) {
         }
       }
     }
-  } else if (Number(world.schemaVersion) >= 3) {
+  } else if (Number(world.schemaVersion) >= 3 && !options.allowMissingScoutingKnowledge) {
     throw new Error("invalid save: scouting knowledge is missing");
   }
   if (world.scoutMissions != null) {
@@ -262,7 +262,7 @@ export function validateSaveStructure(world) {
  * run the idempotent repair pass so newly introduced derived fields stay healthy.
  */
 export function migrateSaveSchema(world, config) {
-  validateSaveStructure(world);
+  validateSaveStructure(world, { allowMissingScoutingKnowledge: true });
   const legacyRepair = typeof config === "function" ? config : null;
   const migrations = config?.migrations || {};
   const ensureCurrent = config?.ensureCurrent || null;
@@ -281,5 +281,6 @@ export function migrateSaveSchema(world, config) {
   if (originalVersion === CURRENT_SAVE_SCHEMA_VERSION && typeof ensureCurrent === "function") {
     ensureCurrent(world, { fromVersion: version, toVersion: version });
   }
+  validateSaveStructure(world);
   return world;
 }
