@@ -35,8 +35,8 @@ import {
 } from "./match-presentation.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=199";
-import { clubCrestHtml } from "./club-crest.js?v=199";
+import { nationFlagHtml } from "./flags.js?v=200";
+import { clubCrestHtml } from "./club-crest.js?v=200";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -344,7 +344,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=199";
+} from "./avatar.js?v=200";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -432,7 +432,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=199").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=200").then((module) => {
       matchViewApi = module;
       return module;
     });

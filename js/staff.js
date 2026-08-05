@@ -1,6 +1,11 @@
 /** 教练组 / 球探 / 队医 — 按实力生成 + 合同与俱乐部间流动 */
 
-import { FIRST_NAMES, LAST_NAMES, DIVISIONS, NATIONALITIES } from "./data.js";
+import {
+  DIVISIONS,
+  NATIONALITIES,
+  NAMES_BY_NATION,
+  generatePlayerName,
+} from "./data.js";
 import { formatMoney } from "./models.js";
 import { isTransferWindowOpen } from "./transfers.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
@@ -40,7 +45,49 @@ const STAFF_ROLES = ["coach", "scout", "doctor"];
 /** 职员质量标尺版本：旧档 ensureStaff 时按实力重校准一次 */
 export const STAFF_QUALITY_VERSION = 2;
 
-export const STAFF_PROFILE_VERSION = 1;
+export const STAFF_PROFILE_VERSION = 2;
+
+const GENERIC_STAFF_NATIONS = ["ENG", "USA", "AUS", "IRL"];
+
+/** 俱乐部职员劳动力来源先验：用于同分姓名反推与外籍职员生成，不影响职员能力。 */
+const STAFF_NATION_PRIOR = Object.freeze({
+  ENG: 10,
+  ESP: 9,
+  GER: 9,
+  FRA: 8,
+  ITA: 8,
+  POR: 5,
+  BRA: 7,
+  ARG: 5,
+  NED: 5,
+  BEL: 3,
+  CRO: 2,
+  URU: 2,
+  COL: 3,
+  MEX: 3,
+  USA: 3,
+  JPN: 2,
+  KOR: 2,
+  CHN: 1,
+  NGA: 2,
+  SEN: 1,
+  GHA: 1,
+  CIV: 1,
+  MAR: 2,
+  POL: 3,
+  DEN: 2,
+  SWE: 2,
+  NOR: 2,
+  SUI: 2,
+  AUT: 2,
+  TUR: 3,
+  SRB: 2,
+  UKR: 2,
+  SCO: 2,
+  WAL: 1,
+  IRL: 2,
+  AUS: 2,
+});
 
 function rand(a, b) {
   return Math.floor(Math.random() * (b - a + 1)) + a;
@@ -55,11 +102,111 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
-function stableNationCode(staff) {
-  const id = String(staff?.id || staff?.name || "staff");
+function stableHash(value) {
   let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  for (const char of String(value || "staff")) {
+    hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  }
+  return hash;
+}
+
+function stableNationCode(staff) {
+  const hash = stableHash(staff?.id || staff?.name || "staff");
   return NATIONALITIES[hash % NATIONALITIES.length]?.code || "ENG";
+}
+
+function validNation(code) {
+  return NATIONALITIES.find((item) => item.code === code) || null;
+}
+
+function staffNationPrior(code) {
+  return STAFF_NATION_PRIOR[code] || 1;
+}
+
+function pickWeightedNation(pool) {
+  const total = pool.reduce((sum, nation) => sum + staffNationPrior(nation.code), 0);
+  let roll = Math.random() * total;
+  for (const nation of pool) {
+    roll -= staffNationPrior(nation.code);
+    if (roll <= 0) return nation;
+  }
+  return pool[pool.length - 1] || null;
+}
+
+function normalizeIdentityName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[.'’]/g, "")
+    .replace(/-/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function atStart(fullName, part) {
+  return fullName === part || fullName.startsWith(`${part} `);
+}
+
+function atEnd(fullName, part) {
+  return fullName === part || fullName.endsWith(` ${part}`);
+}
+
+/** 姓名是否能由该国籍姓名池解释；姓氏比名字提供更强的文化线索。 */
+export function staffNameCompatibilityScore(name, nationCode) {
+  const pool = NAMES_BY_NATION[nationCode];
+  const fullName = normalizeIdentityName(name);
+  if (!pool || !fullName) return 0;
+  const givenNames = pool.first.map(normalizeIdentityName);
+  const familyNames = pool.last.map(normalizeIdentityName);
+  const givenMatches = pool.order === "family-given"
+    ? givenNames.some((part) => atEnd(fullName, part))
+    : givenNames.some((part) => atStart(fullName, part));
+  const familyMatches = pool.order === "family-given"
+    ? familyNames.some((part) => atStart(fullName, part))
+    : familyNames.some((part) => atEnd(fullName, part));
+  if (givenMatches && familyMatches) return 6;
+  if (familyMatches) return 3;
+  if (givenMatches) return 2;
+  return 0;
+}
+
+/**
+ * 旧档保留职员姓名，并从姓名池反推有数据依据的国籍。
+ * 混合文化姓名优先采用姓氏线索；完全没有命中时回到通用英语姓名来源国。
+ */
+export function inferStaffNationalityFromName(name, seed = name) {
+  let bestScore = 0;
+  let candidates = [];
+  for (const nation of NATIONALITIES) {
+    const score = staffNameCompatibilityScore(name, nation.code);
+    if (score > bestScore) {
+      bestScore = score;
+      candidates = [nation.code];
+    } else if (score > 0 && score === bestScore) {
+      candidates.push(nation.code);
+    }
+  }
+  if (!candidates.length) candidates = GENERIC_STAFF_NATIONS;
+  const strongestPrior = Math.max(...candidates.map(staffNationPrior));
+  const likeliest = candidates.filter((code) => staffNationPrior(code) === strongestPrior);
+  return likeliest[stableHash(seed) % likeliest.length] || "ENG";
+}
+
+function pickStaffNationality(role, rating, opts = {}) {
+  const explicit = validNation(opts.nationality);
+  if (explicit) return explicit.code;
+  const home = validNation(opts.homeNation);
+  if (home) {
+    const roleAdjustment = role === "coach" ? -0.05 : role === "doctor" ? 0.04 : 0;
+    const normalChance = clamp(0.74 - Math.max(0, Number(rating) - 10) * 0.025 + roleAdjustment, 0.5, 0.82);
+    const localChance = clamp(Number.isFinite(opts.localChance) ? opts.localChance : normalChance, 0, 1);
+    if (Math.random() < localChance) return home.code;
+  }
+  const pool = home
+    ? NATIONALITIES.filter((nation) => nation.code !== home.code)
+    : NATIONALITIES;
+  return pickWeightedNation(pool)?.code || home?.code || "ENG";
 }
 
 export function closeStaffTenure(staff, world = null) {
@@ -73,10 +220,20 @@ export function closeStaffTenure(staff, world = null) {
 
 export function ensureStaffProfile(staff, club = null, world = null) {
   if (!staff) return staff;
-  if (!staff.nationality || !NATIONALITIES.some((item) => item.code === staff.nationality)) {
-    staff.nationality = stableNationCode(staff);
+  const previousVersion = Number(staff.profileVersion) || 0;
+  if (!validNation(staff.nationality)) {
+    staff.nationality = staff.name
+      ? inferStaffNationalityFromName(staff.name, staff.id || staff.name)
+      : validNation(club?.countryCode)?.code || stableNationCode(staff);
+  } else if (
+    previousVersion < STAFF_PROFILE_VERSION
+    && staff.name
+    && staffNameCompatibilityScore(staff.name, staff.nationality) === 0
+  ) {
+    staff.nationality = inferStaffNationalityFromName(staff.name, staff.id || staff.name);
   }
-  const nation = NATIONALITIES.find((item) => item.code === staff.nationality);
+  if (!staff.name) staff.name = generatePlayerName(staff.nationality, pick);
+  const nation = validNation(staff.nationality);
   staff.nationName = nation?.name || staff.nationName || staff.nationality;
   staff.nationNameEn = nation?.nameEn || staff.nationNameEn || staff.nationality;
   staff.nationFlag = nation?.flag || staff.nationFlag || "🌍";
@@ -213,16 +370,18 @@ export function ensureStaffContract(staff, club = null) {
 
 export function createStaff(role, rating = null, opts = {}) {
   const r = rating != null ? rating : rand(6, 16);
+  const id = uid();
+  const nationality = pickStaffNationality(role, r, opts);
   const staff = {
-    id: uid(),
-    name: `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`,
+    id,
+    name: opts.name || generatePlayerName(nationality, pick),
     role,
     rating: clamp(r, 1, 20),
     wage: wageFromRating(r),
     age: rand(32, 62),
     contractYears: opts.contractYears != null ? opts.contractYears : defaultStaffContractYears(r),
     clubId: opts.clubId != null ? opts.clubId : null,
-    nationality: opts.nationality || stableNationCode({ id: `${role}-${Date.now()}-${Math.random()}` }),
+    nationality,
     history: [],
   };
   ensureStaffProfile(staff, null);
@@ -231,9 +390,9 @@ export function createStaff(role, rating = null, opts = {}) {
 
 export function defaultStaffForClub(club) {
   const staff = {
-    coach: createStaff("coach", staffTargetRating(club, "coach"), { clubId: club?.id }),
-    scout: createStaff("scout", staffTargetRating(club, "scout"), { clubId: club?.id }),
-    doctor: createStaff("doctor", staffTargetRating(club, "doctor"), { clubId: club?.id }),
+    coach: createStaff("coach", staffTargetRating(club, "coach"), { clubId: club?.id, homeNation: club?.countryCode }),
+    scout: createStaff("scout", staffTargetRating(club, "scout"), { clubId: club?.id, homeNation: club?.countryCode }),
+    doctor: createStaff("doctor", staffTargetRating(club, "doctor"), { clubId: club?.id, homeNation: club?.countryCode }),
   };
   for (const role of STAFF_ROLES) ensureStaffContract(staff[role], club);
   return staff;
@@ -244,7 +403,10 @@ export function calibrateClubStaff(club, { force = false } = {}) {
   if (!club.staff) club.staff = defaultStaffForClub(club);
   for (const role of STAFF_ROLES) {
     if (!club.staff[role]) {
-      club.staff[role] = createStaff(role, staffTargetRating(club, role), { clubId: club.id });
+      club.staff[role] = createStaff(role, staffTargetRating(club, role), {
+        clubId: club.id,
+        homeNation: club.countryCode,
+      });
       ensureStaffContract(club.staff[role], club);
       continue;
     }
@@ -259,7 +421,6 @@ export function calibrateClubStaff(club, { force = false } = {}) {
     s.wage = wageFromRating(s.rating);
     s.role = role;
     if (!s.id) s.id = uid();
-    if (!s.name) s.name = `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`;
     if (!s.age) s.age = rand(32, 62);
     ensureStaffContract(s, club);
   }
@@ -276,7 +437,10 @@ export function ensureStaff(club) {
   }
   for (const role of STAFF_ROLES) {
     if (!club.staff[role]) {
-      club.staff[role] = createStaff(role, staffTargetRating(club, role), { clubId: club.id });
+      club.staff[role] = createStaff(role, staffTargetRating(club, role), {
+        clubId: club.id,
+        homeNation: club.countryCode,
+      });
     }
     ensureStaffContract(club.staff[role], club);
   }
@@ -416,7 +580,12 @@ function findEmployedStaff(world, staffId) {
 
 function makeCaretaker(club, role) {
   const temp = Math.max(5, staffTargetRating(club, role, { jitter: false }) - rand(3, 5));
-  const s = createStaff(role, temp, { clubId: club.id, contractYears: 1 });
+  const s = createStaff(role, temp, {
+    clubId: club.id,
+    contractYears: 1,
+    homeNation: club.countryCode,
+    localChance: 0.9,
+  });
   s.contractYears = 1;
   s.clubId = club.id;
   return s;
