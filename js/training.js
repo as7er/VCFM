@@ -11,6 +11,7 @@ import {
   processInjuryRecoveryDay,
 } from "./injuries.js";
 import { recordPlayerDevelopment } from "./player-pathway.js";
+import { ensurePlayerPositionProfile } from "./player-positions.js";
 
 export const TRAINING_FOCUSES = {
   recovery: {
@@ -152,6 +153,22 @@ const POS_ATTRS = {
   ATT: ["shooting", "finishing", "pace", "dribbling", "strength"],
 };
 
+const DETAILED_POS_ATTRS = {
+  GK: ["reflexes", "handling", "positioning", "kicking"],
+  LB: ["pace", "tackling", "marking", "crossing", "stamina"],
+  CB: ["tackling", "marking", "strength", "positioning", "heading"],
+  RB: ["pace", "tackling", "marking", "crossing", "stamina"],
+  DM: ["tackling", "marking", "positioning", "passing", "stamina"],
+  CM: ["passing", "vision", "stamina", "pace", "decisions"],
+  LM: ["pace", "crossing", "dribbling", "passing", "stamina"],
+  RM: ["pace", "crossing", "dribbling", "passing", "stamina"],
+  AM: ["vision", "passing", "dribbling", "shooting", "decisions"],
+  LW: ["pace", "dribbling", "crossing", "finishing", "decisions"],
+  RW: ["pace", "dribbling", "crossing", "finishing", "decisions"],
+  CF: ["finishing", "shooting", "dribbling", "vision", "decisions"],
+  ST: ["finishing", "shooting", "strength", "heading", "positioning"],
+};
+
 function rng() {
   return Math.random();
 }
@@ -206,7 +223,12 @@ function pickAttrKeys(player, focusCfg) {
   }
   if (Array.isArray(focusCfg.attrs) && focusCfg.attrs.length === 0) return [];
   if (focusCfg.attrs == null) {
-    return (POS_ATTRS[player.pos] || POS_ATTRS.MID).slice();
+    ensurePlayerPositionProfile(player);
+    return (
+      DETAILED_POS_ATTRS[player.positionProfile?.primary] ||
+      POS_ATTRS[player.pos] ||
+      POS_ATTRS.MID
+    ).slice();
   }
   // 专项：门将只练门将项；外场手跳过纯门将属性
   if (player.pos === "GK") {

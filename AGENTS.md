@@ -4,7 +4,17 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v202**（多年阵容规划与 AI 建队）
+> 缓存：**vcfm-v203**（球员细分位置与多位置适应性）
+
+## v203 球员细分位置与多位置适应性（2026-08-06）
+
+- 球员新增 13 个细分位置（GK/LB/CB/RB/DM/CM/LM/RM/AM/LW/RW/CF/ST）的熟悉度档案，由本人真实属性与惯用脚稳定派生；`player.pos` 继续作为赛事与旧档兼容的粗位置字段
+- 阵型槽位按左右站位和纵深解析成细分位置，自动阵容、锁定球员安置、半场重同步与换人共用同一份适配度；抢截型中卫不再被塞到边路，左脚边后卫优先落在左路
+- 空间比赛的边后卫与边路球员判定改读槽位细分位置，不再只靠横坐标阈值猜测；`detailedPosition` 是槽位属性，换人继承槽位因此保持不变
+- 阵容规划新增逐槽覆盖事实与细分位置需求，转会评估、接班人判断与训练重点读取同一份档案；适配度只影响选人与建队决策，不向比赛写入隐藏能力
+- 旧档迁移在修正越界熟悉度、剔除非法擅长位置或补齐缺失细分位置时都会回报变更并落盘；稳定态不会反复把存档标脏
+- `derivePositionRatings` 对 v199 属性（heading/crossing/decisions）提供方向一致的代理值，外部调用顺序不同时不会塌成平均值；本模块不反向 import `models.js`，避免与 `ensureFootballProfile` 成环
+- 新增 `js/player-positions.js` 与 `scripts/player-positions-audit.mjs`；缓存 `vcfm-v203`
 
 ## v202 多年阵容规划与 AI 建队（2026-08-06）
 

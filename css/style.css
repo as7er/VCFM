@@ -1263,6 +1263,11 @@ html[data-theme="light"] .pitch {
   font-size: 0.62rem;
   padding: 0.05rem 0.3rem;
 }
+.tac-chip-meta small,
+.squad-position-detail {
+  font-size: 0.65rem;
+  line-height: 1.15;
+}
 .tac-chip-meta em {
   font-style: normal;
   font-weight: 700;

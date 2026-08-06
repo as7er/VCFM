@@ -29,6 +29,7 @@ import {
   ensureWorldClubTemplates,
 } from "./models.js";
 import { STYLE_MOD, FORMATIONS, POS_LABEL } from "./data.js";
+import { positionGroup, positionRating } from "./player-positions.js";
 import {
   mediaAfterUserMatch,
   mediaTransfer,
@@ -1875,8 +1876,9 @@ export function processAiTransfers(world) {
       const sameDiv = (other.division || 3) === (club.division || 3);
       const sellerPlan = ensureClubSquadPlan(world, other);
       const sellerPosition = squadPositionPlan(sellerPlan, needPos);
+      const detailedNeed = squadPlan?.detailedNeeds?.find((slot) => slot.group === needPos) || null;
       for (const p of other.players) {
-        if (p.pos !== needPos) continue;
+        if (positionGroup(p.pos) !== needPos) continue;
         if (other.players.length <= 14) continue;
         if (
           !sellerPosition ||
@@ -1886,6 +1888,7 @@ export function processAiTransfers(world) {
         const sellerDecision = sellerPlan.playerDecisions?.[p.id];
         if (!["sell", "replace"].includes(sellerDecision?.action)) continue;
         if ((p.ovr || 0) < minOvr) continue;
+        if (detailedNeed && positionRating(p, detailedNeed.target) < 8) continue;
         // 别买高龄废柴
         if ((p.age || 0) >= 33 && (p.ovr || 0) < 12) continue;
         const price = (p.value || estimateValue(p)) * (0.9 + rng() * 0.15);

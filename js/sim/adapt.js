@@ -16,6 +16,7 @@ import {
   getSlotRole,
 } from "../models.js";
 import { FORMATIONS } from "../data.js";
+import { positionCoverage } from "../player-positions.js";
 
 /**
  * 比赛请求显式选择空间引擎；旧调用未声明时，用户参与比赛仍默认空间模拟。
@@ -98,6 +99,7 @@ export function resyncSimAfterHalfTime(state) {
       const slot = slots[i];
       const p = assigned[i] || null;
       if (!p) continue;
+      const coverage = positionCoverage(p, slot, slots);
       a.id = p.id;
       a.player = p;
       a.num = p.number ?? a.num;
@@ -107,6 +109,9 @@ export function resyncSimAfterHalfTime(state) {
       a.injuredOff = (p.injured || 0) > 0;
       // 角色以阵型槽为准，GK 槽永远是门将 AI
       a.role = slot.pos || p.pos || a.role;
+      a.detailedPosition = coverage.target;
+      a.positionRating = coverage.rating;
+      a.naturalPosition = coverage.natural;
       try {
         a.roleId = getSlotRole(club, i) || null;
       } catch {

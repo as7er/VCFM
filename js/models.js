@@ -20,6 +20,12 @@ import { applyClubBranding } from "./branding.js";
 import { CURRENT_SAVE_SCHEMA_VERSION } from "./save-schema.js";
 import { recordPlayerDevelopment } from "./player-pathway.js";
 import {
+  ensurePlayerPositionProfile,
+  positionCoverage,
+  positionFitForSlot,
+  positionGroup,
+} from "./player-positions.js";
+import {
   APPEARANCE_HAIR_COLORS as SHARED_APPEARANCE_HAIR_COLORS,
   APPEARANCE_HAIR_STYLE_IDS as SHARED_APPEARANCE_HAIR_STYLE_IDS,
   APPEARANCE_HAIR_STYLE_NAMES as SHARED_APPEARANCE_HAIR_STYLE_NAMES,
@@ -255,6 +261,7 @@ export function ensureFootballProfile(p) {
     p.footballProfileVersion = FOOTBALL_PROFILE_VERSION;
     changed = true;
   }
+  if (ensurePlayerPositionProfile(p)) changed = true;
   return changed;
 }
 
@@ -1797,6 +1804,29 @@ function xiSortScore(p, options = {}) {
   return score;
 }
 
+function lineupPlayerScore(player, slot, slots, options = {}) {
+  const base = xiSortScore(player, options);
+  const coverage = positionCoverage(player, slot, slots);
+  const groupFit = positionGroup(player?.pos) === positionGroup(slot?.pos) ? 1 : 0.55;
+  // 位置适配是现实选人因素，但不会盖过 OVR、体能和近况。
+  const fitMultiplier = 0.78 + Math.max(0, Math.min(20, coverage.rating)) / 20 * 0.3;
+  return base * groupFit * fitMultiplier;
+}
+
+function slotCandidates(club, slot, slots, used, eligibleIds, options = {}) {
+  const selectable = (player) =>
+    !used.has(player.id) &&
+    playerSelectable(player) &&
+    (!eligibleIds || eligibleIds.has(player.id));
+  const group = positionGroup(slot?.pos);
+  const inGroup = (club.players || []).filter((player) => selectable(player) && positionGroup(player.pos) === group);
+  const pool = slot?.pos === "GK"
+    ? inGroup.filter((player) => player.pos === "GK")
+    : inGroup.filter((player) => player.pos !== "GK");
+  const candidates = pool.length ? pool : (club.players || []).filter((player) => selectable(player) && (slot?.pos === "GK" ? player.pos === "GK" : player.pos !== "GK"));
+  return candidates.sort((a, b) => lineupPlayerScore(b, slot, slots, options) - lineupPlayerScore(a, slot, slots, options));
+}
+
 export function autoLineup(club, options = {}) {
   ensureTactics(club);
   const formation = FORMATIONS[club.tactics.formation] || FORMATIONS["4-3-3"];
@@ -1810,7 +1840,11 @@ export function autoLineup(club, options = {}) {
 
   // 先把可用的锁定球员安置到同位置槽；不得已才使用非门将空槽。
   for (const player of lockedPlayers) {
-    let slotIndex = formation.slots.findIndex((slot, index) => !lineup[index] && slot.pos === player.pos);
+    const eligibleSlots = formation.slots
+      .map((slot, index) => ({ slot, index }))
+      .filter(({ slot, index }) => !lineup[index] && positionGroup(slot.pos) === positionGroup(player.pos));
+    eligibleSlots.sort((a, b) => lineupPlayerScore(player, b.slot, formation.slots, options) - lineupPlayerScore(player, a.slot, formation.slots, options));
+    let slotIndex = eligibleSlots[0]?.index ?? -1;
     if (slotIndex < 0 && player.pos !== "GK") {
       slotIndex = formation.slots.findIndex((slot, index) => !lineup[index] && slot.pos !== "GK");
     }
@@ -1822,9 +1856,7 @@ export function autoLineup(club, options = {}) {
   for (let slotIndex = 0; slotIndex < formation.slots.length; slotIndex++) {
     if (lineup[slotIndex]) continue;
     const slot = formation.slots[slotIndex];
-    const candidates = club.players
-      .filter((p) => p.pos === slot.pos && !used.has(p.id) && playerSelectable(p) && (!eligibleIds || eligibleIds.has(p.id)))
-      .sort((a, b) => xiSortScore(b, options) - xiSortScore(a, options));
+    const candidates = slotCandidates(club, slot, formation.slots, used, eligibleIds, options);
     let pickP = candidates[0];
     if (!pickP) {
       pickP = club.players
@@ -1854,10 +1886,15 @@ export function assignPlayersToFormationSlots(xi, slots) {
   const used = new Set();
   const out = [];
   for (const slot of slots || []) {
-    let p =
-      pool.find((x) => !used.has(x.id) && x.pos === slot.pos) ||
-      (slot.pos === "GK" ? pool.find((x) => !used.has(x.id) && x.pos === "GK") : null) ||
-      pool.find((x) => !used.has(x.id));
+    const candidates = pool
+      .filter((x) => !used.has(x.id) && (slot.pos === "GK" ? x.pos === "GK" : x.pos !== "GK"))
+      .sort((a, b) => {
+        const ga = positionGroup(a.pos) === positionGroup(slot.pos) ? 1 : 0;
+        const gb = positionGroup(b.pos) === positionGroup(slot.pos) ? 1 : 0;
+        if (ga !== gb) return gb - ga;
+        return positionFitForSlot(b, slot, slots).rating - positionFitForSlot(a, slot, slots).rating;
+      });
+    const p = candidates[0] || pool.find((x) => !used.has(x.id));
     if (p) used.add(p.id);
     out.push(p || null);
   }
@@ -1888,9 +1925,14 @@ export function ensureMatchLineup(club, { forceAuto = false, day = null, importa
       continue;
     }
     const slot = formation.slots[i];
-    const candidates = club.players
-      .filter((x) => x.pos === slot.pos && !used.has(x.id) && playerSelectable(x) && (!(eligibleIds instanceof Set) || eligibleIds.has(x.id)))
-      .sort((a, b) => xiSortScore(b, { day, importance }) - xiSortScore(a, { day, importance }));
+    const candidates = slotCandidates(
+      club,
+      slot,
+      formation.slots,
+      used,
+      eligibleIds instanceof Set ? eligibleIds : null,
+      { day, importance }
+    );
     let pickP = candidates[0];
     if (!pickP) {
       pickP = club.players
@@ -1986,9 +2028,17 @@ export function setLineupSlot(club, slotIndex, playerId) {
   club.tactics.lineup = lineup.filter((id, i) => i < need);
   ensureLineupRoles(club);
   ensureLineupResponsibilities(club);
-  const slotPos = formation.slots[idx]?.pos;
-  const outOfPos = slotPos && player.pos && player.pos !== slotPos;
-  return { ok: true, outOfPos, slotPos, playerPos: player.pos };
+  const slot = formation.slots[idx];
+  const coverage = positionCoverage(player, slot, formation.slots);
+  const outOfPos = coverage.rating < 10;
+  return {
+    ok: true,
+    outOfPos,
+    slotPos: slot?.pos,
+    slotDetailedPosition: coverage.target,
+    positionRating: coverage.rating,
+    playerPos: player.pos,
+  };
 }
 
 export function teamStrength(club) {

@@ -35,8 +35,13 @@ import {
 } from "./match-presentation.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=202";
-import { clubCrestHtml } from "./club-crest.js?v=202";
+import {
+  positionSummary,
+  positionCoverage,
+  positionLabel as detailedPositionLabel,
+} from "./player-positions.js";
+import { nationFlagHtml } from "./flags.js?v=203";
+import { clubCrestHtml } from "./club-crest.js?v=203";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -286,7 +291,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=202";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=203";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -346,7 +351,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=202";
+} from "./avatar.js?v=203";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -434,7 +439,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=202").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=203").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -4204,6 +4209,11 @@ function renderSquadPlan(club) {
       <td>${escapeHtml((en ? row.reasonsEn : row.reasons).slice(0, 2).join("；"))}</td>
     </tr>`;
   }).join("");
+  const detailedNeedsText = (plan.detailedNeeds || []).slice(0, 4).map((need) =>
+    en
+      ? `${need.labelEn} (${need.readyCount} ready, best ${need.bestRating}/20)`
+      : `${need.label}（可用 ${need.readyCount} 人，最佳 ${need.bestRating}/20）`
+  ).join(" · ");
   const priorityHtml = plan.priorities.length
     ? plan.priorities.slice(0, 6).map((decision) => `
         <li>
@@ -4220,6 +4230,7 @@ function renderSquadPlan(club) {
         <p class="hint">${en
           ? `Formation ${plan.formation} · ${plan.seasonPlanLabelEn}. Transfers, contracts, promotions and loans read these same squad facts; no hidden match bonus is added.`
           : `阵型 ${plan.formation} · ${plan.seasonPlanLabel}。转会、合同、提拔与租借读取同一份阵容事实，不添加隐藏比赛加成。`}</p>
+        ${detailedNeedsText ? `<p class="hint">${escapeHtml(en ? `Detailed slot coverage: ${detailedNeedsText}` : `细分槽位覆盖：${detailedNeedsText}`)}</p>` : ""}
       </div>
       <span class="badge ${registration.risk ? "ATT" : "DEF"}">${registration.risk ? (en ? "Registration risk" : "报名风险") : (en ? "Registration stable" : "报名稳定")}</span>
     </div>
@@ -4284,6 +4295,7 @@ function renderSquad() {
       const ovr = p.ovr || playerOverall(p);
       const s = playerStats(p);
       const isGk = p.pos === "GK";
+      const detailedPosition = positionSummary(p, en ? "en" : "zh");
       // 本赛季：出场 / 进球·零封 / 助攻·失球
       const apps = s.apps || 0;
       const colG = isGk ? s.cleanSheets || 0 : s.goals || 0;
@@ -4340,7 +4352,7 @@ function renderSquad() {
         <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${num}</span></td>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)} <span>${playerLinkHtml(p.id, p.name)} ${statusBadges}</span></td>
         <td class="squad-detail">${nationLabel(p)}</td>
-        <td><span class="badge ${p.pos}">${en ? p.pos : POS_LABEL[p.pos]}</span></td>
+        <td title="${escapeHtml(detailedPosition)}"><span class="badge ${p.pos}">${en ? p.pos : POS_LABEL[p.pos]}</span><small class="muted squad-position-detail">${escapeHtml(detailedPosition)}</small></td>
         <td class="squad-detail">${p.age}</td>
         <td class="${ovrClass(ovr)}"><strong>${ovr}</strong></td>
         <td class="num-stat squad-detail" title="${escapeHtml(t("squad.appsTitle") || "本赛季出场")}">${apps}</td>
@@ -4433,6 +4445,7 @@ function showPlayerModal(playerId, context = {}) {
   const career = careerStats(player);
   const intl = player.intl || {};
   const isGk = player.pos === "GK";
+  const detailedPosition = positionSummary(player, en ? "en" : "zh");
 
   // 分赛季历史 + 当前未归档赛季
   const curAvgR = seasonAvgRating(player);
@@ -4508,6 +4521,7 @@ function showPlayerModal(playerId, context = {}) {
     <h2 style="margin:0 0 0.25rem">${escapeHtml(player.name)}${displayNumber != null ? ` <span class="muted">#${displayNumber}</span>` : ""}</h2>
     <p class="muted">
        <span class="badge ${player.pos}">${en ? player.pos : POS_LABEL[player.pos]}</span>
+       · ${en ? "Natural / compatible" : "主位 / 兼容位置"} ${escapeHtml(detailedPosition)}
        · ${nationLabel(player)}
        · ${en ? `Age ${player.age}` : `${player.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${isOther ? "" : ovrClass(player.ovr)}">${escapeHtml(ovrShow)}</strong>
        · ${en ? "Potential" : "潜力"} <strong>${escapeHtml(String(pot))}</strong>
@@ -5824,6 +5838,7 @@ function renderTactics() {
     .map((slot, i) => {
       const p = players[i];
       const competitionEligible = !p || nextEligibility.ids.has(p.id);
+      const coverage = p ? positionCoverage(p, slot, formation.slots) : null;
       const label = p ? playerDisplaySurname(p.name, p.nationality) : "?";
       const shirtNo = p && p.number != null ? p.number : null;
       const fallback = shirtNo != null ? shirtNo : p ? p.ovr : "-";
@@ -5842,7 +5857,7 @@ function renderTactics() {
       )}" aria-label="${escapeHtml(en ? "Role" : "角色")}">${roleOpts.join("")}</select>`;
       const isCore = p && p.id === coreId;
       const full = p
-        ? `${shirtNo != null ? `#${shirtNo} ` : ""}${p.name} · ${roleLabel(roleId, en ? "en" : "zh")}${isCore ? (en ? " · CORE" : " · 核心") : ""}${competitionEligible ? "" : (en ? " · NOT REGISTERED" : " · 未报名")}`
+        ? `${shirtNo != null ? `#${shirtNo} ` : ""}${p.name} · ${detailedPositionLabel(coverage?.target, en ? "en" : "zh")} ${coverage?.rating ?? 0}/20 · ${roleLabel(roleId, en ? "en" : "zh")}${isCore ? (en ? " · CORE" : " · 核心") : ""}${competitionEligible ? "" : (en ? " · NOT REGISTERED" : " · 未报名")}`
         : positionLabel(slot.pos);
       const badge =
         shirtNo != null
@@ -5857,7 +5872,7 @@ function renderTactics() {
             en ? "Set as core (talisman)" : "设为核心球员"
           )}" aria-pressed="${isCore ? "true" : "false"}">⭐</button>`
         : "";
-      const oop = p && p.pos !== slot.pos ? " out-of-pos" : "";
+      const oop = p && (coverage?.rating || 0) < 10 ? " out-of-pos" : "";
       const empty = !p ? " empty" : "";
       const coreCls = isCore ? " is-core" : "";
       const registrationCls = competitionEligible ? "" : " unavailable";
@@ -5867,6 +5882,7 @@ function renderTactics() {
         draggable="${p ? "true" : "false"}"
         data-slot="${i}"
         data-slot-pos="${escapeHtml(slot.pos)}"
+        data-slot-detailed-pos="${escapeHtml(coverage?.target || "")}"
         ${p ? `data-player-id="${escapeHtml(p.id)}"` : ""}>
         <div class="circle kit-dot" style="${style}">${av || fallback}${badge}${isCore ? '<span class="pitch-core-star">⭐</span>' : ""}</div>
         <div class="name">${nameHtml}</div>
@@ -5916,7 +5932,7 @@ function renderTactics() {
               ${av}
               <div class="tac-chip-meta">
                 <strong>${num} ${escapeHtml(playerDisplaySurname(p.name, p.nationality))}</strong>
-                <span><i class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</i> ${status}</span>
+                <span><i class="badge ${p.pos}">${escapeHtml(positionLabel(p.pos))}</i> <small class="muted">${escapeHtml(positionSummary(p, getLang() === "en" ? "en" : "zh"))}</small> ${status}</span>
               </div>
               <button type="button" class="btn small ghost tac-chip-info" data-player-link="${escapeHtml(p.id)}" title="${escapeHtml(getLang() === "en" ? "Profile" : "资料")}">ℹ</button>
             </div>`;

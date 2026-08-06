@@ -6,8 +6,14 @@
 import { FORMATIONS } from "./data.js";
 import { ensureClubSeasonPlan, clubPlanDef } from "./board.js";
 import { developmentStatus } from "./squad-registration.js";
+import {
+  positionCoverage,
+  positionGroup,
+  positionLabel,
+  slotPositionCode,
+} from "./player-positions.js";
 
-export const SQUAD_PLAN_VERSION = 1;
+export const SQUAD_PLAN_VERSION = 2;
 export const SQUAD_POSITIONS = ["GK", "DEF", "MID", "ATT"];
 
 const POSITION_LABELS = {
@@ -43,7 +49,69 @@ function formationSlots(club) {
   for (const slot of definition?.slots || []) {
     if (counts[slot.pos] != null) counts[slot.pos] += 1;
   }
-  return { formation, counts };
+  return { formation, counts, slots: definition?.slots || [] };
+}
+
+function bestDetailedFit(player, slots) {
+  const candidates = (slots || []).filter((slot) => positionGroup(slot?.pos) === positionGroup(player?.pos));
+  if (!candidates.length) return { target: player?.pos || "MID", rating: 0, natural: false };
+  return candidates
+    .map((slot) => positionCoverage(player, slot, slots))
+    .sort((a, b) => b.rating - a.rating)[0];
+}
+
+function slotCoveragePlan(players, slots) {
+  const list = slots || [];
+  // 同一名球员会同时适配多个同组槽位（中卫可以填两个中卫槽）。
+  // 缺口要看的是"这条战线有多少人可用"，因此把同组槽位的需求量一起算，
+  // 否则一名中卫会被四个后卫槽各数一遍，深度不足完全看不出来。
+  const groupDemand = {};
+  for (const slot of list) {
+    const group = positionGroup(slot?.pos);
+    groupDemand[group] = (groupDemand[group] || 0) + 1;
+  }
+  const groupSupply = {};
+  for (const player of players || []) {
+    const group = positionGroup(player?.pos);
+    groupSupply[group] = (groupSupply[group] || 0) + 1;
+  }
+
+  return list.map((slot, index) => {
+    const candidates = (players || [])
+      .filter((player) => positionGroup(player?.pos) === positionGroup(slot?.pos))
+      .map((player) => ({
+        player,
+        coverage: positionCoverage(player, slot, slots),
+      }))
+      .sort((a, b) => b.coverage.rating - a.coverage.rating || playerOvr(b.player) - playerOvr(a.player));
+    const target = slotPositionCode(slot, index, slots);
+    const group = positionGroup(slot?.pos);
+    const ready = candidates.filter((row) => row.coverage.rating >= 12);
+    // 一条战线至少要有首发加一名替补；不足即为真实缺口。
+    const demand = groupDemand[group] || 1;
+    const supply = groupSupply[group] || 0;
+    const depthShortfall = Math.max(0, demand + 1 - supply);
+    const fitShortfall = Math.max(0, 12 - (candidates[0]?.coverage.rating || 0));
+    return {
+      slotIndex: index,
+      group,
+      target,
+      label: positionLabel(target),
+      labelEn: positionLabel(target, "en"),
+      candidates: candidates.slice(0, 5).map((row) => ({
+        playerId: row.player.id,
+        playerName: row.player.name,
+        rating: row.coverage.rating,
+        natural: row.coverage.natural,
+      })),
+      readyCount: ready.length,
+      bestRating: candidates[0]?.coverage.rating || 0,
+      groupDemand: demand,
+      groupSupply: supply,
+      starterAverage: round(average(candidates.slice(0, 1), (row) => playerOvr(row.player))),
+      needScore: round(fitShortfall * 4 + depthShortfall * 8 + Math.max(0, 2 - ready.length) * 5),
+    };
+  });
 }
 
 function positionTarget(position, slots) {
@@ -293,8 +361,11 @@ function playerDecision(world, club, player, positionPlan, seasonPlan, decisionP
   const withinIdeal = rank <= positionPlan.ideal;
   const surplus = positionPlan.current > positionPlan.maximum;
   const replacementAge = REPLACEMENT_AGE[player.pos || "MID"];
+  const formation = FORMATIONS[club?.tactics?.formation] || FORMATIONS["4-3-3"];
+  const positionFit = bestDetailedFit(player, formation.slots || []);
   const weakForClub = playerOvr(player) < Math.max(6, positionPlan.starterAverage - 3);
   const protectedYouth = age <= 22 && growthRoom >= 2;
+  const poorSlotFit = positionFit.rating > 0 && positionFit.rating < 9;
   let action = "retain";
   let priority = 30;
   let reason = "保持阵容稳定";
@@ -315,13 +386,17 @@ function playerDecision(world, club, player, positionPlan, seasonPlan, decisionP
     priority = 58 + growthRoom * 3 + (status.clubTrained ? 5 : 0);
     reason = status.clubTrained ? "高潜且具本俱乐部培养价值，应保留培养" : "能力仍有明确成长空间，应进入轮换培养";
     reasonEn = status.clubTrained ? "High upside with club-trained value" : "Clear development room merits rotation minutes";
-  } else if (starter && age >= replacementAge) {
+  } else if (starter && (age >= replacementAge || poorSlotFit)) {
     action = "replace";
-    priority = 64 + Math.max(0, age - replacementAge) * 4;
-    reason = positionPlan.successorIds.length
+    priority = 64 + Math.max(0, age - replacementAge) * 4 + (poorSlotFit ? 7 : 0);
+    reason = poorSlotFit
+      ? `当前首发槽位适配度不足（${positionLabel(positionFit.target)} ${positionFit.rating}/20），需要更合适的接班人`
+      : positionPlan.successorIds.length
       ? "仍可使用，但已进入年龄替代期，年轻接班人应逐步接手"
       : "仍是当前主力，但需要提前寻找真实接班人";
-    reasonEn = positionPlan.successorIds.length
+    reasonEn = poorSlotFit
+      ? `Current slot fit is low (${positionLabel(positionFit.target, "en")} ${positionFit.rating}/20); a better successor is needed`
+      : positionPlan.successorIds.length
       ? "Still useful, but a younger successor should take over gradually"
       : "Still starts, but a genuine successor is needed";
   } else if (!starter && weakForClub && (surplus || rank > positionPlan.ideal) && peers.length > positionPlan.minimum) {
@@ -344,6 +419,9 @@ function playerDecision(world, club, player, positionPlan, seasonPlan, decisionP
     playerId: player.id,
     playerName: player.name,
     position: player.pos,
+    detailedPosition: positionFit.target,
+    positionRating: positionFit.rating,
+    naturalPosition: positionFit.natural,
     rank,
     action,
     priority: round(priority),
@@ -374,6 +452,8 @@ function planSignature(world, club, seasonPlan) {
       number(player.contractYears),
       number(player.wage),
       parentId || "",
+      player.positionProfile?.primary || "",
+      (player.positionProfile?.natural || []).join(","),
     ].join(":"));
   }
   playerFacts.sort();
@@ -394,9 +474,10 @@ export function generateClubSquadPlan(world, club) {
   if (!world || !club) return null;
   const seasonPlan = ensureClubSeasonPlan(club, world.clubs || [], world.season);
   const planDef = clubPlanDef(seasonPlan);
-  const { formation, counts } = formationSlots(club);
+  const { formation, counts, slots } = formationSlots(club);
   const { current, owned, loanedOut } = planPlayers(world, club);
   const registration = registrationFacts(world, club, owned);
+  const slotCoverage = slotCoveragePlan(current, slots);
   const positions = {};
   for (const position of SQUAD_POSITIONS) {
     positions[position] = buildPositionPlan(
@@ -417,7 +498,7 @@ export function generateClubSquadPlan(world, club) {
       world,
       club,
       player,
-      positions[player.pos] || positions.MID,
+    positions[player.pos] || positions.MID,
       seasonPlan,
       owned
     );
@@ -468,6 +549,10 @@ export function generateClubSquadPlan(world, club) {
     },
     registration,
     positions,
+    slotCoverage,
+    detailedNeeds: slotCoverage
+      .filter((slot) => slot.needScore >= 5)
+      .sort((a, b) => b.needScore - a.needScore || a.slotIndex - b.slotIndex),
     orderedNeeds: orderedNeeds.map((item) => item.position),
     playerDecisions: decisions,
     priorities: priorities.slice(0, 12),
@@ -566,6 +651,9 @@ export function evaluateRecruitmentCandidate(world, club, player, options = {}) 
   const status = developmentStatus(world, club, player);
   const homegrownValue = status.clubTrained ? 1.4 : status.associationTrained ? 0.8 : age <= 21 ? 0.35 : 0;
   const fit = styleFit(seasonPlan?.key, player);
+  const formation = FORMATIONS[club?.tactics?.formation] || FORMATIONS["4-3-3"];
+  const positionFit = bestDetailedFit(player, formation.slots || []);
+  const fitPenalty = positionFit.rating > 0 ? Math.max(0, 9 - positionFit.rating) * 1.2 : 0;
   const score = round(
     ability * def.ovrWeight +
     potential * (0.18 + def.youthWeight * 0.14) +
@@ -574,7 +662,8 @@ export function evaluateRecruitmentCandidate(world, club, player, options = {}) 
     position.needScore * 0.16 +
     homegrownValue +
     fit -
-    agePenalty * 1.4
+    agePenalty * 1.4 -
+    fitPenalty
   );
   const reasons = [position.reasons[0]];
   const reasonsEn = [position.reasonsEn[0]];
@@ -590,7 +679,19 @@ export function evaluateRecruitmentCandidate(world, club, player, options = {}) 
     reasons.push("有助于报名与本土培养结构");
     reasonsEn.push("supports registration and homegrown structure");
   }
-  return { score, qualityGain: round(qualityGain), styleFit: fit, reasons, reasonsEn };
+  if (positionFit.rating > 0 && positionFit.rating < 10) {
+    reasons.push(`细分位置适配度 ${positionLabel(positionFit.target)} ${positionFit.rating}/20`);
+    reasonsEn.push(`detailed-position fit ${positionLabel(positionFit.target, "en")} ${positionFit.rating}/20`);
+  }
+  return {
+    score,
+    qualityGain: round(qualityGain),
+    styleFit: fit,
+    positionRating: positionFit.rating,
+    detailedPosition: positionFit.target,
+    reasons,
+    reasonsEn,
+  };
 }
 
 export function evaluateYouthCandidate(world, club, player, options = {}) {

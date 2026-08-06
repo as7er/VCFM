@@ -27,6 +27,7 @@ import {
   getCaptainId,
   getSetPieceTakerId,
 } from "./../models.js";
+import { positionCoverage } from "../player-positions.js";
 import { estimateShotXg } from "./../match-analysis.js";
 import {
   PENALTY_RUN_SEC,
@@ -216,6 +217,7 @@ export class SimEngine {
       if (p) ensureFootballProfile(p);
       const base = slotToPitch(slot, isHome);
       const a = p?.attrs || {};
+      const coverage = p ? positionCoverage(p, slot, slots) : { target: slot.pos || "MID", rating: 0, natural: false };
       // 战术角色以阵型槽为准（槽是 GK 就必须按门将 AI 站门）
       const role = slot.pos || p?.pos || "MID";
       // 战术板角色 id（边路爆破 / 内切前锋 等）
@@ -233,6 +235,9 @@ export class SimEngine {
         isHome,
         role, // GK | DEF | MID | ATT
         roleId: roleId || null,
+        detailedPosition: coverage.target,
+        positionRating: coverage.rating,
+        naturalPosition: coverage.natural,
         num: p?.number ?? i + 1,
         // —— 运动状态 ——
         x: base.x,
@@ -322,6 +327,8 @@ export class SimEngine {
   /** 边后卫？宽位 DEF（用阵型 slotX，主客对称） */
   _isFullback(a) {
     const x = a.slotX != null ? a.slotX : a.baseX;
+    if (a.detailedPosition === "LB" || a.detailedPosition === "RB") return true;
+    if (a.detailedPosition === "CB") return false;
     return a.role === "DEF" && (x < 30 || x > 70);
   }
 
@@ -334,6 +341,8 @@ export class SimEngine {
     if (!a || a.role === "GK" || a.role === "DEF") return false;
     const rid = a.roleId;
     if (rid === "winger" || rid === "st_inside") return true;
+    if (["LW", "RW", "LM", "RM"].includes(a.detailedPosition)) return true;
+    if (["AM", "CM", "DM"].includes(a.detailedPosition)) return false;
     const x = a.slotX != null ? a.slotX : a.baseX;
     // 宽位 ATT（4-3-3 边锋等）
     if (a.role === "ATT" && (x < 34 || x > 66)) return true;
@@ -4289,6 +4298,8 @@ export class SimEngine {
         id: a.id,
         team: a.team,
         role: a.role,
+        detailedPosition: a.detailedPosition,
+        positionRating: a.positionRating,
         num: a.num,
         x: a.x,
         y: a.y,
