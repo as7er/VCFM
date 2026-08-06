@@ -10,7 +10,8 @@
 //
 // —— 阶段进度 ——
 // P0–P5：球物理、持球/无球决策、球队协防、裁判规则、directResult 正式接入
-// P5：match.js 经 sim/adapt.js 接入用户场；AI 后台仍用概率引擎
+// P5：match.js 经 sim/adapt.js 接入用户场
+// v201：AI 后台通过无画面性能档运行同一空间因果
 
 import { FORMATIONS } from "./../data.js";
 import {
@@ -132,6 +133,9 @@ export class SimEngine {
     this.opts = opts;
     this.random = typeof opts.random === "function" ? opts.random : Math.random;
     this.matchModifiers = opts.modifiers || null;
+    this.simulationProfile = opts.simulationProfile || "standard";
+    this.timeStep = clamp(Number(opts.timeStep) || SIM.DT, SIM.DT, 0.5);
+    this.separationPasses = clamp(Math.round(Number(opts.separationPasses) || 8), 1, 8);
     this.t = 0; // 已模拟时间（秒）
     this.agents = [];
     this.ball = null;
@@ -500,7 +504,7 @@ export class SimEngine {
     for (const a of this.agents) this._integrate(a, dt);
     // 2b) 近距离约束求解，避免禁区争抢时球员互相穿透或叠成一团。
     // 阵型分散的帧首轮即退出，只有真正的禁区混战才用满迭代预算。
-    this._separateAgents(8);
+    this._separateAgents(this.separationPasses);
     // 3) 球物理
     this._stepBall(dt);
     // 4) 接管/控球判定
@@ -1015,6 +1019,22 @@ export class SimEngine {
           this._pass(a, passTo);
           return;
         }
+      }
+      // 禁区边缘若连续数秒既没有推进也没有形成出球线路，现实中的持球者会
+      // 回做或撤出人堆重新组织，而不是保持同一盘带目标直到看门狗强制解围。
+      if (this.ball.owner === a.id && (this._stallT || 0) > 8) {
+        const release = this._bestCutback(a) || passTo || this._bestCross(a);
+        if (release) {
+          this._pass(a, release);
+          return;
+        }
+        a.intent = {
+          type: "dribble",
+          tx: clamp(a.x + (goalX - a.x) * 0.3, 8, 92),
+          ty: clamp(a.y - dir * 10, 5, 95),
+        };
+        a.fsm = "carry";
+        return;
       }
       const nearAttackingByline = a.team === "home" ? a.y < 5.5 : a.y > 94.5;
       const trappedAtByline = nearAttackingByline && Math.abs(a.x - goalX) > 8;
@@ -3015,7 +3035,10 @@ export class SimEngine {
       this._stallY = b.y;
       this._stallT = 0;
     }
-    if (this._stallT < 20) return;
+    // 粗粒度无画面步长在低速护球时更容易连续落在同一 3m 采样窗内；
+    // 给数值积分留出最多 4 秒容差，正常死锁仍会被看门狗清除。
+    const stallLimit = 20 + clamp((this.timeStep - SIM.DT) * 40, 0, 4);
+    if (this._stallT < stallLimit) return;
     this._stallT = 0;
     this._stallKey = null;
     const o = b.owner ? this.agentById(b.owner) : null;
@@ -3102,6 +3125,14 @@ export class SimEngine {
       0.34
     );
     pFoul *= this._teamModifier(defender.team, "foul");
+    // 较大的无画面积分步长会让一次接触跨越更宽的空间区间；按采样宽度
+    // 校正可吹罚接触，避免仅因数值分辨率下降而凭空增加犯规与点球。
+    const contactSamplingScale = clamp(
+      0.5 + 0.5 * (SIM.DT / (this.timeStep || SIM.DT)),
+      0.65,
+      1
+    );
+    pFoul *= contactSamplingScale;
     // 后卫在禁区内会收脚，但不应把点球压低两个数量级。
     if (inBox) pFoul *= 0.16;
     if (this.random() >= pFoul) return false;

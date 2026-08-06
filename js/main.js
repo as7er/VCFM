@@ -35,8 +35,8 @@ import {
 } from "./match-presentation.js";
 import { t, initPrefs, getLang } from "./i18n.js";
 import { ensurePlayerInjury, injuryLabel } from "./injuries.js";
-import { nationFlagHtml } from "./flags.js?v=200";
-import { clubCrestHtml } from "./club-crest.js?v=200";
+import { nationFlagHtml } from "./flags.js?v=202";
+import { clubCrestHtml } from "./club-crest.js?v=202";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -131,8 +131,9 @@ import {
 } from "./models.js";
 import {
   advanceDay,
-  advanceToNextMatchDay,
-  advanceToSeasonEnd,
+  advanceDayAsync,
+  advanceToNextMatchDayAsync,
+  advanceToSeasonEndAsync,
   simulateMatch,
   createMatchSession,
   playFirstHalf,
@@ -285,6 +286,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=202";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -344,7 +346,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=200";
+} from "./avatar.js?v=202";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -432,7 +434,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=200").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=202").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -4155,6 +4157,100 @@ function renderSquadRegistration() {
   });
 }
 
+function renderSquadPlan(club) {
+  const root = $("#squad-plan-summary");
+  if (!root) return;
+  const en = getLang() === "en";
+  const plan = ensureClubSquadPlan(world, club);
+  if (!plan) {
+    root.innerHTML = `<p class="muted">${en ? "Squad planning is unavailable." : "暂无阵容规划。"}</p>`;
+    return;
+  }
+  const actionLabels = {
+    renew: en ? "Renew" : "续约",
+    loan: en ? "Loan" : "外租",
+    develop: en ? "Develop" : "培养",
+    replace: en ? "Successor" : "接班",
+    sell: en ? "Sell" : "出售",
+    release: en ? "Release" : "释放",
+  };
+  const actionTone = {
+    renew: "DEF",
+    loan: "MID",
+    develop: "GK",
+    replace: "ATT",
+    sell: "ATT",
+    release: "ATT",
+  };
+  const registration = plan.registration;
+  const registrationText = registration.risk
+    ? (en
+        ? `${registration.clubTrained}/4 club-trained · ${registration.associationTrained}/8 association-trained · ${registration.nonAssociation} non-homegrown`
+        : `本俱乐部培养 ${registration.clubTrained}/4 · 本足协培养 ${registration.associationTrained}/8 · 非本土培养 ${registration.nonAssociation}`)
+    : (en
+        ? `${registration.clubTrained} club-trained · ${registration.associationTrained} association-trained`
+        : `本俱乐部培养 ${registration.clubTrained} · 本足协培养 ${registration.associationTrained}`);
+  const positionRows = plan.orderedNeeds.map((position) => {
+    const row = plan.positions[position];
+    const quality = row.peerAverage > 0
+      ? `${row.starterAverage.toFixed(1)} / ${row.peerAverage.toFixed(1)}`
+      : row.starterAverage.toFixed(1);
+    return `<tr>
+      <td><span class="badge ${position}">${escapeHtml(en ? position : row.label)}</span></td>
+      <td>${row.slots}</td>
+      <td><strong>${row.current}</strong> / ${row.ideal}</td>
+      <td>${row.securedNext} / ${row.securedTwoYears}</td>
+      <td>${quality}</td>
+      <td>${escapeHtml((en ? row.reasonsEn : row.reasons).slice(0, 2).join("；"))}</td>
+    </tr>`;
+  }).join("");
+  const priorityHtml = plan.priorities.length
+    ? plan.priorities.slice(0, 6).map((decision) => `
+        <li>
+          <span class="badge ${actionTone[decision.action] || "MID"}">${escapeHtml(actionLabels[decision.action] || decision.action)}</span>
+          <strong>${playerLinkHtml(decision.playerId, decision.playerName)}</strong>
+          <span class="muted">${escapeHtml(en ? decision.reasonEn : decision.reason)}</span>
+        </li>`).join("")
+    : `<li class="muted">${en ? "No urgent personnel decisions." : "暂无紧急人员决策。"}</li>`;
+
+  root.innerHTML = `
+    <div class="row-between squad-plan-heading">
+      <div>
+        <h2>${en ? "Multi-year squad plan" : "多年阵容规划"}</h2>
+        <p class="hint">${en
+          ? `Formation ${plan.formation} · ${plan.seasonPlanLabelEn}. Transfers, contracts, promotions and loans read these same squad facts; no hidden match bonus is added.`
+          : `阵型 ${plan.formation} · ${plan.seasonPlanLabel}。转会、合同、提拔与租借读取同一份阵容事实，不添加隐藏比赛加成。`}</p>
+      </div>
+      <span class="badge ${registration.risk ? "ATT" : "DEF"}">${registration.risk ? (en ? "Registration risk" : "报名风险") : (en ? "Registration stable" : "报名稳定")}</span>
+    </div>
+    <div class="squad-plan-metrics">
+      <div><span>${en ? "Current / ideal" : "当前 / 理想人数"}</span><strong>${plan.squad.current} / ${plan.squad.ideal}</strong></div>
+      <div><span>${en ? "Contracted next season" : "已签约下季"}</span><strong>${plan.squad.securedNext}</strong></div>
+      <div><span>${en ? "Contracted in two years" : "已签约两年后"}</span><strong>${plan.squad.securedTwoYears}</strong></div>
+      <div><span>${en ? "Average age" : "平均年龄"}</span><strong>${plan.squad.averageAge.toFixed(1)}</strong></div>
+    </div>
+    <p class="squad-plan-registration ${registration.risk ? "risk" : ""}">${escapeHtml(registrationText)}</p>
+    <div class="squad-plan-grid">
+      <div class="table-wrap">
+        <table class="squad-plan-table">
+          <thead><tr>
+            <th>${en ? "Unit" : "位置"}</th>
+            <th>${en ? "XI" : "首发位"}</th>
+            <th>${en ? "Now / ideal" : "当前 / 理想"}</th>
+            <th>${en ? "Next / +2y" : "下季 / 两年后"}</th>
+            <th>${en ? "Quality / division" : "主力 / 同级"}</th>
+            <th>${en ? "Evidence" : "依据"}</th>
+          </tr></thead>
+          <tbody>${positionRows}</tbody>
+        </table>
+      </div>
+      <div class="squad-plan-priorities">
+        <h3>${en ? "Personnel priorities" : "人员优先事项"}</h3>
+        <ul>${priorityHtml}</ul>
+      </div>
+    </div>`;
+}
+
 function renderSquad() {
   const club = getUserClub(world);
   const en = getLang() === "en";
@@ -4268,6 +4364,7 @@ function renderSquad() {
   tbody.querySelectorAll("button[data-pid]").forEach((btn) => {
     btn.onclick = () => showPlayerModal(btn.dataset.pid);
   });
+  renderSquadPlan(club);
   renderSquadRegistration();
 }
 
@@ -7733,7 +7830,36 @@ function showAdvanceSummary(events, days) {
   return true;
 }
 
-function onAdvance() {
+let calendarAdvanceBusy = false;
+
+function setCalendarAdvanceBusy(busy) {
+  calendarAdvanceBusy = !!busy;
+  for (const id of ["#btn-advance", "#btn-advance-matchday", "#btn-advance-season-end"]) {
+    const button = $(id);
+    if (button) button.disabled = calendarAdvanceBusy;
+  }
+}
+
+async function runCalendarAdvance(task) {
+  if (calendarAdvanceBusy) return null;
+  setCalendarAdvanceBusy(true);
+  toast(
+    getLang() === "en"
+      ? "Running headless spatial matches…"
+      : "正在后台运行无画面空间比赛…"
+  );
+  try {
+    return await task();
+  } catch (error) {
+    console.error(error);
+    toast(getLang() === "en" ? "Calendar advance failed" : "日历推进失败");
+    return null;
+  } finally {
+    setCalendarAdvanceBusy(false);
+  }
+}
+
+async function onAdvance() {
   if (world.sacked) {
     // 待业：允许推进日程刷工作邀请
     try {
@@ -7784,7 +7910,8 @@ function onAdvance() {
     }
   }
   world._inboxSkipGate = false;
-  const res = advanceDay(world);
+  const res = await runCalendarAdvance(() => advanceDayAsync(world));
+  if (!res) return;
   if (handleSacked(res)) return;
   const { userMatches } = res;
   if (userMatches && userMatches.length) {
@@ -7827,7 +7954,7 @@ function onAdvance() {
   refreshAll();
 }
 
-function onAdvanceToMatchday() {
+async function onAdvanceToMatchday() {
   if (world.sacked) {
     handleSacked({ sacked: true, msg: world.sackedReason || "你已被解雇" });
     return;
@@ -7836,7 +7963,8 @@ function onAdvanceToMatchday() {
     toast(t("toast.seasonOver"));
     return;
   }
-  const res = advanceToNextMatchDay(world);
+  const res = await runCalendarAdvance(() => advanceToNextMatchDayAsync(world));
+  if (!res) return;
   if (world.sacked || res.sacked) {
     handleSacked(res.sackedResult || { sacked: true, msg: world.sackedReason });
     return;
@@ -7862,7 +7990,7 @@ function onAdvanceToMatchday() {
 }
 
 /** 推进到赛季末：遇我方比赛停下（无「连推 N 天」） */
-function onAdvanceToSeasonEnd() {
+async function onAdvanceToSeasonEnd() {
   if (world.sacked) {
     handleSacked({ sacked: true, msg: world.sackedReason || "你已被解雇" });
     return;
@@ -7880,7 +8008,10 @@ function onAdvanceToSeasonEnd() {
   ) {
     return;
   }
-  const res = advanceToSeasonEnd(world, { stopOnUserMatch: true });
+  const res = await runCalendarAdvance(() =>
+    advanceToSeasonEndAsync(world, { stopOnUserMatch: true })
+  );
+  if (!res) return;
   if (world.sacked || res.sacked) {
     handleSacked(res.sackedResult || { sacked: true, msg: world.sackedReason });
     return;

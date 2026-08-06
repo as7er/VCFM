@@ -4,6 +4,11 @@ import { estimateWage, estimateValue, formatMoney, assignSquadNumbers, autoLineu
 import { assertTransferOpen } from "./transfers.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { clubCashAvailability } from "./cash-reservations.js";
+import {
+  ensureClubSquadPlan,
+  invalidateClubSquadPlan,
+  squadPlayerPlan,
+} from "./squad-planning.js";
 
 function cashFailure(world, club, amount, label, options = {}) {
   const cash = clubCashAvailability(world, club, amount, options);
@@ -167,6 +172,7 @@ export function processContractsEndOfSeason(world) {
   const leftUser = [];
 
   for (const club of world.clubs) {
+    const squadPlan = club.id === userId ? null : ensureClubSquadPlan(world, club);
     const kept = [];
     for (const p of club.players) {
       ensureContract(p);
@@ -187,12 +193,13 @@ export function processContractsEndOfSeason(world) {
         userExpired.push(p);
         void offer;
       } else {
-        // AI：高能力续约，低能力释放（租借中的先保留，由归还后再处理）
+        // AI：读取多年阵容计划；租借中的合同仍由归还后的母队结构处理。
         if (p.loan) {
           kept.push(p);
           continue;
         }
-        if (p.ovr >= 11 || club.players.length <= 16) {
+        const decision = squadPlayerPlan(squadPlan, p.id);
+        if (decision?.action === "renew") {
           const o = renewOffer(p);
           if (club.money >= o.fee) {
             recordFinanceEntry(club, -o.fee, { category: "contract", source: "contract-renewal", season: world.season, day: world.day });
@@ -212,6 +219,7 @@ export function processContractsEndOfSeason(world) {
       }
     }
     club.players = kept;
+    invalidateClubSquadPlan(club);
   }
 
   // 青训合同也 -1，到期自动 +1 年短约（仍在学院）

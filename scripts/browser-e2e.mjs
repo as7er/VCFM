@@ -83,6 +83,15 @@ try {
   }
   await assertCrestLoaded(page.locator("#club-name .club-crest"), "topbar crest");
   await assertNoHorizontalOverflow(page, "desktop dashboard");
+  const dateBeforeWorkerAdvance = await page.locator("#date-label").innerText();
+  await page.locator("#btn-advance").click();
+  await page.waitForFunction(
+    (before) => document.querySelector("#date-label")?.textContent !== before,
+    dateBeforeWorkerAdvance,
+    { timeout: 90_000 }
+  );
+  assert.notEqual(await page.locator("#date-label").innerText(), dateBeforeWorkerAdvance);
+  assert.equal(await page.locator("#btn-advance").isEnabled(), true);
 
   for (const tab of ["finance", "squad", "training", "tactics", "fixtures", "career"]) {
     await openTab(page, tab);
@@ -93,6 +102,11 @@ try {
       assert.equal(await page.locator("#finance-sponsorship .sponsor-offer").count(), 3);
       assert.ok((await page.locator("#finance-debt").innerText()).trim().length > 0);
       assert.ok((await page.locator("#finance-budget-projection").innerText()).trim().length > 0);
+    }
+    if (tab === "squad") {
+      await page.waitForSelector("#squad-plan-summary .squad-plan-table");
+      assert.equal(await page.locator("#squad-plan-summary .squad-plan-table tbody tr").count(), 4);
+      assert.match(await page.locator("#squad-plan-summary").innerText(), /多年阵容规划|Multi-year squad plan/);
     }
   }
 
@@ -127,6 +141,8 @@ try {
   await assertNoHorizontalOverflow(page, "mobile scouting mission");
   await openTab(page, "finance");
   await assertNoHorizontalOverflow(page, "mobile finance");
+  await openTab(page, "squad");
+  await assertNoHorizontalOverflow(page, "mobile squad planning");
   await openTab(page, "dashboard");
   await assertNoHorizontalOverflow(page, "mobile dashboard");
   await openTab(page, "clubs");
@@ -139,7 +155,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

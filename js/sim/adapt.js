@@ -1,10 +1,8 @@
 /**
  * SimEngine → match.js 适配层（P5）
  *
- * 用户场次：空间模拟跑完全时段 → directResult 读取真实事件 →
+ * 所有显式请求空间引擎的场次：空间模拟跑完全时段 → directResult 读取真实事件 →
  * 翻译成现有 {minute,type,text,playerId,...} 事件，继续走报告/评分/积分。
- *
- * AI 后台场次仍用 match.js 概率引擎（性能）。
  */
 import { SimEngine, SIM } from "./engine.js";
 import { simMinuteOf } from "../match-presentation.js";
@@ -20,14 +18,30 @@ import {
 import { FORMATIONS } from "../data.js";
 
 /**
- * 用户参与的比赛走 v2 空间模拟；AI 后台场（userSide=null）走概率引擎（性能）。
- * P6 起 v2 为永久默认，不再设总开关。
+ * 比赛请求显式选择空间引擎；旧调用未声明时，用户参与比赛仍默认空间模拟。
+ * 表现方式（直播、快速、纯战报、后台）不能改变这里的判断。
  * @param {object} state createMatchSession 返回值
  * @returns {boolean}
  */
 export function shouldUseSim(state) {
+  if (state?.engineMode === "spatial") return true;
+  if (state?.engineMode === "probability") return false;
   return !!state?.userSide;
 }
+
+export const SIMULATION_PROFILES = Object.freeze({
+  standard: Object.freeze({
+    key: "standard",
+    timeStep: SIM.DT,
+    separationPasses: 8,
+  }),
+  background: Object.freeze({
+    key: "background",
+    // 无画面比赛仍逐步运行同一空间决策、球物理和裁判规则；仅降低时间分辨率。
+    timeStep: 0.2,
+    separationPasses: 4,
+  }),
+});
 
 /**
  * 创建 / 复用绑定在 state 上的引擎
@@ -39,12 +53,24 @@ export function ensureSimEngine(state) {
     state.simEng.matchModifiers = state.simModifiers || state.simEng.matchModifiers || null;
     return state.simEng;
   }
+  const profile =
+    SIMULATION_PROFILES[state.simulationProfile] || SIMULATION_PROFILES.standard;
+  state.simulationProfile = profile.key;
   state.simEng = new SimEngine(state.home, state.away, {
     random: state.random,
     modifiers: state.simModifiers || null,
+    simulationProfile: profile.key,
+    timeStep: profile.timeStep,
+    separationPasses: profile.separationPasses,
   });
   state.simEng.matchModifiers = state.simModifiers || null;
-  state.simEngineMeta = { version: 2, halves: [] };
+  state.simEngineMeta = {
+    version: 2,
+    profile: profile.key,
+    timeStep: profile.timeStep,
+    separationPasses: profile.separationPasses,
+    halves: [],
+  };
   return state.simEng;
 }
 
@@ -204,9 +230,13 @@ export function runSimPeriodRaw(eng, fromMin, toMin, opts = {}) {
   const tEnd = toMin * 60;
   const record = !!opts.record;
   const adaptive = record && opts.adaptive !== false;
+  const stepDt = Math.max(
+    SIM.DT,
+    Math.min(0.5, Number(opts.timeStep ?? eng?.timeStep ?? SIM.DT) || SIM.DT)
+  );
   const sampleEvery = Math.max(1, opts.sampleEvery ?? (adaptive ? 1 : 5));
   const frames = record ? [] : null;
-  const ringMax = Math.ceil(LIVE_RING_SEC / SIM.DT) + 2;
+  const ringMax = Math.ceil(LIVE_RING_SEC / stepDt) + 2;
   const ring = record && adaptive ? [] : null;
   // 开球段强制密采（与 buildHighlightWindows kickoff 窗一致）
   let denseUntil = record && adaptive ? Math.min(tEnd, tStart + LIVE_DENSE.kickoff.trail) : -Infinity;
@@ -216,10 +246,10 @@ export function runSimPeriodRaw(eng, fromMin, toMin, opts = {}) {
     home: eng.stats?.home?.poss || 0,
     away: eng.stats?.away?.poss || 0,
   };
-  const guardMax = Math.ceil((tEnd - eng.t) / SIM.DT + 50);
+  const guardMax = Math.ceil((tEnd - eng.t) / stepDt + 50);
   let guard = 0;
   while (eng.t + 1e-9 < tEnd && guard < guardMax) {
-    eng.step();
+    eng.step(Math.min(stepDt, tEnd - eng.t));
     guard++;
     if (!frames) continue;
 

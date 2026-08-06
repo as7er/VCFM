@@ -90,6 +90,7 @@ import {
   previewLoanOut,
   previewLoanIn,
   isOnLoan,
+  arrangeAiLoan,
 } from "./loans.js";
 import {
   ensureCompetitions,
@@ -106,7 +107,6 @@ import {
   ensureBoardObjective,
   ensureClubSeasonPlan,
   ensureWorldSeasonPlans,
-  clubPlanDef,
   evaluateBoardProgress,
   checkBoardMidSeason,
   settleBoardObjective,
@@ -137,12 +137,17 @@ import {
   assertTransferOpen,
 } from "./transfers.js";
 import {
-  analyzeSquadBalance,
-  canSellPosition,
-  shouldBuyPosition,
-  selectPlayerToSell as selectPlayerToSellSmart,
-  selectPositionToBuy,
-} from "./squad-balance.js";
+  ensureClubSquadPlan,
+  ensureWorldSquadPlans,
+  evaluateRecruitmentCandidate,
+  evaluateYouthCandidate,
+  invalidateClubSquadPlan,
+  invalidateDivisionSquadPlans,
+  selectPlannedLoanCandidate,
+  selectPlannedRecruitmentPosition,
+  selectPlannedSaleCandidate,
+  squadPositionPlan,
+} from "./squad-planning.js";
 import {
   ensureFacilities,
   startFacilityUpgrade,
@@ -334,6 +339,7 @@ import {
   developmentAttrLabel,
   PLAYING_TIME_ROLES,
 } from "./player-pathway.js";
+import { runCalendarWorker } from "./sim/calendar-worker-client.js";
 
 export {
   simulateMatch,
@@ -576,9 +582,13 @@ function processYouthDay(world) {
 
 function aiManageYouth(world, club) {
   const ya = ensureYouthAcademy(club);
-  // 提拔高潜力
-  const promote = ya.players.filter((p) => p.potential >= 15 || p.ovr >= 12);
-  for (const p of promote.slice(0, 1)) {
+  const squadPlan = ensureClubSquadPlan(world, club);
+  // 按一线队未来位置缺口、成熟度和培养价值选择提拔对象。
+  const promote = ya.players
+    .map((player) => ({ player, review: evaluateYouthCandidate(world, club, player, { plan: squadPlan }) }))
+    .filter((item) => item.review.promote)
+    .sort((a, b) => b.review.score - a.review.score);
+  for (const { player: p } of promote.slice(0, 1)) {
     if (club.players.length >= 28) break;
     promoteYouth(world, club.id, p.id, { silent: true });
   }
@@ -610,6 +620,7 @@ export function promoteYouth(world, clubId, playerId, { silent = false } = {}) {
   club.players.push(player);
   assignSquadNumbers(club);
   autoLineup(club);
+  invalidateClubSquadPlan(club);
 
   if (!silent && clubId === world.userClubId) {
     recordPlayerDevelopment(player, {
@@ -653,7 +664,7 @@ export function releaseYouth(world, clubId, playerId) {
 // 青训升级：走 facilities 工期系统（re-export 见文件底部 import）
 
 /** 推进一天：训练恢复、AI 比赛、工资 */
-export function advanceDay(world) {
+export function advanceDay(world, options = {}) {
   // 待业：日历仍推进（生成工作邀请），但不能经营旧队比赛
   if (world.sacked) {
     world.day += 1;
@@ -743,7 +754,10 @@ export function advanceDay(world) {
     if (isUser) {
       userMatches.push(f);
     } else {
-      const result = simulateMatch(world, f);
+      const result = simulateMatch(world, f, {
+        engineMode: options.aiEngineMode,
+        simulationProfile: options.aiSimulationProfile,
+      });
       // 记录关键AI比赛（德比、争冠、保级）
       if (f.derby || isTopTableClash(world, f) || isRelegationClash(world, f)) {
         aiMatchResults.push({
@@ -1043,11 +1057,16 @@ export function finishSeason(world) {
       });
       // 青训一般不退役；满 20 岁仍在青训则强制释放或提拔潜力高的
       if (p.age >= 20) {
-        if (p.potential >= 14 && club.players.length < 23) {
+        const plannedPromotion = club.id !== world.userClubId
+          ? evaluateYouthCandidate(world, club, p).promote
+          : p.potential >= 14;
+        const squadLimit = club.id === world.userClubId ? 23 : 25;
+        if (plannedPromotion && club.players.length < squadLimit) {
           p.fromYouth = true;
           p.wage = estimateWage(p);
           ensurePlayerHistory(p);
           club.players.push(p);
+          invalidateClubSquadPlan(club);
           if (club.id === world.userClubId) {
             recordPlayerDevelopment(p, {
               season: world.season,
@@ -1187,6 +1206,7 @@ export function startNextSeason(world) {
   ensureWorldSponsorships(world);
   const leagueTransitionPayments = processLeagueTransitionPayments(world);
   ensureWorldSeasonPlans(world);
+  ensureWorldSquadPlans(world, { force: true });
 
   world.fixtures = generateAllDivisionFixtures(world.clubs);
   const qualifiers = world._nextContinentalQualifiers || null;
@@ -1451,7 +1471,7 @@ export function nextUserMatchDay(world) {
  * 若当天已有可踢比赛，不推进，返回 stopped 提示。
  * 返回值包含关键事件摘要，用于界面展示。
  */
-export function advanceToNextMatchDay(world, maxDays = 60) {
+export function advanceToNextMatchDay(world, maxDays = 60, options = {}) {
   if (world.sacked) {
     return { ok: false, msg: "你已被解雇", days: 0, userMatches: [], sacked: true, events: [] };
   }
@@ -1487,7 +1507,7 @@ export function advanceToNextMatchDay(world, maxDays = 60) {
         events: allEvents,
       };
     }
-    last = advanceDay(world);
+    last = advanceDay(world, options);
     if (last.events && last.events.length > 0) {
       allEvents.push(...last.events);
     }
@@ -1537,7 +1557,15 @@ export function advanceToNextMatchDay(world, maxDays = 60) {
  * 推进到赛季末：自动连推，遇到我方比赛日则停下。
  * stopOnUserMatch=true（默认）适合通勤。
  */
-export function advanceToSeasonEnd(world, { maxDays = 400, stopOnUserMatch = true } = {}) {
+export function advanceToSeasonEnd(
+  world,
+  {
+    maxDays = 400,
+    stopOnUserMatch = true,
+    aiEngineMode,
+    aiSimulationProfile,
+  } = {}
+) {
   if (world.sacked) {
     return { ok: false, msg: "你已被解雇", days: 0, userMatches: [], sacked: true };
   }
@@ -1559,7 +1587,7 @@ export function advanceToSeasonEnd(world, { maxDays = 400, stopOnUserMatch = tru
   let last = { userMatches: [] };
   const allEvents = []; // 累积事件供界面摘要展示
   while (days < maxDays && !world.seasonOver && !world.sacked) {
-    last = advanceDay(world);
+    last = advanceDay(world, { aiEngineMode, aiSimulationProfile });
     if (last.events && last.events.length > 0) {
       allEvents.push(...last.events);
     }
@@ -1608,9 +1636,51 @@ export function advanceToSeasonEnd(world, { maxDays = 400, stopOnUserMatch = tru
   };
 }
 
+const BACKGROUND_SPATIAL_OPTIONS = Object.freeze({
+  aiEngineMode: "spatial",
+  aiSimulationProfile: "background",
+});
 
-function posCount(players, pos) {
-  return players.filter((p) => p.pos === pos).length;
+async function runCalendarInBackground(world, action, payload, fallback) {
+  try {
+    return await runCalendarWorker(world, action, payload);
+  } catch (error) {
+    // 无 Worker 的旧浏览器仍保持相同空间因果，只是会同步占用主线程。
+    console.warn("calendar worker unavailable; using synchronous spatial fallback", error);
+    return fallback();
+  }
+}
+
+/** 浏览器主路径：在 Worker 中用无画面空间模拟推进一天。 */
+export function advanceDayAsync(world) {
+  return runCalendarInBackground(world, "day", {}, () =>
+    advanceDay(world, BACKGROUND_SPATIAL_OPTIONS)
+  );
+}
+
+/** 浏览器主路径：在 Worker 中推进到下一场用户比赛。 */
+export function advanceToNextMatchDayAsync(world, maxDays = 60) {
+  return runCalendarInBackground(world, "to-matchday", { maxDays }, () =>
+    advanceToNextMatchDay(world, maxDays, BACKGROUND_SPATIAL_OPTIONS)
+  );
+}
+
+/** 浏览器主路径：在 Worker 中推进赛季，并在用户比赛前停下。 */
+export function advanceToSeasonEndAsync(
+  world,
+  { maxDays = 400, stopOnUserMatch = true } = {}
+) {
+  return runCalendarInBackground(
+    world,
+    "to-season-end",
+    { maxDays, stopOnUserMatch },
+    () =>
+      advanceToSeasonEnd(world, {
+        maxDays,
+        stopOnUserMatch,
+        ...BACKGROUND_SPATIAL_OPTIONS,
+      })
+  );
 }
 
 /** 队与队之间转会 */
@@ -1650,12 +1720,15 @@ function transferBetween(world, buyer, seller, player) {
   assignSquadNumbers(buyer);
   autoLineup(buyer);
   autoLineup(seller);
+  invalidateClubSquadPlan(buyer);
+  invalidateClubSquadPlan(seller);
+  invalidateDivisionSquadPlans(world, buyer.division);
+  if (seller.division !== buyer.division) invalidateDivisionSquadPlans(world, seller.division);
   return { ok: true, price, upfront: paymentPlan.upfront, player };
 }
 
 /**
- * AI 转会：窗内约每 3 天；按短板/年龄结构买卖，可能挖用户队。
- * v153: 增强阵容平衡检查，避免8后卫3前锋等失衡情况。
+ * AI 转会：窗内约每 3 天；买、卖与年轻球员外租均读取同一份多年阵容计划。
  */
 export function processAiTransfers(world) {
   if (world.seasonOver || world.sacked) return [];
@@ -1672,24 +1745,65 @@ export function processAiTransfers(world) {
     if (budgetMoves <= 0) break;
     ensureStaff(club);
     if (club.players.length < 14) continue;
-    const plan = ensureClubSeasonPlan(club, world.clubs, world.season);
-    const planDef = clubPlanDef(plan);
+    const seasonPlan = ensureClubSeasonPlan(club, world.clubs, world.season);
+    const squadPlan = ensureClubSquadPlan(world, club);
 
     const avgAge =
       club.players.reduce((s, p) => s + (p.age || 25), 0) / Math.max(1, club.players.length);
-    const needCash = club.money < (plan?.key === "sustainable" ? 1_200_000 : 350_000) || club.players.length >= 26;
-    const tooOld = avgAge >= (plan?.key === "rebuild" ? 27.3 : 29) && club.players.length > 16;
+    const needCash = club.money < (seasonPlan?.key === "sustainable" ? 1_200_000 : 350_000) || club.players.length >= 26;
+    const tooOld = avgAge >= (seasonPlan?.key === "rebuild" ? 27.3 : 29) && club.players.length > 16;
 
-    // 卖：优先卖出过剩位置的最弱球员（而非全队最弱）
-    if (needCash || tooOld || chance(plan?.key === "sustainable" || plan?.key === "rebuild" ? 0.24 : 0.15)) {
-      // 使用阵容平衡系统选择卖出球员
-      const victim = selectPlayerToSellSmart(club.players, (p, players) => {
-        const posCount = players.filter((x) => x.pos === p.pos).length;
-        if (p.pos === "GK" && posCount <= 1) return false;
-        if (plan?.key === "youth" && (p.age || 25) <= 22 && (p.potential || p.ovr || 0) >= (p.ovr || 0) + 2) return false;
-        if (plan?.key === "compete" && (p.ovr || 0) >= Math.max(...players.map((x) => x.ovr || 0)) - 1) return false;
-        return true;
-      });
+    // 外租：母队确有培养对象，接收方也必须在该位置缺人且能提供现实轮换机会。
+    if (chance(seasonPlan?.key === "youth" || seasonPlan?.key === "rebuild" ? 0.24 : 0.12)) {
+      const loanPlayer = selectPlannedLoanCandidate(world, club);
+      if (loanPlayer) {
+        const hosts = clubs
+          .filter((host) =>
+            host.id !== club.id &&
+            !host.finance?.debtPlan?.transferEmbargo &&
+            !host.finance?.compliance?.transferEmbargo &&
+            host.players.length < 25
+          )
+          .map((host) => {
+            const hostPlan = ensureClubSquadPlan(world, host);
+            const positionPlan = squadPositionPlan(hostPlan, loanPlayer.pos);
+            return { host, positionPlan };
+          })
+          .filter(({ positionPlan }) =>
+            positionPlan &&
+            positionPlan.current < positionPlan.ideal &&
+            positionPlan.needScore >= 12 &&
+            (loanPlayer.ovr || 0) >= Math.max(6, positionPlan.starterAverage - 2.5)
+          )
+          .sort((a, b) =>
+            b.positionPlan.needScore - a.positionPlan.needScore ||
+            a.positionPlan.starterAverage - b.positionPlan.starterAverage
+          );
+        const host = hosts[0]?.host;
+        if (host) {
+          const fee = Math.round((loanPlayer.value || estimateValue(loanPlayer) || 100_000) * 0.03);
+          const loan = arrangeAiLoan(world, club, host, loanPlayer, {
+            term: getTransferPhase(world) === "summer" ? "season" : "half",
+            fee,
+            wageShare: 0.75,
+            announce: chance(0.18),
+          });
+          if (loan.ok) {
+            invalidateClubSquadPlan(club);
+            invalidateClubSquadPlan(host);
+            invalidateDivisionSquadPlans(world, club.division);
+            if (host.division !== club.division) invalidateDivisionSquadPlans(world, host.division);
+            moves.push({ ...loan, type: "loan", fromClubId: club.id, toClubId: host.id });
+            budgetMoves -= 1;
+            continue;
+          }
+        }
+      }
+    }
+
+    // 卖：只处理计划明确判定为过剩且不会破坏位置最低骨架的球员。
+    if (needCash || tooOld || chance(seasonPlan?.key === "sustainable" || seasonPlan?.key === "rebuild" ? 0.24 : 0.15)) {
+      const victim = selectPlannedSaleCandidate(world, club);
       if (victim && club.players.length > 15) {
         const buyers = world.clubs
           .filter(
@@ -1699,14 +1813,22 @@ export function processAiTransfers(world) {
               c.players.length < 25 &&
               clubTransferBudget(world, c) > (victim.value || 0) * 0.8
           )
+          .map((buyer) => {
+            const buyerPlan = ensureClubSquadPlan(world, buyer);
+            const positionPlan = squadPositionPlan(buyerPlan, victim.pos);
+            const review = evaluateRecruitmentCandidate(world, buyer, victim, { plan: buyerPlan });
+            return { buyer, positionPlan, review };
+          })
+          .filter(({ positionPlan }) =>
+            positionPlan && positionPlan.current < positionPlan.maximum && positionPlan.needScore >= 8
+          )
           .sort((a, b) => {
-            // 缺该位置的优先
-            const da = posCount(a.players, victim.pos);
-            const db = posCount(b.players, victim.pos);
-            return da - db || b.money - a.money;
+            return b.positionPlan.needScore - a.positionPlan.needScore ||
+              b.review.score - a.review.score ||
+              b.buyer.money - a.buyer.money;
           });
         if (buyers.length) {
-          const buyer = buyers[0];
+          const buyer = buyers[0].buyer;
           const res = transferBetween(world, buyer, club, victim);
           if (res.ok) {
             moves.push(res);
@@ -1737,20 +1859,11 @@ export function processAiTransfers(world) {
       }
     }
 
-    // 买：使用阵容平衡系统确定需要补强的位置
+    // 买：优先解决当前、下季与两年后共同暴露的最高位置风险。
     const transferBudget = clubTransferBudget(world, club);
     if (club.finance?.debtPlan?.transferEmbargo || club.finance?.compliance?.transferEmbargo) continue;
-    const needPos = selectPositionToBuy(club.players, transferBudget);
+    const needPos = selectPlannedRecruitmentPosition(world, club);
     if (!needPos || transferBudget < 150000 || club.players.length >= 25) continue;
-
-    // 同时检查：如果该位置已经够用，也跳过（双重保险）
-    const counts = {
-      GK: posCount(club.players, "GK"),
-      DEF: posCount(club.players, "DEF"),
-      MID: posCount(club.players, "MID"),
-      ATT: posCount(club.players, "ATT"),
-    };
-    if (!shouldBuyPosition(club.players, needPos)) continue;
 
     const minOvr = Math.max(6, Math.floor((club.power || 50) / 8) - 1);
     const candidates = [];
@@ -1760,29 +1873,27 @@ export function processAiTransfers(world) {
       if (other.id === world.userClubId) continue;
       // 略偏好同级
       const sameDiv = (other.division || 3) === (club.division || 3);
+      const sellerPlan = ensureClubSquadPlan(world, other);
+      const sellerPosition = squadPositionPlan(sellerPlan, needPos);
       for (const p of other.players) {
         if (p.pos !== needPos) continue;
         if (other.players.length <= 14) continue;
-        if (p.pos === "GK" && posCount(other.players, "GK") <= 1) continue;
+        if (
+          !sellerPosition ||
+          sellerPosition.current <= sellerPosition.minimum ||
+          sellerPosition.owned <= sellerPosition.minimum
+        ) continue;
+        const sellerDecision = sellerPlan.playerDecisions?.[p.id];
+        if (!["sell", "replace"].includes(sellerDecision?.action)) continue;
         if ((p.ovr || 0) < minOvr) continue;
         // 别买高龄废柴
         if ((p.age || 0) >= 33 && (p.ovr || 0) < 12) continue;
         const price = (p.value || estimateValue(p)) * (0.9 + rng() * 0.15);
         if (price > transferBudget) continue;
-        const pot = p.potential || p.ovr || 10;
-        const age = p.age || 25;
-        const youthBonus = age <= 23 ? planDef.youthWeight * 2.2 : age >= 31 ? -planDef.youthWeight : 0;
-        const identityPosBonus =
-          plan?.key === "attacking" && (p.pos === "MID" || p.pos === "ATT") ? 1.1 :
-          plan?.key === "resilient" && (p.pos === "GK" || p.pos === "DEF") ? 1.1 : 0;
-        const score =
-          (p.ovr || 0) * planDef.ovrWeight +
-          pot * (0.22 + planDef.youthWeight * 0.18) +
-          youthBonus +
-          identityPosBonus +
-          (sameDiv ? 0.5 : 0) -
-          (price / 1_200_000) * (0.7 + planDef.valueWeight);
-        candidates.push({ player: p, club: other, score, price });
+        const review = evaluateRecruitmentCandidate(world, club, p, { plan: squadPlan, seasonPlan });
+        const affordability = price / Math.max(150_000, transferBudget);
+        const score = review.score + (sameDiv ? 0.5 : 0) - affordability * 3;
+        candidates.push({ player: p, club: other, score, price, review });
       }
     }
     candidates.sort((a, b) => b.score - a.score);

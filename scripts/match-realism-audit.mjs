@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { SimEngine, SIM } from "../js/sim/engine.js";
 
 const matches = Math.max(8, Number(process.argv[2]) || 24);
-const strongMatches = Math.max(16, matches);
+const equalOnly = process.argv[4] === "equal-only";
+const strongMatches = equalOnly ? 0 : Math.max(16, matches);
+const simulationProfile = process.argv[3] === "background" ? "background" : "standard";
+const timeStep = simulationProfile === "background" ? 0.2 : SIM.DT;
+const separationPasses = simulationProfile === "background" ? 4 : 8;
 
 function seededRandom(seed) {
   let value = seed >>> 0;
@@ -91,11 +95,12 @@ function runMatch(homeAbility, awayAbility, seed) {
   try {
     const engine = new SimEngine(
       makeClub(`home-${seed}`, homeAbility),
-      makeClub(`away-${seed}`, awayAbility)
+      makeClub(`away-${seed}`, awayAbility),
+      { simulationProfile, timeStep, separationPasses }
     );
     validateKickoff(engine, "home");
-    const steps = Math.round((90 * 60) / SIM.DT);
-    for (let step = 0; step < steps; step++) engine.step();
+    const steps = Math.round((90 * 60) / timeStep);
+    for (let step = 0; step < steps; step++) engine.step(timeStep);
     return engine;
   } finally {
     Math.random = originalRandom;
@@ -129,9 +134,11 @@ const totals = {
     "30plus": { shots: 0, goals: 0 },
   },
 };
+const stallSeeds = [];
 
 for (let match = 0; match < matches; match++) {
-  const engine = runMatch(13, 13, 165000 + match);
+  const seed = 165000 + match;
+  const engine = runMatch(13, 13, seed);
   const recentShots = [];
   const recentCorners = { home: -Infinity, away: -Infinity };
   for (const event of engine.events) {
@@ -170,7 +177,10 @@ for (let match = 0; match < matches; match++) {
       if (event.card === "yellow") totals.yellows++;
       if (event.card === "red" || event.card === "red2") totals.reds++;
     } else if (event.type === "injury") totals.injuries++;
-    else if (event.type === "stall_clear") totals.stalls++;
+    else if (event.type === "stall_clear") {
+      totals.stalls++;
+      stallSeeds.push(seed);
+    }
   }
 }
 
@@ -198,6 +208,10 @@ const distance = Object.fromEntries(
   ])
 );
 const report = {
+  simulationProfile,
+  timeStep,
+  separationPasses,
+  stallSeeds,
   equalMatches: matches,
   perMatch: {
     goals: perMatch(totals.goals),
@@ -252,5 +266,7 @@ assert.ok(report.perMatch.corners >= 3 && report.perMatch.corners <= 10, "corner
 assert.ok(report.perMatch.cornerShots >= 0.5, "corners are not producing attacking shots");
 // 24 场样本的胜率会被平局和单场随机性显著扰动；积分/净胜球更稳定地
 // 检验能力差异仍然存在，同时避免把正常的足球方差误判为引擎回归。
-assert.ok(report.strongVsWeak.pointsPerMatch >= 1.5, "strong teams must retain a visible ability advantage");
-assert.ok(strongGoals > weakGoals, "strong teams need a positive goal difference");
+if (!equalOnly) {
+  assert.ok(report.strongVsWeak.pointsPerMatch >= 1.5, "strong teams must retain a visible ability advantage");
+  assert.ok(strongGoals > weakGoals, "strong teams need a positive goal difference");
+}

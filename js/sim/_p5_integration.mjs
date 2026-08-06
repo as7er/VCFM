@@ -1,4 +1,4 @@
-// P5 接入自检：用户场走 SimEngine，AI 场走概率引擎
+// v201 接入自检：用户场与浏览器 AI 后台都走 SimEngine，不同之处仅是性能档。
 import {
   simulateMatchSync,
 } from "../match.js";
@@ -71,13 +71,16 @@ console.log("shots", r1.report?.home?.shots, r1.report?.away?.shots);
 console.log("xg", r1.report?.home?.xg, r1.report?.away?.xg);
 console.log("fromSim goals", r1.events.filter((e) => e.type === "goal" && e.fromSim).length);
 
-console.log("\n=== AI 场 (应走 v1，无 sim 标记) ===");
+console.log("\n=== AI 后台场 (应走 v2 background) ===");
 const home2 = makeClub("c1", "ClubA", 70);
 const away2 = makeClub("c2", "ClubB", 65);
 const worldAi = makeWorld("nobody", home2, away2);
 const f2 = { home: "c1", away: "c2", day: 11, competition: "league", round: 2, played: false };
 const t1 = Date.now();
-const r2 = simulateMatchSync(worldAi, f2);
+const r2 = simulateMatchSync(worldAi, f2, {
+  engineMode: "spatial",
+  simulationProfile: "background",
+});
 console.log("ms", Date.now() - t1);
 console.log("score", r2.homeGoals, "-", r2.awayGoals);
 console.log("sim marker", r2.events.some((e) => e.text && e.text.includes("空间模拟")));
@@ -87,12 +90,16 @@ if (!r1.events.some((e) => e.text && e.text.includes("空间模拟"))) {
   console.error("FAIL: user match missing sim marker");
   process.exit(1);
 }
-if (r2.events.some((e) => e.text && e.text.includes("空间模拟"))) {
-  console.error("FAIL: AI match should not use sim");
+if (!r2.events.some((e) => e.text && e.text.includes("空间模拟"))) {
+  console.error("FAIL: AI background match missing sim marker");
+  process.exit(1);
+}
+if (r2.report?.simulationProfile !== "background") {
+  console.error("FAIL: AI background match missing persisted profile");
   process.exit(1);
 }
 if (!f1.played) {
   console.error("FAIL: fixture not finalized");
   process.exit(1);
 }
-console.log("\nOK p5 integration");
+console.log("\nOK v201 spatial integration");

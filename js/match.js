@@ -583,7 +583,7 @@ function recomputeSides(state) {
 /**
  * 创建比赛会话（不写最终结果）
  */
-export function createMatchSession(world, fixture) {
+export function createMatchSession(world, fixture, opts = {}) {
   const home = clubById(world, fixture.home);
   const away = clubById(world, fixture.away);
   if (!home || !away) throw new Error("invalid fixture clubs");
@@ -633,6 +633,21 @@ export function createMatchSession(world, fixture) {
   const bigMatch = isBigMatch(world, home, away, isCup);
 
   // 备份战术（半场改完可保留到终场）
+  const userSide =
+    home.id === world.userClubId ? "home" : away.id === world.userClubId ? "away" : null;
+  const engineMode =
+    opts.engineMode === "spatial"
+      ? "spatial"
+      : opts.engineMode === "probability"
+        ? "probability"
+        : userSide
+          ? "spatial"
+          : "probability";
+  const simulationProfile =
+    engineMode === "spatial" && opts.simulationProfile === "background"
+      ? "background"
+      : "standard";
+
   const state = {
     world,
     fixture,
@@ -660,9 +675,12 @@ export function createMatchSession(world, fixture) {
     /** 正式比赛：每队最多 5 次换人（与当代足球/FMM 一致） */
     maxSubs: 5,
     eligiblePlayerIds: { home: homeEligibleIds, away: awayEligibleIds },
-    userSide:
-      home.id === world.userClubId ? "home" : away.id === world.userClubId ? "away" : null,
+    userSide,
     userClub,
+    /** 比赛事实引擎；表现模式不能再隐式决定比赛规律。 */
+    engineMode,
+    /** standard=直播同精度；background=同一空间因果的无画面性能档。 */
+    simulationProfile,
     finished: false,
     report: null,
     /** 队内讲话侧修正 { home|away: mods } */
@@ -2586,6 +2604,9 @@ function buildReport(state) {
     : null;
   return {
     matchSeed: state.matchSeed,
+    engine: state.simEng ? "spatial-v2" : "probability-v1",
+    simulationProfile: state.simEng ? state.simulationProfile || "standard" : "legacy",
+    simulationMeta: state.simEngineMeta || null,
     score: `${state.hg} - ${state.ag}`,
     homeGoals: state.hg,
     awayGoals: state.ag,
@@ -2976,6 +2997,8 @@ export function finalizeMatch(state) {
   fixture.events = events;
   fixture.weather = state.weather.key;
   fixture.derby = state.derby;
+  fixture.matchEngine = state.simEng ? "spatial-v2" : "probability-v1";
+  fixture.simulationProfile = state.simEng ? state.simulationProfile || "standard" : "legacy";
 
   recordTransferAppearances(world, home.id, appearedPlayers(state, home).map((player) => player.id));
   recordTransferAppearances(world, away.id, appearedPlayers(state, away).map((player) => player.id));
@@ -3190,7 +3213,7 @@ function runMinutesSync(state, fromMin, toMin) {
 
 /** 同步完整模拟（AI 场次 / 快速无暂停） */
 export function simulateMatchSync(world, fixture, opts = {}) {
-  const state = createMatchSession(world, fixture);
+  const state = createMatchSession(world, fixture, opts);
   const { home, away, weather, derby, bigMatch, isCup } = state;
   const staffManaged = state.userClub && shouldStaffHandleMatchday(state.world, state.userClub);
   if (staffManaged) {
@@ -3203,9 +3226,16 @@ export function simulateMatchSync(world, fixture, opts = {}) {
   if (derby) bits.push("🔥 德比大战");
   if (bigMatch) bits.push(isCup ? "🏆 焦点杯赛" : "⭐ 焦点战");
   pushEv(state, 0, "context", `情境：${bits.join(" · ")}`);
-  // 用户场：空间模拟 v2；AI 后台场：概率引擎（性能）
+  // 引擎由比赛请求显式决定；直播、快速和后台不再各自暗选足球规律。
   if (shouldUseSim(state)) {
-    pushEv(state, 0, "context", "⚙️ 比赛引擎：空间模拟 v2");
+    pushEv(
+      state,
+      0,
+      "context",
+      state.simulationProfile === "background"
+        ? "⚙️ 比赛引擎：空间模拟 v2 · 无画面后台档"
+        : "⚙️ 比赛引擎：空间模拟 v2"
+    );
     simulatePeriodWithSimSync(state, 1, 45);
     pushEv(state, 45, "ht", `中场休息 ${home.name} ${state.hg} - ${state.ag} ${away.name}`);
     aiHalfTime(state);

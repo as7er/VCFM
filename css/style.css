@@ -6742,6 +6742,47 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
 .registration-summary span { color: var(--muted); font-size: 0.78rem; }
 .registration-summary strong { margin-top: 0.2rem; font-size: 0.9rem; }
 .squad-registration-card input[type="checkbox"] { width: 1rem; height: 1rem; }
+.squad-plan-heading { align-items: flex-start; gap: 1rem; }
+.squad-plan-heading h2 { margin: 0; }
+.squad-plan-heading .hint { max-width: 62rem; margin: 0.3rem 0 0; }
+.squad-plan-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg2);
+}
+.squad-plan-metrics > div { padding: 0.65rem 0.75rem; border-right: 1px solid var(--border); }
+.squad-plan-metrics > div:last-child { border-right: 0; }
+.squad-plan-metrics span,
+.squad-plan-metrics strong { display: block; }
+.squad-plan-metrics span { color: var(--muted); font-size: 0.78rem; }
+.squad-plan-metrics strong { margin-top: 0.2rem; }
+.squad-plan-registration {
+  margin: 0.65rem 0;
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--good);
+  background: color-mix(in srgb, var(--good) 8%, transparent);
+  color: var(--muted);
+}
+.squad-plan-registration.risk {
+  border-left-color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 8%, transparent);
+}
+.squad-plan-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(17rem, 1fr); gap: 0.85rem; align-items: start; }
+.squad-plan-table { min-width: 48rem; }
+.squad-plan-table td:last-child { min-width: 14rem; color: var(--muted); }
+.squad-plan-priorities {
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg2);
+}
+.squad-plan-priorities h3 { margin: 0 0 0.55rem; font-size: 0.95rem; }
+.squad-plan-priorities ul { display: grid; gap: 0.55rem; margin: 0; padding: 0; list-style: none; }
+.squad-plan-priorities li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.25rem 0.45rem; align-items: center; }
+.squad-plan-priorities li .muted { grid-column: 2; font-size: 0.78rem; line-height: 1.35; }
 .view-switch {
   display: inline-flex;
   padding: 0.18rem;
@@ -6875,6 +6916,11 @@ summary:focus-visible {
   .finance-sponsorship { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .squad-heading { align-items: flex-start; gap: 0.6rem; }
   .squad-heading-tools { align-items: flex-end; flex-direction: column; }
+  .squad-plan-heading { flex-direction: column; }
+  .squad-plan-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .squad-plan-metrics > div:nth-child(2) { border-right: 0; }
+  .squad-plan-metrics > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
+  .squad-plan-grid { grid-template-columns: minmax(0, 1fr); }
   .registration-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .registration-summary > div:nth-child(2) { border-right: 0; }
   .registration-summary > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }

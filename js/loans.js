@@ -163,6 +163,65 @@ function moveOnLoan(world, player, fromClub, toClub, { untilDay, wageShare, fee,
 }
 
 /**
+ * AI 俱乐部之间的计划性租借。接收方必须真实承担租借费与工资份额，
+ * 球员对象、阵容和财务流水沿用用户租借相同的移动路径。
+ */
+export function arrangeAiLoan(world, fromClub, toClub, player, opts = {}) {
+  const win = assertTransferOpen(world);
+  if (!win.ok) return win;
+  if (!fromClub || !toClub || fromClub.id === toClub.id || !player) {
+    return { ok: false, msg: "无效租借双方" };
+  }
+  if (!fromClub.players?.some((candidate) => candidate.id === player.id)) {
+    return { ok: false, msg: "球员不在母队" };
+  }
+  if (player.loan) return { ok: false, msg: "球员已在租借中" };
+  if (fromClub.players.length <= 15) return { ok: false, msg: "母队阵容过少" };
+  if (toClub.players.length >= 26) return { ok: false, msg: "接收方阵容已满" };
+  if (hasTransferEmbargo(toClub)) return { ok: false, msg: "接收方处于财政转会限制期" };
+
+  const term = opts.term === "season" ? "season" : "half";
+  const fee = Math.max(0, Math.round(numberOr(opts.fee, (player.value || estimateValue(player) || 100000) * 0.03)));
+  const wageShare = Math.max(0.5, Math.min(1, numberOr(opts.wageShare, 0.75)));
+  const untilDay = loanUntilDay(world, term);
+  const payerCash = clubCashAvailability(world, toClub, fee);
+  if (!payerCash.ok) return { ok: false, msg: "接收方无法承担租借成本" };
+
+  const result = moveOnLoan(world, player, fromClub, toClub, {
+    untilDay,
+    wageShare,
+    fee,
+    term,
+  });
+  if (!result.ok) return result;
+
+  recordFinanceEntry(toClub, -fee, {
+    category: "loan",
+    source: "ai-loan-fee",
+    season: world.season,
+    day: world.day,
+  });
+  recordFinanceEntry(fromClub, fee, {
+    category: "loan",
+    source: "ai-loan-fee",
+    season: world.season,
+    day: world.day,
+  });
+  if (opts.announce) {
+    world.news?.unshift({
+      day: world.day,
+      text: `🔁 租借：${player.name} 从 ${fromClub.name} 加盟 ${toClub.name}（${term === "season" ? "至赛季末" : `至 D${untilDay}`}）`,
+    });
+  }
+  return { ok: true, player: result.player, rec: result.rec, fee, wageShare, untilDay };
+}
+
+function numberOr(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
  * 用户外租给 AI
  * @param {{ term?: 'half'|'season', toClubId?: string }} opts
  */

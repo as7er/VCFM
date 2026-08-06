@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v200";
+const CACHE = "vcfm-v202";
 const ASSETS = [
   "./",
   "./index.html",
@@ -40,6 +40,8 @@ const ASSETS = [
   "./js/career.js",
   "./js/sim/engine.js",
   "./js/sim/adapt.js",
+  "./js/sim/calendar-worker-client.js",
+  "./js/sim/calendar-worker.js",
   "./js/poaching.js",
   "./js/scoutreport.js",
   "./js/scouting-knowledge.js",
@@ -49,6 +51,7 @@ const ASSETS = [
   "./js/transfer-negotiations.js",
   "./js/deal-negotiations.js",
   "./js/squad-registration.js",
+  "./js/squad-planning.js",
   "./js/inbox.js",
   "./js/relations.js",
   "./js/worldpulse.js",
