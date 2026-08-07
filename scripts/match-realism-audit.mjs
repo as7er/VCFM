@@ -124,6 +124,11 @@ const totals = {
   injuries: 0,
   stalls: 0,
   openGoalShots: 0,
+  openGoalReasons: {},
+  goalkeeperClaims: 0,
+  goalkeeperBlocks: 0,
+  goalkeeperChallenges: 0,
+  goalkeeperFouls: 0,
   unattributedGoals: 0,
   ownGoals: 0,
   penaltyGoals: 0,
@@ -151,7 +156,11 @@ for (let match = 0; match < matches; match++) {
       recentShots.push(shot);
       totals.shots++;
       totals.distance[shot.bin].shots++;
-      if (event.openGoal) totals.openGoalShots++;
+      if (event.openGoal) {
+        totals.openGoalShots++;
+        const reason = event.openGoalReason || "unknown";
+        totals.openGoalReasons[reason] = (totals.openGoalReasons[reason] || 0) + 1;
+      }
       if (event.t - recentCorners[event.team] <= 18) totals.cornerShots++;
     } else if (event.type === "goal") {
       totals.goals++;
@@ -165,6 +174,9 @@ for (let match = 0; match < matches; match++) {
       else totals.unattributedGoals++;
       if (event.t - recentCorners[event.team] <= 18) totals.cornerGoals++;
     } else if (event.type === "save") totals.saves++;
+    else if (event.type === "gk_claim") totals.goalkeeperClaims++;
+    else if (event.type === "gk_block") totals.goalkeeperBlocks++;
+    else if (event.type === "gk_challenge") totals.goalkeeperChallenges++;
     else if (event.type === "pass") totals.passes++;
     else if (event.type === "tackle") totals.tackles++;
     else if (event.type === "intercept") totals.interceptions++;
@@ -173,6 +185,7 @@ for (let match = 0; match < matches; match++) {
       recentCorners[event.team] = event.t;
     } else if (event.type === "foul") {
       totals.fouls++;
+      if (engine.agentById(event.agentId)?.role === "GK") totals.goalkeeperFouls++;
       if (event.penalty) totals.penalties++;
       if (event.card === "yellow") totals.yellows++;
       if (event.card === "red" || event.card === "red2") totals.reds++;
@@ -230,11 +243,18 @@ const report = {
     injuries: perMatch(totals.injuries),
     stalls: perMatch(totals.stalls),
     openGoalShots: perMatch(totals.openGoalShots),
+    goalkeeperClaims: perMatch(totals.goalkeeperClaims),
+    goalkeeperBlocks: perMatch(totals.goalkeeperBlocks),
+    goalkeeperChallenges: perMatch(totals.goalkeeperChallenges),
+    goalkeeperFouls: perMatch(totals.goalkeeperFouls),
     unattributedGoals: perMatch(totals.unattributedGoals),
     ownGoals: perMatch(totals.ownGoals),
     penaltyGoals: perMatch(totals.penaltyGoals),
   },
   shotConversionPct: pct(totals.goals, totals.shots),
+  openGoalReasons: Object.fromEntries(
+    Object.entries(totals.openGoalReasons).map(([reason, count]) => [reason, perMatch(count)])
+  ),
   outsideBoxSharePct: pct(
     totals.distance["16to22"].shots + totals.distance["22to30"].shots + totals.distance["30plus"].shots,
     totals.shots

@@ -48,6 +48,7 @@ const checks = [
   "scripts/squad-planning-audit.mjs",
   "scripts/match-seed-audit.mjs",
   "scripts/match-causality-audit.mjs",
+  "scripts/goalkeeper-open-goal-audit.mjs",
   "scripts/background-spatial-worker-audit.mjs",
   "scripts/match-analysis-audit.mjs",
   "scripts/match-balance-audit.mjs",

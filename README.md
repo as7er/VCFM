@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v203** · 球员细分位置与多位置适应性 |
+| 当前版本 | **v204** · 禁区决策与门将出击 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -25,15 +25,14 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 仓库：https://github.com/as7er/vcfm
 
-### v203 更新亮点
+### v204 更新亮点
 
-- 球员从四个粗位置扩展到 13 个细分位置（GK/LB/CB/RB/DM/CM/LM/RM/AM/LW/RW/CF/ST）的熟悉度档案，由真实属性与惯用脚稳定派生。
-- 阵型槽位解析成细分位置后，自动阵容、锁定安置、半场重同步与换人共用同一份适配度：抢截型中卫不再被塞到边路，左脚边后卫优先落在左路。
-- 熟悉度只回答“属性结构是否适合这个位置”，绝对能力仍由总评单独计入；属性均衡的球员稳定落在 12–14，专精球员主位与非主位差距不小于 3。
-- 位置深度按战线统计供需而非逐槽计数，后卫线缺口不再出现“2 人填 4 个槽仍报零缺口”；阵容规划、转会评估、接班人与训练重点读取同一份档案。
-- 适配度只影响选人与建队决策，不向比赛写入隐藏能力；旧存档在加载时补齐细分位置熟悉度，不改变球员身份或历史数据。
+- 空门在球员决定是否射门前就会按门将位置、射门线路与真实可达范围识别，不再出现看见空门却仍被普通球队射门冷却压制的情况。
+- 门将处理直塞和禁区持球者时始终保持在球门侧，不会因错误出击目标主动跑到球后方；射门飞行时会按反应属性追踪预测落点。
+- 门将真实移动到触球距离后，可以收球、用身体挡出松球、扑空或低概率犯规；这些结果由双方属性决定，不靠画面层摆拍。
+- 持球者会在门将近身封角时提前重算射门、传球或盘带；正常封角不被误判为空门，收球与身体封堵也不会冒充射门扑救统计。
 
-前序版本（v196–v202）：真实临场换人、赛后回放与完整评分、直播因果与定位球表现、球员特征与定位球职责、职员姓名与国籍因果、后台空间比赛 Worker、多年阵容规划与 AI 建队。完整条目见 [CHANGELOG.md](./CHANGELOG.md)。
+前序版本（v196–v203）：真实临场换人、赛后回放与完整评分、直播因果与定位球表现、球员特征与定位球职责、职员姓名与国籍因果、后台空间比赛 Worker、多年阵容规划与 AI 建队、球员细分位置与多位置适应性。完整条目见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ### 快速开始
 
@@ -155,7 +154,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v203** · detailed positions and positional aptitude |
+| Current version | **v204** · box decisions and goalkeeper interventions |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -164,15 +163,14 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 Repository: https://github.com/as7er/vcfm
 
-### What's new in v203
+### What's new in v204
 
-- Players now carry familiarity ratings for 13 detailed positions (GK/LB/CB/RB/DM/CM/LM/RM/AM/LW/RW/CF/ST), derived deterministically from their real attributes and preferred foot.
-- Formation slots resolve to detailed positions, so auto-lineups, locked placements, half-time resync, and substitutions share one aptitude view: a tackling centre-back is no longer pushed wide, and a left-footed full-back prefers the left flank.
-- Familiarity answers only “does this attribute profile suit the position”; raw ability is still counted once through the overall rating. Balanced players settle at 12–14, while specialists keep at least a 3-point gap between their best and worst slot.
-- Positional depth is measured per line of the pitch rather than per slot, so two defenders filling four slots no longer report zero shortfall. Squad planning, transfer evaluation, succession, and training focus all read the same profile.
-- Aptitude affects selection and squad-building decisions only and never writes hidden ability into matches. Existing saves gain detailed familiarity on load without altering player identity or history.
+- Open goals are identified before the shot decision from goalkeeper position, shot lane, and real reach, so a genuine empty net is no longer suppressed by the ordinary team shooting rhythm.
+- Goalkeepers stay goal-side when handling through balls and close dribblers instead of targeting a point behind the ball, and react toward projected shot crossings according to their reflexes.
+- Once physically close enough, a goalkeeper can claim, block the ball loose, miss the challenge, or rarely concede a foul. Outcomes read both players' existing attributes rather than presentation-only weights.
+- Ball carriers recalculate shoot, pass, or dribble choices when the goalkeeper closes down. Normal angle coverage is not mistaken for an empty net, and claims or body blocks are not counted as shot saves.
 
-Earlier releases (v196–v202): realistic in-match substitutions, post-match replays and full ratings, live-broadcast causality and set-piece presentation, player traits and set-piece duties, staff naming and nationality causality, the background spatial match worker, and multi-year squad planning with AI squad building. See [CHANGELOG.md](./CHANGELOG.md) for full entries.
+Earlier releases (v196–v203): realistic in-match substitutions, post-match replays and full ratings, live-broadcast causality and set-piece presentation, player traits and set-piece duties, staff naming and nationality causality, the background spatial match worker, multi-year squad planning with AI squad building, and detailed positional aptitude. See [CHANGELOG.md](./CHANGELOG.md) for full entries.
 
 ### Quick start
 
