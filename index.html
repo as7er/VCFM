@@ -155,6 +155,19 @@
             <span aria-hidden="true">🔍</span>
           </button>
           <button id="btn-save" class="btn small" data-i18n="btn.save">存档</button>
+          <div class="topbar-continue">
+            <button id="btn-topbar-continue" class="btn primary topbar-continue-main" type="button">推进一天</button>
+            <details class="topbar-continue-more">
+              <summary class="btn primary topbar-continue-caret" aria-label="更多推进选项" data-i18n-title="nav.moreAdvance" title="更多推进选项">
+                <span aria-hidden="true">▾</span>
+              </summary>
+              <div class="topbar-continue-menu">
+                <button id="btn-topbar-advance-day" class="btn small ghost" type="button" data-i18n="dash.advance">推进一天</button>
+                <button id="btn-topbar-advance-matchday" class="btn small ghost" type="button" data-i18n="dash.advanceMatchday">推进到比赛日</button>
+                <button id="btn-topbar-advance-season-end" class="btn small ghost" type="button" data-i18n="dash.advanceSeasonEnd">推进到赛季末</button>
+              </div>
+            </details>
+          </div>
           <details class="topbar-more">
             <summary class="btn small ghost" aria-label="更多操作" data-i18n-title="nav.more">•••</summary>
             <div class="topbar-more-menu">
@@ -1340,24 +1353,33 @@
         </div>
 
         <footer class="fm-match-bar fmm-match-bar">
-          <div class="match-speed-bar" role="group" aria-label="match speed">
-            <span class="muted" data-i18n="match.speed">倍速</span>
-            <button type="button" class="btn small" data-match-speed="0.5" title="慢放">×0.5</button>
-            <button type="button" class="btn small" data-match-speed="1" title="正常观赛">×1</button>
-            <button type="button" class="btn small" data-match-speed="1.5" title="稍快">×1.5</button>
-            <button type="button" class="btn small" data-match-speed="2">×2</button>
-            <button type="button" class="btn small" data-match-speed="4">×4</button>
-          </div>
-          <div class="match-playback-bar" role="group" aria-label="match playback">
-            <button type="button" id="btn-match-pause" class="btn small" disabled data-i18n="match.pause">暂停</button>
-            <button type="button" id="btn-match-step" class="btn small" disabled data-i18n="match.step">下一步</button>
-            <button type="button" id="btn-match-step-mode" class="btn small" data-i18n="match.stepMode" data-i18n-title="match.stepModeHint">逐事件</button>
-            <button type="button" id="btn-match-sfx" class="btn small" data-i18n="match.sfx" data-i18n-title="match.sfxHint" aria-pressed="false">音效</button>
+          <div class="match-transport">
+            <div class="match-playback-bar" role="group" aria-label="match playback">
+              <button type="button" id="btn-match-pause" class="btn small icon-btn" disabled data-i18n-title="match.pause" title="暂停" aria-label="暂停">
+                <span class="mtb-glyph" aria-hidden="true">⏸</span>
+              </button>
+              <button type="button" id="btn-match-step" class="btn small icon-btn" disabled data-i18n-title="match.step" title="下一步" aria-label="下一步">
+                <span class="mtb-glyph" aria-hidden="true">⏭</span>
+              </button>
+              <button type="button" id="btn-match-step-mode" class="btn small icon-btn" data-i18n-title="match.stepModeHint" title="逐事件" aria-label="逐事件" aria-pressed="false">
+                <span class="mtb-glyph" aria-hidden="true">≡</span>
+              </button>
+              <button type="button" id="btn-match-sfx" class="btn small icon-btn" data-i18n-title="match.sfxHint" title="音效" aria-label="音效" aria-pressed="false">
+                <span class="mtb-glyph" aria-hidden="true">🔊</span>
+              </button>
+            </div>
+            <div class="match-speed-bar" role="group" aria-label="match speed">
+              <button type="button" class="btn small" data-match-speed="0.5" title="慢放 ×0.5" aria-label="×0.5">.5</button>
+              <button type="button" class="btn small" data-match-speed="1" title="正常观赛 ×1" aria-label="×1">1</button>
+              <button type="button" class="btn small" data-match-speed="1.5" title="稍快 ×1.5" aria-label="×1.5">1.5</button>
+              <button type="button" class="btn small" data-match-speed="2" title="快速 ×2" aria-label="×2">2</button>
+              <button type="button" class="btn small" data-match-speed="4" title="极快 ×4" aria-label="×4">4</button>
+            </div>
           </div>
           <div class="match-actions" id="match-main-actions">
-            <button id="btn-sim-fast" class="btn primary" data-i18n="match.fast">快速高光（中场可调）</button>
-            <button id="btn-sim-live" class="btn" data-i18n="match.live">直播（中场可调）</button>
-            <button id="btn-sim-instant" class="btn" data-i18n="match.instant">一键战报</button>
+            <button id="btn-sim-fast" class="btn primary" data-i18n="match.fast" data-i18n-title="match.fastHint" title="快速高光 · 中场可调整战术">快速高光</button>
+            <button id="btn-sim-live" class="btn" data-i18n="match.live" data-i18n-title="match.liveHint" title="全场直播 · 中场可调整战术">直播</button>
+            <button id="btn-sim-instant" class="btn" data-i18n="match.instant" data-i18n-title="match.instantHint" title="跳过过程，直接出赛后战报">一键战报</button>
             <button id="btn-match-continue" class="btn" disabled data-i18n="match.continue">赛后继续</button>
           </div>
         </footer>

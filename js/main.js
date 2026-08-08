@@ -505,9 +505,12 @@ function updateMatchPlaybackUI() {
   if (pauseBtn) {
     pauseBtn.disabled = !en;
     pauseBtn.classList.toggle("active", matchPlayback.paused);
-    pauseBtn.textContent = matchPlayback.paused
-      ? t("match.resume")
-      : t("match.pause");
+    // 图标按钮：文字走 title/aria-label，避免覆盖 .mtb-glyph
+    const label = matchPlayback.paused ? t("match.resume") : t("match.pause");
+    pauseBtn.title = label;
+    pauseBtn.setAttribute("aria-label", label);
+    const glyph = pauseBtn.querySelector(".mtb-glyph");
+    if (glyph) glyph.textContent = matchPlayback.paused ? "▶" : "⏸";
   }
   if (stepBtn) {
     // 暂停中 或 逐事件等待时，可点「下一步」
@@ -517,6 +520,8 @@ function updateMatchPlaybackUI() {
   if (modeBtn) {
     modeBtn.classList.toggle("active", matchPlayback.stepMode);
     modeBtn.setAttribute("aria-pressed", matchPlayback.stepMode ? "true" : "false");
+    const modeLabel = t("match.stepMode");
+    modeBtn.setAttribute("aria-label", modeLabel);
   }
   updateMatchSfxUI();
 }
@@ -651,11 +656,15 @@ function updateMatchSfxUI() {
   btn.classList.toggle("active", !muted);
   btn.classList.toggle("is-muted", !!muted);
   btn.setAttribute("aria-pressed", muted ? "false" : "true");
-  btn.textContent = muted
+  const label = muted
     ? getLang() === "en"
       ? "SFX off"
       : "静音"
     : t("match.sfx") || (getLang() === "en" ? "SFX" : "音效");
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+  const glyph = btn.querySelector(".mtb-glyph");
+  if (glyph) glyph.textContent = muted ? "🔇" : "🔊";
 }
 
 /**
@@ -1440,6 +1449,29 @@ function bindMainOnce() {
   $("#btn-advance-matchday").onclick = () => onAdvanceToMatchday();
   const seasonEndBtn = $("#btn-advance-season-end");
   if (seasonEndBtn) seasonEndBtn.onclick = () => onAdvanceToSeasonEnd();
+  // 顶栏常驻推进：主键随赛程上下文变脸，▾ 菜单放其余推进方式
+  $("#btn-topbar-continue")?.addEventListener("click", () => runTopbarContinue());
+  const closeContinueMenu = () => {
+    const box = document.querySelector(".topbar-continue-more");
+    if (box) box.open = false;
+  };
+  $("#btn-topbar-advance-day")?.addEventListener("click", () => {
+    closeContinueMenu();
+    onAdvance();
+  });
+  $("#btn-topbar-advance-matchday")?.addEventListener("click", () => {
+    closeContinueMenu();
+    onAdvanceToMatchday();
+  });
+  $("#btn-topbar-advance-season-end")?.addEventListener("click", () => {
+    closeContinueMenu();
+    onAdvanceToSeasonEnd();
+  });
+  // 点菜单外部收起
+  document.addEventListener("click", (e) => {
+    const box = document.querySelector(".topbar-continue-more");
+    if (box?.open && !box.contains(e.target)) box.open = false;
+  });
   $("#btn-play-match").onclick = async () => {
     try {
       await openMatch();
@@ -3502,6 +3534,58 @@ function ticketFactorsText(factors, en = getLang() === "en") {
     .join(" · ");
 }
 
+/**
+ * 顶栏推进键的当前语义：赛季末 → 进入下赛季；比赛日 → 进入比赛；否则推进一天。
+ * 状态由 renderDashboard 算好后传入，这里只负责显示。
+ */
+let topbarContinueMode = "advance";
+
+function syncTopbarContinue({ seasonDone = false, matchReady = false } = {}) {
+  const btn = $("#btn-topbar-continue");
+  if (!btn) return;
+  const en = getLang() === "en";
+  topbarContinueMode = seasonDone ? "season" : matchReady ? "match" : "advance";
+
+  if (topbarContinueMode === "season") {
+    btn.textContent = t("dash.nextSeason");
+    btn.title = en ? "Start the next season" : "进入下一赛季";
+  } else if (topbarContinueMode === "match") {
+    btn.textContent = t("dash.play");
+    btn.title = en ? "Matchday — enter the match" : "比赛日 · 进入比赛";
+  } else {
+    btn.textContent = t("dash.advance");
+    btn.title = en ? "Advance one day" : "推进一天";
+  }
+  btn.classList.toggle("is-matchday", topbarContinueMode === "match");
+  btn.disabled = calendarAdvanceBusy;
+
+  // 比赛日当天应先踢比赛：与概览页一致地禁掉跳过类推进
+  const dayBtn = $("#btn-topbar-advance-day");
+  const matchBtn = $("#btn-topbar-advance-matchday");
+  const seasonBtn = $("#btn-topbar-advance-season-end");
+  if (dayBtn) dayBtn.disabled = calendarAdvanceBusy || seasonDone;
+  if (matchBtn) matchBtn.disabled = calendarAdvanceBusy || seasonDone || matchReady;
+  if (seasonBtn) seasonBtn.disabled = calendarAdvanceBusy || seasonDone || matchReady;
+}
+
+/** 顶栏主键：按当前语义分派 */
+async function runTopbarContinue() {
+  if (topbarContinueMode === "season") {
+    $("#btn-next-season")?.click();
+    return;
+  }
+  if (topbarContinueMode === "match") {
+    try {
+      await openMatch();
+    } catch (error) {
+      console.error(error);
+      toast(getLang() === "en" ? "Match view failed to load" : "比赛画面加载失败");
+    }
+    return;
+  }
+  await onAdvance();
+}
+
 function renderDashboard() {
   const club = getUserClub(world);
   const en = getLang() === "en";
@@ -3566,6 +3650,9 @@ function renderDashboard() {
     if (advanceSeasonBtn) advanceSeasonBtn.disabled = ready;
     nextSeasonBtn.style.display = "none";
   }
+
+  // 顶栏常驻推进键：复用上面算好的三种态，避免重复判断
+  syncTopbarContinue({ seasonDone, matchReady: !seasonDone && !!next && next.day <= world.day });
 
   // 经理生涯摘要
   const careerBox = $("#manager-career-dash");
@@ -7886,7 +7973,15 @@ let calendarAdvanceBusy = false;
 
 function setCalendarAdvanceBusy(busy) {
   calendarAdvanceBusy = !!busy;
-  for (const id of ["#btn-advance", "#btn-advance-matchday", "#btn-advance-season-end"]) {
+  for (const id of [
+    "#btn-advance",
+    "#btn-advance-matchday",
+    "#btn-advance-season-end",
+    "#btn-topbar-continue",
+    "#btn-topbar-advance-day",
+    "#btn-topbar-advance-matchday",
+    "#btn-topbar-advance-season-end",
+  ]) {
     const button = $(id);
     if (button) button.disabled = calendarAdvanceBusy;
   }
@@ -8604,14 +8699,6 @@ async function driveMatchEvent(ev, snap, { live = true } = {}) {
     setMatchMinute(ev.minute);
   }
   if (ev.text) appendMatchEvent(ev);
-  if (ev.type === "context") {
-    const ctx = $("#match-context");
-    if (ctx) {
-      ctx.textContent = localizeMatchEvent(ev)
-        .replace(/^Context:\s*/, "")
-        .replace(/^情境：/, "");
-    }
-  }
   if (ev.type === "ht") setMatchLiveState("ht");
   if (ev.type === "ft") setMatchLiveState("ft");
 
@@ -8906,15 +8993,9 @@ async function openMatch() {
         appendMatchEvent({ type: "briefing", text, minute: 0 });
       }
     }
-    // 计分板情境条
+    // 计分板情境条：只放轮次，天气/德比留给简报卡与评论流（避免挤压两侧队名）
     const ctx = $("#match-context");
-    if (ctx && brief.weather) {
-      const bits = [`${brief.weather.icon} ${brief.weather.name}`];
-      if (brief.derby) bits.push(getLang() === "en" ? "Derby" : "德比");
-      if (brief.bigMatch) bits.push(getLang() === "en" ? "Spotlight" : "焦点");
-      bits.push(brief.roundLabel || "");
-      ctx.textContent = bits.filter(Boolean).join(" · ");
-    }
+    if (ctx && brief.roundLabel) ctx.textContent = brief.roundLabel;
   }
 
   hideHtPanel();
@@ -9267,15 +9348,6 @@ async function runMatch(mode) {
           })(),
         },
       });
-    }
-    const ctxEv = matchState.events.find((e) => e.type === "context");
-    if (ctxEv) {
-      const ctx = $("#match-context");
-      if (ctx) {
-        ctx.textContent = localizeMatchEvent(ctxEv)
-          .replace(/^Context:\s*/, "")
-          .replace(/^情境：/, "");
-      }
     }
 
     // 中场暂停：停掉播放控制，避免卡在「下一步」
