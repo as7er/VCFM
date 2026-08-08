@@ -84,6 +84,10 @@ import {
   isFullyDelegated,
   shouldStaffHandleMatchday,
 } from "./delegation.js";
+import {
+  applyCoachTacticalIdentity,
+  ensureCoachIdentity,
+} from "./manager-ecosystem.js";
 
 let activeRandom = Math.random;
 function rng() {
@@ -303,59 +307,103 @@ function formScore(club, n = 5) {
   return { score: s, len: slice.length };
 }
 
+function identityFormationForContext(identity, intent, fallback) {
+  const candidates = (identity?.preferredFormations || []).filter((formation) => FORMATIONS[formation]);
+  if (!candidates.length) return fallback;
+  const shapeScore = (formation) => {
+    const slots = FORMATIONS[formation]?.slots || [];
+    const defenders = slots.filter((slot) => slot.pos === "DEF").length;
+    const attackers = slots.filter((slot) => slot.pos === "ATT").length;
+    if (intent === "defend") return defenders * 4 - attackers * 2;
+    if (intent === "attack") return attackers * 4 - defenders;
+    return 0;
+  };
+  return candidates.sort((a, b) => shapeScore(b) - shapeScore(a))[0] || fallback;
+}
+
 function aiTuneTactics(club, opponent, world) {
   if (!club?.tactics || club.id === world.userClubId) return;
+  ensureStaff(club);
   ensureTactics(club);
+  const coach = club.staff?.coach || null;
+  const identity = ensureCoachIdentity(coach);
+  if (identity) {
+    if (
+      club.tactics.coachIdentityId !== coach.id
+      || club.tactics.coachIdentityVersion !== identity.version
+      || !identity.preferredFormations.includes(club.tactics.formation)
+    ) {
+      applyCoachTacticalIdentity(club, coach, { force: true, rebuildLineup: false });
+    } else {
+      club.tactics.style = identity.style;
+      club.tactics.pressing = identity.pressing;
+      club.tactics.tempo = identity.tempo;
+      club.tactics.width = identity.width;
+      club.tactics.defensiveLine = identity.defensiveLine;
+    }
+  }
   const t = club.tactics;
   const fs = formScore(club, 5);
   const myP = club.power || 50;
   const opP = opponent?.power || 50;
   const diff = myP - opP;
   const oppStyle = opponent?.tactics?.style || "balanced";
+  const adaptability = Number(identity?.adaptability || 3);
 
-  if (fs.len >= 3 && fs.score <= -2) {
-    t.style = chance(0.5) ? "defend" : "counter";
-    t.pressing = Math.max(1, Math.min(3, (t.pressing || 3) - 1));
-    t.tempo = Math.max(1, Math.min(3, (t.tempo || 3) - 1));
+  if (fs.len >= 3 && fs.score <= -2 && adaptability >= 3) {
+    t.style = identity?.style === "defend" ? "defend" : "counter";
+    t.pressing = Math.max(1, (t.pressing || 3) - 1);
+    t.tempo = Math.max(1, (t.tempo || 3) - 1);
     t.defensiveLine = Math.max(1, (t.defensiveLine || 3) - 1);
     t.width = Math.max(2, (t.width || 3) - 1);
-    if (chance(0.45)) t.formation = chance(0.5) ? "5-3-2" : "4-5-1";
-  } else if (fs.len >= 3 && fs.score >= 2) {
-    t.style = chance(0.55) ? "attack" : "balanced";
+    if (adaptability >= 4) {
+      t.formation = identityFormationForContext(identity, "defend", t.formation);
+    }
+  } else if (fs.len >= 3 && fs.score >= 2 && adaptability >= 3) {
     t.pressing = Math.min(5, Math.max(3, (t.pressing || 3) + 1));
     t.tempo = Math.min(5, Math.max(3, (t.tempo || 3) + 1));
     t.defensiveLine = Math.min(5, (t.defensiveLine || 3) + 1);
-    if (chance(0.35)) t.formation = chance(0.5) ? "4-3-3" : "3-4-3";
-  } else if (diff <= -12) {
-    t.style = "counter";
-    t.pressing = 2;
-    t.tempo = 4;
-    t.defensiveLine = 1;
-    t.width = 3;
-    t.formation = chance(0.5) ? "4-5-1" : "5-3-2";
-  } else if (diff >= 12) {
-    t.style = chance(0.4) ? "attack" : "possession";
-    t.pressing = 4;
-    t.tempo = t.style === "possession" ? 2 : 4;
-    t.defensiveLine = 4;
-    t.width = 4;
-    t.formation = chance(0.5) ? "4-2-3-1" : "4-3-3";
-  } else {
+    if (adaptability >= 4) {
+      t.formation = identityFormationForContext(identity, "attack", t.formation);
+    }
+  } else if (diff <= -12 && adaptability >= 2) {
+    t.style = identity?.style === "defend" ? "defend" : "counter";
+    t.pressing = Math.min(t.pressing || 3, 2);
+    t.tempo = Math.max(t.tempo || 3, 4);
+    t.defensiveLine = Math.min(t.defensiveLine || 3, 2);
+    t.width = Math.min(t.width || 3, 3);
+    t.formation = identityFormationForContext(identity, "defend", t.formation);
+  } else if (diff >= 12 && adaptability >= 2) {
+    t.style = identity?.style === "possession" ? "possession" : "attack";
+    t.pressing = Math.max(t.pressing || 3, 4);
+    t.tempo = t.style === "possession" ? Math.min(t.tempo || 3, 3) : Math.max(t.tempo || 3, 4);
+    t.defensiveLine = Math.max(t.defensiveLine || 3, 4);
+    t.width = Math.max(t.width || 3, 4);
+    t.formation = identityFormationForContext(identity, "attack", t.formation);
+  } else if (adaptability >= 4) {
     // 对阵风格克制：对方猛攻 → 防反；对方龟缩 → 控球/高压
     if (oppStyle === "attack" && chance(0.55)) {
       t.style = "counter";
-      t.defensiveLine = 2;
-      t.pressing = 2;
+      t.defensiveLine = Math.min(t.defensiveLine || 3, 2);
+      t.pressing = Math.min(t.pressing || 3, 2);
     } else if (oppStyle === "defend" && chance(0.5)) {
-      t.style = chance(0.5) ? "possession" : "attack";
-      t.pressing = 4;
-      t.defensiveLine = 4;
+      t.style = identity?.style === "possession" ? "possession" : "attack";
+      t.pressing = Math.max(t.pressing || 3, 4);
+      t.defensiveLine = Math.max(t.defensiveLine || 3, 4);
     } else if (oppStyle === "possession" && chance(0.45)) {
       t.style = "counter";
-      t.tempo = 4;
+      t.tempo = Math.max(t.tempo || 3, 4);
     }
   }
-  ensureMatchLineup(club, { forceAuto: true });
+  ensureMatchLineup(club, {
+    forceAuto: true,
+    youthPriority: identity?.youthTrust >= 4 ? "high" : "normal",
+    rotation: identity?.rotation >= 4
+      ? "fitness"
+      : identity?.rotation <= 2
+        ? "strongest"
+        : "balanced",
+  });
 }
 
 function emptySideStats() {

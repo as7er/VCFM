@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v204** · 禁区决策与门将出击 |
+| 当前版本 | **v205** · AI 主教练生态与战术身份 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -25,14 +25,14 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 仓库：https://github.com/as7er/vcfm
 
-### v204 更新亮点
+### v205 更新亮点
 
-- 空门在球员决定是否射门前就会按门将位置、射门线路与真实可达范围识别，不再出现看见空门却仍被普通球队射门冷却压制的情况。
-- 门将处理直塞和禁区持球者时始终保持在球门侧，不会因错误出击目标主动跑到球后方；射门飞行时会按反应属性追踪预测落点。
-- 门将真实移动到触球距离后，可以收球、用身体挡出松球、扑空或低概率犯规；这些结果由双方属性决定，不靠画面层摆拍。
-- 持球者会在门将近身封角时提前重算射门、传球或盘带；正常封角不被误判为空门，收球与身体封堵也不会冒充射门扑救统计。
+- 主教练拥有稳定的足球理念，包括偏好阵型、比赛风格、压迫、节奏、防线、青训信任、轮换和应变能力；旧档按职员身份稳定补齐。
+- AI 球队和受委托球队每场先执行主教练基础理念，再按实力差、近五场与对手风格有限应变，不添加隐藏能力或胜率修正。
+- AI 董事会按赛季目标、真实积分榜、近况、净胜球和降级风险周期复核；只有连续严重不达标才会解雇主教练。
+- 解雇补偿进入统一总账，原主帅回到共享市场，看守教练临时接管；新任招聘同时考虑能力、理念适配、平台、合同与现金。
 
-前序版本（v196–v203）：真实临场换人、赛后回放与完整评分、直播因果与定位球表现、球员特征与定位球职责、职员姓名与国籍因果、后台空间比赛 Worker、多年阵容规划与 AI 建队、球员细分位置与多位置适应性。完整条目见 [CHANGELOG.md](./CHANGELOG.md)。
+前序版本（v197–v204）：赛后回放与完整评分、直播因果与定位球表现、球员特征与定位球职责、职员姓名与国籍因果、后台空间比赛 Worker、多年阵容规划与 AI 建队、球员细分位置与多位置适应性、禁区决策与门将出击。完整条目见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ### 快速开始
 
@@ -71,7 +71,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **细分位置与阵容规划**：球员持有 13 个细分位置的熟悉度档案，阵型槽位按站位与纵深解析成细分位置，选人与换人共用同一份适配度；阵容页提供一至三年规划工作台，展示位置深度、未来合同、同级质量差与报名风险。
 - **训练与青训**：训练重点、强度、赛前备战、青训名单和球员成长；可委托助理教练按赛程与阵容短板安排。
 - **转会与合同**：夏窗、冬窗、续约、租借、自由球员和 AI 报价；买入、出售、续约与租借均按现实参与方逐阶段审核，永久转会支持分期、出场奖金、二次转会分成和青训补偿。
-- **职员体系**：主教练、球探和队医拥有能力、工资、合同与完整任职履历；姓名、国籍、国旗和头像来自同一份国籍事实，本土与外籍比例按足协、岗位和能力决定；可以签自由职员、接触其他俱乐部在职职员并支付补偿。
+- **职员体系**：主教练、球探和队医拥有能力、工资、合同与完整任职履历；主教练另有真实驱动阵型和临场应变的足球理念，AI 董事会会按连续成绩决定解雇、看守与再任命；姓名、国籍、国旗和头像来自同一份国籍事实。
 - **经理生涯**：董事会目标、名望、成就与执教历史；被解雇或主动请辞后进入待业市场，也可能在任时收到更高水平球队邀请。
 
 ### 经营与体验
@@ -154,7 +154,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v204** · box decisions and goalkeeper interventions |
+| Current version | **v205** · AI head-coach ecosystem and tactical identity |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -163,14 +163,14 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 Repository: https://github.com/as7er/vcfm
 
-### What's new in v204
+### What's new in v205
 
-- Open goals are identified before the shot decision from goalkeeper position, shot lane, and real reach, so a genuine empty net is no longer suppressed by the ordinary team shooting rhythm.
-- Goalkeepers stay goal-side when handling through balls and close dribblers instead of targeting a point behind the ball, and react toward projected shot crossings according to their reflexes.
-- Once physically close enough, a goalkeeper can claim, block the ball loose, miss the challenge, or rarely concede a foul. Outcomes read both players' existing attributes rather than presentation-only weights.
-- Ball carriers recalculate shoot, pass, or dribble choices when the goalkeeper closes down. Normal angle coverage is not mistaken for an empty net, and claims or body blocks are not counted as shot saves.
+- Head coaches now have stable football identities covering preferred formations, style, pressing, tempo, defensive line, youth trust, rotation, and adaptability. Existing saves derive them deterministically from staff identity.
+- AI and delegated teams begin each match from the coach's actual philosophy, then make limited adjustments from relative strength, recent form, and the opponent. No hidden ability or win-rate modifier is added.
+- AI boards review coaches against season objectives, the real table, recent results, goal difference, and relegation risk. Dismissal requires sustained serious underperformance.
+- Dismissal compensation enters the shared ledger, the outgoing coach returns to the labour market, a caretaker takes charge, and recruitment considers ability, tactical fit, platform, contract, and cash.
 
-Earlier releases (v196–v203): realistic in-match substitutions, post-match replays and full ratings, live-broadcast causality and set-piece presentation, player traits and set-piece duties, staff naming and nationality causality, the background spatial match worker, multi-year squad planning with AI squad building, and detailed positional aptitude. See [CHANGELOG.md](./CHANGELOG.md) for full entries.
+Earlier releases (v197–v204): post-match replays and full ratings, live-broadcast causality and set-piece presentation, player traits and set-piece duties, staff naming and nationality causality, the background spatial match worker, multi-year squad planning with AI squad building, detailed positional aptitude, and box/goalkeeper decisions. See [CHANGELOG.md](./CHANGELOG.md) for full entries.
 
 ### Quick start
 
@@ -209,7 +209,7 @@ Earlier releases (v196–v203): realistic in-match substitutions, post-match rep
 - **Detailed positions and squad planning**: every player carries familiarity for 13 detailed positions, formation slots resolve to those positions, and selection and substitutions share one aptitude view. The squad page includes a one-to-three-year planning workbench covering positional depth, future contracts, same-tier quality gaps, and registration risk.
 - **Training and youth**: training focus, intensity, match preparation, youth development, and assistant-manager delegation based on schedule and squad weaknesses.
 - **Transfers and contracts**: summer and winter windows, renewals, loans, free agents, and AI bids. Purchases, sales, renewals, and loans use staged reviews, while permanent deals support installments, appearance bonuses, sell-on clauses, and training compensation.
-- **Staff**: managers, scouts, and physios have ability, wages, contracts, and complete employment histories. Names, nationality, flags, and portraits come from one nationality fact, and the local-to-foreign mix follows the club's federation, the role, and ability. Hire free agents or approach employed staff with compensation.
+- **Staff**: managers, scouts, and physios have ability, wages, contracts, and complete employment histories. Head coaches also have football identities that drive formation and match adaptation, while AI boards use sustained results for dismissals, caretakers, and appointments. Names, nationality, flags, and portraits come from one nationality fact.
 - **Manager career**: board objectives, reputation, achievements, and job history. Sacking or resignation leads to unemployment and new offers; successful employed managers may receive prestige approaches.
 
 ### Operations and usability

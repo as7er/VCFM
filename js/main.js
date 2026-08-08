@@ -40,8 +40,8 @@ import {
   positionCoverage,
   positionLabel as detailedPositionLabel,
 } from "./player-positions.js";
-import { nationFlagHtml } from "./flags.js?v=204";
-import { clubCrestHtml } from "./club-crest.js?v=204";
+import { nationFlagHtml } from "./flags.js?v=205";
+import { clubCrestHtml } from "./club-crest.js?v=205";
 import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
 import { financeLedgerSummary, recordFinanceEntry } from "./finance-ledger.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
@@ -291,7 +291,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=204";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=205";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -307,6 +307,12 @@ import {
   setManagementMode,
   shouldStaffHandleMatchday,
 } from "./delegation.js";
+import {
+  coachIdentityFacts,
+  coachIdentitySummary,
+  ensureCoachIdentity,
+  managerReviewLabel,
+} from "./manager-ecosystem.js";
 import {
   ensureInternational,
   listInternationalCompetitions,
@@ -351,7 +357,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=204";
+} from "./avatar.js?v=205";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -439,7 +445,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=204").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=205").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -3055,6 +3061,7 @@ function renderStaff() {
         </div>
         <div class="meta">${en ? "Ability" : "能力"} <strong class="${ovrClass(s.rating)}">${s.rating}</strong> · ${en ? `Age ${s.age}` : `${s.age} 岁`}</div>
         <div class="meta">${en ? "Wage" : "周薪"} ${formatMoney(s.wage)} · ${en ? "Contract" : "合同"} ${years}${en ? "y" : " 年"}</div>
+        ${role === "coach" ? `<div class="meta">${escapeHtml(coachIdentitySummary(s, en ? "en" : "zh"))}</div>` : ""}
         <div class="meta muted">${en ? "Release cost ~" : "解约约 "}${formatMoney(comp)}</div>
         <p class="hint" style="margin:0.4rem 0">${en ? roleCopy[role]?.[1] || "" : meta.effect}</p>
         <div class="staff-card-actions">
@@ -3234,11 +3241,13 @@ function findStaffById(staffId, preferredClubId = null) {
 function staffImpactLines(staff, en) {
   const rating = Number(staff.rating || 8);
   if (staff.role === "coach") {
+    ensureCoachIdentity(staff);
     const matchMod = 0.94 + (rating / 20) * 0.14;
     return [
       en ? `Match support multiplier ${matchMod.toFixed(3)}x` : `比赛支持系数 ${matchMod.toFixed(3)}x`,
       en ? `Weekly youth growth chance +${(rating * 0.8).toFixed(1)} percentage points` : `年轻球员每周成长概率 +${(rating * 0.8).toFixed(1)} 个百分点`,
       en ? "Training delegation uses fitness, injuries, morale, schedule and squad weaknesses" : "委托训练会分析体能、伤病、士气、赛程与阵容短板",
+      ...coachIdentityFacts(staff, en ? "en" : "zh"),
     ];
   }
   if (staff.role === "scout") {
@@ -3326,6 +3335,11 @@ function showStaffModal(staffId, context = {}) {
   const clubLine = club
     ? `${en ? "Club" : "所属"} ${clubLinkHtml(club.id, clubDisplayName(club))}`
     : "";
+  const reviewLine = staff.role === "coach" && club?.managerReview && source === "opponent"
+    ? `${managerReviewLabel(club.managerReview, en ? "en" : "zh")} · ${
+        en ? "target" : "目标"
+      } ${en ? `top ${club.managerReview.targetPosition}` : `前 ${club.managerReview.targetPosition}`}`
+    : "";
   const returnClubId = context.returnClubId || (source !== "market" ? club?.id : null) || null;
 
   $("#modal-card")?.classList.remove("wide", "search-modal");
@@ -3356,6 +3370,7 @@ function showStaffModal(staffId, context = {}) {
       <span class="badge ${current ? "DEF" : source === "opponent" ? "MID" : "ATT"}">${escapeHtml(statusBadge)}</span>
       <span>${en ? "Weekly wage" : "周薪"} <strong>${formatMoney(staff.wage)}</strong></span>
       ${source === "market" ? `<span>${en ? "Signing fee" : "签约费"} <strong>${formatMoney(fee)}</strong></span>` : ""}
+      ${reviewLine ? `<span>${escapeHtml(reviewLine)}</span>` : ""}
     </div>
     <p>${escapeHtml(en ? roleCopy[staff.role]?.[1] || "" : meta.desc || "")}</p>
     <h3 class="staff-profile-subtitle">${en ? "Employment history" : "效力记录"}</h3>
@@ -3364,8 +3379,8 @@ function showStaffModal(staffId, context = {}) {
     <div class="staff-impact-list">${lines.map((line) => `<div>${escapeHtml(line)}</div>`).join("")}</div>
     <p class="hint">${escapeHtml(
       en
-        ? "Effects use the same staff rating that drives matches, transfers, youth development and recovery; there is no separate hidden profile rating."
-        : "资料展示与比赛、转会、青训和恢复实际使用同一职员能力，不存在独立隐藏评分。"
+        ? "The displayed ability and coaching identity are the same facts used by matches, delegation, recruitment, development and recovery; there is no separate hidden profile rating."
+        : "资料展示的职员能力与主教练理念，就是比赛、委托、招聘、青训和恢复实际读取的同一事实，不存在独立隐藏评分。"
     )}</p>
     ${
       source === "user"
@@ -3838,6 +3853,7 @@ function financeSourceLabel(source, en) {
     "contract-termination": ["球员解约补偿", "Player release compensation"],
     "free-agent-signing": ["自由球员签约", "Free-agent signing"],
     "staff-termination": ["职员解约补偿", "Staff termination"],
+    "manager-dismissal": ["主教练解雇补偿", "Head-coach dismissal"],
     "staff-signing": ["自由职员签约", "Free staff signing"],
     "staff-poach": ["职员挖角", "Staff approach"],
     "staff-market-refresh": ["刷新职员市场", "Staff market refresh"],
@@ -7797,6 +7813,26 @@ function advanceEventLines(events) {
             priority: 1,
           });
         }
+        break;
+      case "manager_dismissal":
+        lines.push({
+          day,
+          icon: "📢",
+          text: en
+            ? `${clubNameById(ev.clubId)} dismissed ${ev.coachName || "their head coach"}`
+            : `${clubNameById(ev.clubId)} 解雇主教练 ${ev.coachName || ""}`,
+          priority: 2,
+        });
+        break;
+      case "manager_appointment":
+        lines.push({
+          day,
+          icon: "📋",
+          text: en
+            ? `${clubNameById(ev.clubId)} appointed ${ev.coachName || "a new head coach"}`
+            : `${clubNameById(ev.clubId)} 任命 ${ev.coachName || "新任主教练"}`,
+          priority: 2,
+        });
         break;
       default:
         break;

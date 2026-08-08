@@ -10,6 +10,15 @@ import { formatMoney } from "./models.js";
 import { isTransferWindowOpen } from "./transfers.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { clubCashAvailability } from "./cash-reservations.js";
+import {
+  applyCoachTacticalIdentity,
+  coachClubFitScore,
+  ensureCoachIdentity,
+  ensureManagerReview,
+  evaluateManagerPerformance,
+  noteCoachAppointment,
+  noteCoachDeparture,
+} from "./manager-ecosystem.js";
 
 function staffCashFailure(world, club, amount, label) {
   const cash = clubCashAvailability(world, club, amount);
@@ -23,8 +32,8 @@ const ROLES = {
   coach: {
     key: "coach",
     label: "主教练",
-    desc: "提升比赛表现与训练成长，协助经理安排训练",
-    effect: "比赛强度、年轻球员成长、训练委托",
+    desc: "以本人足球理念带队，并负责比赛支持、训练与年轻球员成长",
+    effect: "战术理念、比赛支持、年轻球员成长、训练委托",
   },
   scout: {
     key: "scout",
@@ -257,6 +266,7 @@ export function ensureStaffProfile(staff, club = null, world = null) {
     }
   }
   staff.profileVersion = STAFF_PROFILE_VERSION;
+  if (staff.role === "coach") ensureCoachIdentity(staff);
   return staff;
 }
 
@@ -452,9 +462,45 @@ export function ensureStaff(club) {
 
 export function ensureWorldStaff(world) {
   if (!world?.clubs) return;
-  for (const club of world.clubs) ensureStaff(club);
+  for (const club of world.clubs) {
+    ensureStaff(club);
+    const coach = club.staff?.coach;
+    if (!coach) continue;
+    ensureStaffProfile(coach, club, world);
+    ensureManagerReview(world, club);
+    if (
+      coachControlsTactics(world, club)
+      && (
+        club.tactics?.coachIdentityId !== coach.id
+        || club.tactics?.coachIdentityVersion !== coach.footballIdentity?.version
+      )
+    ) {
+      applyCoachTacticalIdentity(club, coach, { rebuildLineup: true });
+    }
+  }
   ensureStaffMarket(world);
+  for (const staff of world.staffMarket) ensureStaffProfile(staff);
   ensureStaffApproaches(world);
+}
+
+function coachControlsTactics(world, club) {
+  if (!world || !club) return false;
+  if (club.id !== world.userClubId) return true;
+  return world.managementMode === "club_director" || club.delegation?.tactics === "staff";
+}
+
+function activateCoach(world, club, coach, reason, { forceTactics = true } = {}) {
+  if (!club || !coach) return null;
+  coach.role = "coach";
+  coach.clubId = club.id;
+  coach.joinedDay = Number(world?.day) || 1;
+  coach.joinedSeason = Number(world?.season) || null;
+  ensureStaffProfile(coach, club, world);
+  noteCoachAppointment(world, club, coach, reason);
+  if (forceTactics && coachControlsTactics(world, club)) {
+    applyCoachTacticalIdentity(club, coach, { force: true, rebuildLineup: true });
+  }
+  return coach;
 }
 
 export function staffRating(club, role) {
@@ -552,6 +598,7 @@ function pushFreeAgent(world, staff) {
   if (!world || !staff) return;
   ensureStaffMarket(world);
   staff.clubId = null;
+  staff.isCaretaker = false;
   // 自由身展示合同为 0
   staff.contractYears = 0;
   closeStaffTenure(staff, world);
@@ -578,7 +625,7 @@ function findEmployedStaff(world, staffId) {
   return null;
 }
 
-function makeCaretaker(club, role) {
+function makeCaretaker(club, role, world = null) {
   const temp = Math.max(5, staffTargetRating(club, role, { jitter: false }) - rand(3, 5));
   const s = createStaff(role, temp, {
     clubId: club.id,
@@ -588,6 +635,10 @@ function makeCaretaker(club, role) {
   });
   s.contractYears = 1;
   s.clubId = club.id;
+  s.isCaretaker = role === "coach";
+  s.joinedDay = Number(world?.day) || 1;
+  s.joinedSeason = Number(world?.season) || null;
+  ensureStaffProfile(s, club, world);
   return s;
 }
 
@@ -616,7 +667,9 @@ export function fireStaff(worldOrClub, roleMaybe, roleArg) {
   if (fundingError) return { ok: false, msg: fundingError };
   recordFinanceEntry(club, -cost, { category: "staff", source: "staff-termination", season: world?.season ?? null, day: world?.day ?? null });
   const released = { ...s, history: structuredClone(s.history || []), clubId: null, contractYears: 0 };
-  club.staff[role] = makeCaretaker(club, role);
+  if (role === "coach") noteCoachDeparture(world, club, released, "俱乐部主动解约");
+  club.staff[role] = makeCaretaker(club, role, world);
+  if (role === "coach") activateCoach(world, club, club.staff[role], "临时接管");
   if (world) pushFreeAgent(world, released);
   return {
     ok: true,
@@ -645,6 +698,7 @@ export function hireStaff(world, club, candidate, fee = null) {
   recordFinanceEntry(club, -signFee, { category: "staff", source: "staff-signing", season: world?.season ?? null, day: world?.day ?? null });
   if (old) {
     const released = { ...old, history: structuredClone(old.history || []), clubId: null, contractYears: 0 };
+    if (role === "coach") noteCoachDeparture(world, club, released, "由新任主教练接替");
     pushFreeAgent(world, released);
   }
   const years = defaultStaffContractYears(candidate.rating);
@@ -660,8 +714,11 @@ export function hireStaff(world, club, candidate, fee = null) {
     contractYears: years,
     clubId: club.id,
     joinedDay: world?.day ?? 1,
+    joinedSeason: world?.season ?? null,
+    isCaretaker: false,
   };
   ensureStaffProfile(club.staff[role], club, world);
+  if (role === "coach") activateCoach(world, club, club.staff[role], "自由身签约");
   removeFromMarket(world, candidate.id);
   return {
     ok: true,
@@ -997,12 +1054,23 @@ export function completeStaffMove(world, approach) {
   const displacedRating =
     displaced && displaced.id !== staff.id ? displaced.rating : null;
   if (displaced && displaced.id !== staff.id) {
-    pushFreeAgent(world, { ...displaced, clubId: null, contractYears: 0 });
+    const released = {
+      ...displaced,
+      history: structuredClone(displaced.history || []),
+      clubId: null,
+      contractYears: 0,
+    };
+    if (role === "coach") noteCoachDeparture(world, buyer, released, "由新任主教练接替");
+    pushFreeAgent(world, released);
   }
 
   // 卖方填临时工
   if (fromClub) {
-    fromClub.staff[role] = makeCaretaker(fromClub, role);
+    if (role === "coach") {
+      noteCoachDeparture(world, fromClub, staff, `受聘于${clubNameOf(buyer)}`);
+    }
+    fromClub.staff[role] = makeCaretaker(fromClub, role, world);
+    if (role === "coach") activateCoach(world, fromClub, fromClub.staff[role], "原主教练离任后临时接管");
   }
 
   closeStaffTenure(staff, world);
@@ -1018,8 +1086,18 @@ export function completeStaffMove(world, approach) {
     contractYears: years,
     clubId: buyer.id,
     joinedDay: world.day || 1,
+    joinedSeason: world.season || null,
+    isCaretaker: false,
   };
   ensureStaffProfile(buyer.staff[role], buyer, world);
+  if (role === "coach") {
+    activateCoach(
+      world,
+      buyer,
+      buyer.staff[role],
+      approach.freeAgent ? "自由身签约" : `从${approach.fromClubName || "其他俱乐部"}受聘`
+    );
+  }
   removeFromMarket(world, staff.id);
 
   approach.status = "completed";
@@ -1084,9 +1162,11 @@ export function processStaffContractsEndOfSeason(world) {
       ensureStaffContract(s, club);
       s.contractYears = (s.contractYears || 1) - 1;
       if (s.contractYears <= 0) {
-        const gone = { ...s, clubId: null, contractYears: 0 };
+        const gone = { ...s, history: structuredClone(s.history || []), clubId: null, contractYears: 0 };
+        if (role === "coach") noteCoachDeparture(world, club, gone, "合同到期");
         pushFreeAgent(world, gone);
-        club.staff[role] = makeCaretaker(club, role);
+        club.staff[role] = makeCaretaker(club, role, world);
+        if (role === "coach") activateCoach(world, club, club.staff[role], "合同到期后临时接管");
         released++;
         if (club.id === world.userClubId) {
           world.news?.unshift({
@@ -1126,6 +1206,8 @@ export function processStaffMarketDay(world) {
     ensureStaff(club);
     if ((club.money || 0) < 150_000) continue;
     for (const role of STAFF_ROLES) {
+      // 主教练任免读取成绩、目标和足球理念，由独立生态流程处理。
+      if (role === "coach") continue;
       const cur = club.staff[role];
       const target = staffTargetRating(club, role, { jitter: false });
       const gap = target - (cur?.rating || 0);
@@ -1165,6 +1247,183 @@ export function processStaffMarketDay(world) {
       if (res.ok || res.pending) return;
     }
   }
+}
+
+function managerCandidateRows(world, buyer) {
+  ensureStaffMarket(world);
+  const target = staffTargetRating(buyer, "coach", { jitter: false });
+  let freeCoaches = world.staffMarket.filter(
+    (staff) => staff?.role === "coach" && staff.clubId == null
+  );
+  if (!freeCoaches.length) {
+    const candidate = createStaff("coach", clamp(target + rand(-2, 1), 5, 19), {
+      clubId: null,
+      contractYears: 0,
+      homeNation: buyer.countryCode,
+    });
+    candidate.clubId = null;
+    candidate.contractYears = 0;
+    world.staffMarket.unshift(candidate);
+    freeCoaches = [candidate];
+  }
+
+  const rows = freeCoaches.map((staff) => ({ staff, fromClub: null, freeAgent: true }));
+  for (const club of world.clubs || []) {
+    if (club.id === buyer.id || club.id === world.userClubId) continue;
+    ensureStaff(club);
+    const staff = club.staff?.coach;
+    if (!staff || staff.isCaretaker) continue;
+    if (
+      Number(staff.joinedSeason) === Number(world.season)
+      && Number(staff.joinedDay) === Number(world.day)
+    ) {
+      continue;
+    }
+    ensureStaffContract(staff, club);
+    const buyerStepUp = (buyer.power || 0) >= (club.power || 0) + 4;
+    if (!buyerStepUp && (staff.contractYears || 1) > 1) continue;
+    if ((staff.rating || 0) > target + 4) continue;
+    rows.push({ staff, fromClub: club, freeAgent: false });
+  }
+
+  const dismissedId = buyer.managerReview?.lastDismissedCoachId || null;
+  return rows
+    .filter((row) => row.staff.id !== dismissedId)
+    .map((row) => {
+      const initialCost = row.freeAgent
+        ? staffSigningFee(row.staff) + (row.staff.wage || 0) * 4
+        : staffCompensationFee(row.staff) + (row.staff.wage || 0) * 4;
+      const affordabilityPenalty = initialCost > Math.max(250_000, (buyer.money || 0) * 0.35) ? 24 : 0;
+      const platformBonus = row.fromClub && (buyer.power || 0) >= (row.fromClub.power || 0) + 6 ? 5 : 0;
+      return {
+        ...row,
+        initialCost,
+        score: coachClubFitScore(row.staff, buyer) + platformBonus - affordabilityPenalty,
+      };
+    })
+    .sort((a, b) => b.score - a.score || (b.staff.rating || 0) - (a.staff.rating || 0));
+}
+
+function appointAiManager(world, club) {
+  const rows = managerCandidateRows(world, club);
+  for (const row of rows.slice(0, 8)) {
+    const result = approachStaff(world, club.id, row.staff.id, row.fromClub?.id || null);
+    if (result.ok) return result;
+  }
+  return { ok: false, msg: "暂无主教练候选人愿意接受任命" };
+}
+
+function dismissAiManager(world, club, evaluation) {
+  ensureStaff(club);
+  const coach = club.staff?.coach;
+  if (!coach || coach.isCaretaker) return null;
+  const reasons = evaluation.reasons?.length
+    ? evaluation.reasons.join("、")
+    : "成绩持续未达到董事会目标";
+  const cost = Math.max(
+    Number(coach.wage || 0) * 4,
+    Math.round(staffCompensationFee(coach) * 0.25)
+  );
+  recordFinanceEntry(club, -cost, {
+    category: "staff",
+    source: "manager-dismissal",
+    season: world.season,
+    day: world.day,
+    meta: {
+      coachId: coach.id,
+      position: evaluation.facts?.position,
+      targetPosition: evaluation.facts?.targetPosition,
+    },
+  });
+  const released = {
+    ...coach,
+    history: structuredClone(coach.history || []),
+    clubId: null,
+    contractYears: 0,
+  };
+  noteCoachDeparture(world, club, released, reasons, evaluation.facts);
+  pushFreeAgent(world, released);
+  const dismissedId = coach.id;
+  club.staff.coach = makeCaretaker(club, "coach", world);
+  activateCoach(world, club, club.staff.coach, "董事会解雇原主教练后临时接管");
+  club.managerReview.lastDismissedCoachId = dismissedId;
+  club.managerReview.lastDismissal = {
+    season: world.season,
+    day: world.day,
+    coachId: dismissedId,
+    coachName: coach.name,
+    reasons: [...(evaluation.reasons || [])],
+    facts: evaluation.facts ? { ...evaluation.facts } : null,
+    compensation: cost,
+  };
+  world.news?.unshift({
+    day: world.day,
+    text: `📢 换帅：${clubNameOf(club)} 解雇 ${coach.name}。${reasons}；解约补偿 ${formatMoney(cost)}，暂由 ${club.staff.coach.name} 接管。`,
+  });
+  return {
+    type: "manager_dismissal",
+    clubId: club.id,
+    coachId: dismissedId,
+    coachName: coach.name,
+    caretakerId: club.staff.coach.id,
+    compensation: cost,
+    facts: evaluation.facts,
+  };
+}
+
+/** AI 主教练每日生态：填补持续空缺，并按真实成绩进行周期复核。 */
+export function processManagerEcosystemDay(world, options = {}) {
+  if (!world?.clubs || world.seasonOver) return [];
+  if (!options.alreadyEnsured) ensureWorldStaff(world);
+  const events = [];
+  const day = Number(world.day) || 1;
+  const season = Number(world.season) || 0;
+  const maxChanges = Math.max(1, Number(options.maxChanges) || 4);
+
+  for (const club of world.clubs) {
+    if (club.id === world.userClubId || events.length >= maxChanges) continue;
+    const coach = club.staff?.coach;
+    if (!coach?.isCaretaker) continue;
+    const review = ensureManagerReview(world, club);
+    const vacancyDay = Number(review.vacancySinceDay) || Number(coach.joinedDay) || day;
+    const vacancySeason = Number(review.vacancySinceSeason) || Number(coach.joinedSeason) || season;
+    const vacancyOldEnough = season > vacancySeason || day - vacancyDay >= 7;
+    if (!options.forceAppointments && !vacancyOldEnough) continue;
+    const result = appointAiManager(world, club);
+    if (result.ok) {
+      events.push({
+        type: "manager_appointment",
+        clubId: club.id,
+        coachId: result.staff?.id || club.staff?.coach?.id,
+        coachName: result.staff?.name || club.staff?.coach?.name,
+      });
+    }
+  }
+
+  for (const club of world.clubs) {
+    if (club.id === world.userClubId || events.length >= maxChanges) continue;
+    if (club.staff?.coach?.isCaretaker) continue;
+    const evaluation = evaluateManagerPerformance(world, club, { seasonEnd: false });
+    if (!evaluation.dismiss) continue;
+    const event = dismissAiManager(world, club, evaluation);
+    if (event) events.push(event);
+  }
+  return events;
+}
+
+/** 赛季末使用最终积分榜复核，升降级改写 division 前调用。 */
+export function processManagerEcosystemSeasonEnd(world) {
+  if (!world?.clubs) return [];
+  ensureWorldStaff(world);
+  const events = [];
+  for (const club of world.clubs) {
+    if (club.id === world.userClubId || club.staff?.coach?.isCaretaker) continue;
+    const evaluation = evaluateManagerPerformance(world, club, { seasonEnd: true });
+    if (!evaluation.dismiss) continue;
+    const event = dismissAiManager(world, club, evaluation);
+    if (event) events.push(event);
+  }
+  return events;
 }
 
 export { ROLES, STAFF_ROLES };

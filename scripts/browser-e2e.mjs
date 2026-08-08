@@ -51,6 +51,7 @@ const navGroupByTab = {
   finance: "overview",
   career: "overview",
   squad: "team",
+  staff: "team",
   training: "team",
   tactics: "team",
   fixtures: "matches",
@@ -93,7 +94,7 @@ try {
   assert.notEqual(await page.locator("#date-label").innerText(), dateBeforeWorkerAdvance);
   assert.equal(await page.locator("#btn-advance").isEnabled(), true);
 
-  for (const tab of ["finance", "squad", "training", "tactics", "fixtures", "career"]) {
+  for (const tab of ["finance", "squad", "staff", "training", "tactics", "fixtures", "career"]) {
     await openTab(page, tab);
     await page.waitForTimeout(100);
     await assertNoHorizontalOverflow(page, `desktop ${tab}`);
@@ -107,6 +108,14 @@ try {
       await page.waitForSelector("#squad-plan-summary .squad-plan-table");
       assert.equal(await page.locator("#squad-plan-summary .squad-plan-table tbody tr").count(), 4);
       assert.match(await page.locator("#squad-plan-summary").innerText(), /多年阵容规划|Multi-year squad plan/);
+    }
+    if (tab === "staff") {
+      const coachCard = page.locator("#staff-current .staff-card").first();
+      assert.match(await coachCard.innerText(), /4-3-3|4-2-3-1|4-4-2|3-5-2|5-3-2|4-1-4-1|4-5-1|3-4-3/);
+      await coachCard.locator("[data-staff-link]").last().click();
+      await page.waitForSelector('#modal:not(.hidden) .staff-impact-list');
+      assert.match(await page.locator('#modal:not(.hidden) .staff-impact-list').innerText(), /足球理念|Identity:/);
+      await page.keyboard.press("Escape");
     }
   }
 
@@ -155,7 +164,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

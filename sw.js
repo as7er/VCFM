@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v204";
+const CACHE = "vcfm-v205";
 const ASSETS = [
   "./",
   "./index.html",
@@ -59,6 +59,7 @@ const ASSETS = [
   // 运行时依赖（此前遗漏会导致离线半残）
   "./js/media.js",
   "./js/staff.js",
+  "./js/manager-ecosystem.js",
   "./js/intl.js",
   "./js/flags.js",
   "./js/honors.js",

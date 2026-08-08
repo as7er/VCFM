@@ -9,6 +9,10 @@ import {
 } from "./models.js";
 import { assistantTrainingPlan, setTraining } from "./training.js";
 import { setTrainingMode } from "./training-boost.js";
+import {
+  ensureCoachIdentity,
+  preferredCoachFormation,
+} from "./manager-ecosystem.js";
 
 const DEFAULT_DELEGATION = Object.freeze({
   training: "player",
@@ -186,10 +190,11 @@ function formationFit(club, formation) {
   return score;
 }
 
-function chooseFormation(club, delegation) {
+function chooseFormation(club, delegation, coach) {
   ensureTactics(club);
   if (delegation.locks.formation) return club.tactics.formation;
   if (delegation.principles.preferredFormation) return delegation.principles.preferredFormation;
+  if (ensureCoachIdentity(coach)) return preferredCoachFormation(coach, club);
   return Object.entries(FORMATIONS)
     .sort((a, b) => formationFit(club, b[1]) - formationFit(club, a[1]))[0]?.[0] || "4-3-3";
 }
@@ -212,28 +217,35 @@ export function buildDelegatedTactics(world, club, fixture = null) {
   const opponentLevel = squadLevel(opponent);
   const difference = ownLevel - opponentLevel;
   const rating = Number(coach.rating || 8);
-  const formation = chooseFormation(club, delegation);
-  let style = "balanced";
-  let pressing = 3;
-  let tempo = 3;
-  let width = 3;
-  let defensiveLine = 3;
+  const identity = ensureCoachIdentity(coach);
+  const formation = chooseFormation(club, delegation, coach);
+  const adaptability = Number(identity?.adaptability || 3);
+  let style = identity?.style || "balanced";
+  let pressing = Number(identity?.pressing || 3);
+  let tempo = Number(identity?.tempo || 3);
+  let width = Number(identity?.width || 3);
+  let defensiveLine = Number(identity?.defensiveLine || 3);
 
-  if (opponent && difference <= -1.5) {
+  if (opponent && difference <= -1.5 && adaptability >= 3) {
     style = "counter";
-    pressing = 2;
-    tempo = 4;
-    defensiveLine = 2;
-  } else if (opponent && difference >= 1.5) {
-    style = rating >= 12 ? "possession" : "attack";
-    pressing = 4;
-    tempo = style === "possession" ? 2 : 4;
-    defensiveLine = 4;
+    pressing = Math.min(pressing, 2);
+    tempo = Math.max(tempo, 4);
+    defensiveLine = Math.min(defensiveLine, 2);
+  } else if (opponent && difference >= 1.5 && adaptability >= 3) {
+    style = identity?.archetype === "controlled" || rating >= 14 ? "possession" : "attack";
+    pressing = Math.max(pressing, 4);
+    tempo = style === "possession" ? Math.min(tempo, 3) : Math.max(tempo, 4);
+    defensiveLine = Math.max(defensiveLine, 4);
   }
-  if (rating >= 14 && opponent?.tactics?.style === "attack" && difference < 1.5) {
+  if (
+    rating >= 14
+    && adaptability >= 4
+    && opponent?.tactics?.style === "attack"
+    && difference < 1.5
+  ) {
     style = "counter";
-    pressing = 2;
-    defensiveLine = 2;
+    pressing = Math.min(pressing, 2);
+    defensiveLine = Math.min(defensiveLine, 2);
   }
   const xi = (club.players || []).filter((p) => club.tactics.lineup?.includes(p.id));
   const avgFitness = average(xi.map((p) => Number(p.fitness ?? 70)), 75);
@@ -250,6 +262,7 @@ export function buildDelegatedTactics(world, club, fixture = null) {
     width: clamp(width, 1, 5),
     defensiveLine: clamp(defensiveLine, 1, 5),
     coachId: coach.id,
+    coachIdentity: identity?.archetype || null,
   };
 }
 
@@ -273,7 +286,8 @@ export function applyDelegatedTactics(world, club, fixture = null, { force = fal
 export function applyDelegatedLineup(world, club, options = {}) {
   const delegation = ensureDelegation(world, club);
   if (!options.force && !isFullyDelegated(world, club, "lineup")) return { ok: false, skipped: "player" };
-  if (!delegationStaff(club)) return { ok: false, msg: "尚未聘请主教练" };
+  const coach = delegationStaff(club);
+  if (!coach) return { ok: false, msg: "尚未聘请主教练" };
   const lockedPlayerIds = [...delegation.locks.playerIds];
   if (delegation.locks.corePlayerId) lockedPlayerIds.push(delegation.locks.corePlayerId);
   const lineup = autoLineup(club, {

@@ -1905,10 +1905,20 @@ export function assignPlayersToFormationSlots(xi, slots) {
  * 保留用户已选首发：仅替换伤停/不存在/人数不足的位置
  * AI 队或 lineup 空时退回 autoLineup
  */
-export function ensureMatchLineup(club, { forceAuto = false, day = null, importance = 0.5, eligibleIds = null } = {}) {
+export function ensureMatchLineup(
+  club,
+  {
+    forceAuto = false,
+    day = null,
+    importance = 0.5,
+    eligibleIds = null,
+    youthPriority = "normal",
+    rotation = "balanced",
+  } = {}
+) {
   ensureTactics(club);
   if (forceAuto || !club.tactics.lineup?.length) {
-    return autoLineup(club, { day, importance, eligibleIds });
+    return autoLineup(club, { day, importance, eligibleIds, youthPriority, rotation });
   }
   const formation = FORMATIONS[club.tactics.formation] || FORMATIONS["4-3-3"];
   const need = formation.slots.length;

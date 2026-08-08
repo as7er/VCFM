@@ -59,6 +59,8 @@ import {
   approachStaff,
   resolveStaffApproach,
   processStaffMarketDay,
+  processManagerEcosystemDay,
+  processManagerEcosystemSeasonEnd,
   processStaffContractsEndOfSeason,
   ensureStaffApproaches,
   pendingStaffApproaches,
@@ -774,6 +776,11 @@ export function advanceDay(world, options = {}) {
   if (aiMatchResults.length > 0) {
     events.push({ type: "key_matches", matches: aiMatchResults });
   }
+  // 用户比赛尚未结算时积分榜不完整，AI 董事会延后到下一完整日复核。
+  const managerEvents = userMatches.length
+    ? []
+    : processManagerEcosystemDay(world, { alreadyEnsured: true });
+  if (managerEvents.length) events.push(...managerEvents);
 
   // 租借到期归还
   ensureLoans(world);
@@ -972,6 +979,9 @@ export function finishSeason(world) {
   const leaguePay = applySeasonLeagueFinance(world, getSortedTable);
   const sponsorshipPay = settleSponsorshipSeason(world, getSortedTable);
   const debtPay = settleWorldDebtSeason(world);
+
+  // AI 董事会必须在升降级改写 division 前，按最终积分榜复核主教练。
+  processManagerEcosystemSeasonEnd(world);
 
   // 先算本级排名与升降级（在年龄变化前，用本赛季积分）
   const promoNews = applyPromotionRelegation(world);
