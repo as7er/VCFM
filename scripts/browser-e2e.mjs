@@ -50,6 +50,7 @@ const navGroupByTab = {
   dashboard: "overview",
   finance: "overview",
   career: "overview",
+  media: "overview",
   squad: "team",
   staff: "team",
   training: "team",
@@ -95,7 +96,7 @@ try {
   assert.notEqual(await page.locator("#date-label").innerText(), dateBeforeWorkerAdvance);
   assert.equal(await page.locator("#btn-advance").isEnabled(), true);
 
-  for (const tab of ["finance", "squad", "staff", "training", "tactics", "facilities", "fixtures", "career"]) {
+  for (const tab of ["finance", "squad", "staff", "training", "tactics", "facilities", "media", "fixtures", "career"]) {
     await openTab(page, tab);
     await page.waitForTimeout(100);
     await assertNoHorizontalOverflow(page, `desktop ${tab}`);
@@ -113,6 +114,11 @@ try {
         assert.ok(effect.trim().length > 0, "each facility card must explain its current effect");
       }
       assert.ok((await page.locator("#facilities-hint").innerText()).trim().length > 0);
+    }
+    if (tab === "media") {
+      // 开局有揭幕报道；即使为空也必须渲染出占位文案，不能是空白面板
+      assert.ok((await page.locator("#media-count").innerText()).trim().length > 0);
+      assert.ok((await page.locator("#media-feed").innerText()).trim().length > 0);
     }
     if (tab === "squad") {
       await page.waitForSelector("#squad-plan-summary .squad-plan-table");

@@ -46,6 +46,7 @@ import { applyWorldClubBranding, localizedClubName, localizedClubShortName } fro
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
 import { renderFacilities as renderFacilitiesView } from "./ui/facilities.js";
+import { renderMedia as renderMediaView } from "./ui/media.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
 import { clubCashAvailability } from "./cash-reservations.js";
 import { buildTransferPaymentPlan } from "./finance-obligations.js";
@@ -3426,28 +3427,9 @@ function showStaffModal(staffId, context = {}) {
   $("#modal-card").scrollTop = 0;
 }
 
+/** 媒体页渲染委托给 js/ui/media.js */
 function renderMedia() {
-  ensureMedia(world);
-  const en = getLang() === "en";
-  const feed = $("#media-feed");
-  if (!feed) return;
-  const list = world.media || [];
-  $("#media-count").textContent = t("media.count", { n: list.length });
-  feed.innerHTML = list.length
-    ? list
-        .map((a) => {
-          const tone = a.tone || "neutral";
-          return `<article class="media-card ${tone}">
-            <div class="outlet">
-              <span>${escapeHtml(a.outlet || (en ? "Media" : "媒体"))}</span>
-              <span>S${a.season || world.season} · D${a.day ?? "—"}</span>
-            </div>
-            <h3>${escapeHtml(a.headline)}</h3>
-            <p class="body">${escapeHtml(a.body || "")}</p>
-          </article>`;
-        })
-        .join("")
-    : `<p class="muted">${en ? "No stories yet. Matches, transfers and calendar progress will populate this feed." : "暂无报道。比赛、转会、推进日程后会出现媒体内容。"}</p>`;
+  renderMediaView(world, getLang() === "en", t);
 }
 
 function playerStats(p) {
