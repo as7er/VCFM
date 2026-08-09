@@ -12,6 +12,8 @@ const ASSETS = [
   "./js/ui/finance.js",
   "./js/ui/facilities.js",
   "./js/ui/media.js",
+  "./js/ui/links.js",
+  "./js/ui/league-centre.js",
   "./js/engine.js",
   "./js/match.js",
   "./js/match-presentation.js",

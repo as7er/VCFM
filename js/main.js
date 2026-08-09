@@ -42,11 +42,22 @@ import {
 } from "./player-positions.js";
 import { nationFlagHtml } from "./flags.js?v=205";
 import { clubCrestHtml } from "./club-crest.js?v=205";
-import { applyWorldClubBranding, localizedClubName, localizedClubShortName } from "./branding.js";
+import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
 import { renderFacilities as renderFacilitiesView } from "./ui/facilities.js";
 import { renderMedia as renderMediaView } from "./ui/media.js";
+import {
+  setLinkWorldSource,
+  clubLinkHtml,
+  playerLinkHtml,
+  clubDisplayName,
+  clubDisplayShortName,
+} from "./ui/links.js";
+import {
+  renderTable as renderTableView,
+  renderStats as renderStatsView,
+} from "./ui/league-centre.js";
 import { clubSeasonBudgetSnapshot, updateClubFinanceBudget } from "./club-finance.js";
 import { clubCashAvailability } from "./cash-reservations.js";
 import { buildTransferPaymentPlan } from "./finance-obligations.js";
@@ -60,14 +71,6 @@ import {
   sortedContinentalTable,
   continentalPlayerLeaders,
 } from "./cup.js";
-
-function clubDisplayName(club) {
-  return localizedClubName(club, getLang()) || club?.name || "—";
-}
-
-function clubDisplayShortName(club) {
-  return localizedClubShortName(club, getLang()) || clubDisplayName(club);
-}
 
 function clubNameById(clubId, fallback = "—") {
   const club = world?.clubs?.find((item) => item.id === clubId);
@@ -163,7 +166,6 @@ import {
   getNextUserMatch,
   sellPlayer,
   getMarketPlayers,
-  getStatLeaders,
   renewUserPlayer,
   terminateUserPlayer,
   previewTerminate,
@@ -427,6 +429,8 @@ function handleSacked(result) {
 }
 
 let world = null;
+// 共享链接工具按需读取当前世界；传取值函数而非 world 本身，读档替换后自动跟随
+setLinkWorldSource(() => world);
 let pendingMatch = null;
 let liveRunning = false;
 /** @type {import('./match.js').createMatchSession extends Function ? any : any} */
@@ -5957,41 +5961,6 @@ function openGlobalSearch() {
   requestAnimationFrame(() => input?.focus());
 }
 
-function clubLinkHtml(clubId, label, extraClass = "") {
-  const club = world.clubs.find((c) => c.id === clubId);
-  const fullName = clubDisplayName(club);
-  const defaultName =
-    label == null || label === club?.name || label === club?.nameZh || label === club?.nameEn;
-  const codeName = label === club?.shortName || label === club?.shortCode;
-  const name = defaultName
-    ? fullName
-    : codeName
-      ? clubDisplayShortName(club)
-      : label;
-  const title = name !== fullName ? ` title="${escapeHtml(fullName)}" aria-label="${escapeHtml(fullName)}"` : "";
-  const crest = club
-    ? clubCrestHtml(club, {
-        size: extraClass.includes("compact") ? 16 : 18,
-        className: "club-link-crest",
-        decorative: true,
-        lazy: true,
-      })
-    : "";
-  return `<button type="button" class="club-link ${extraClass}" data-club-link="${escapeHtml(clubId)}"${title}>${crest}<span class="club-link-label">${escapeHtml(name)}</span></button>`;
-}
-
-/** 可点击球员名 → showPlayerModal（全局 data-player-link 委托） */
-function playerLinkHtml(playerId, label, extraClass = "", context = null) {
-  if (!playerId) return escapeHtml(label ?? "—");
-  const nationAttrs = context?.nationCode
-    ? ` data-player-nation="${escapeHtml(context.nationCode)}"${context.squadNumber != null ? ` data-player-number="${Number(context.squadNumber)}"` : ""}`
-    : "";
-  const browseAttrs = context?.browseType && context?.browseId
-    ? ` data-player-browse="${escapeHtml(context.browseType)}" data-player-browse-id="${escapeHtml(context.browseId)}"${context.competitionId ? ` data-player-competition="${escapeHtml(context.competitionId)}"` : ""}`
-    : "";
-  return `<button type="button" class="player-link ${extraClass}" data-player-link="${escapeHtml(playerId)}"${nationAttrs}${browseAttrs}>${escapeHtml(label ?? "?")}</button>`;
-}
-
 function formatFormHtml(form) {
   const list = (form || []).slice(-5);
   if (!list.length) return `<span class="muted">—</span>`;
@@ -6306,71 +6275,20 @@ function showClubModal(clubId) {
   openSharedModal();
 }
 
+/** 联赛榜与数据榜共享同一份筛选状态，委托给 js/ui/league-centre.js */
+const leagueCentreState = {
+  get leagueDivision() { return selectedLeagueDivision; },
+  set leagueDivision(v) { selectedLeagueDivision = v; },
+  get statsDivision() { return selectedStatsDivision; },
+  set statsDivision(v) { selectedStatsDivision = v; },
+};
+
 function renderTable() {
-  const club = getUserClub(world);
-  const sel = $("#table-division");
-  fillDivisionSelects(club?.division || 3);
-  const requestedDivision = Number(selectedLeagueDivision || club?.division || 3);
-  selectedLeagueDivision = DIVISIONS[requestedDivision]
-    ? requestedDivision
-    : Number(club?.division || 3);
-  if (sel) sel.value = String(selectedLeagueDivision);
-  if (sel && !sel._bound) {
-    sel._bound = true;
-    sel.addEventListener("change", () => {
-      sel.dataset.touched = "1";
-      selectedLeagueDivision = Number(sel.value);
-      selectedStatsDivision = sel.value;
-      renderTable();
-    });
-  }
-  const div = Number(selectedLeagueDivision || club.division || 3);
-  const info = DIVISIONS[div] || DIVISIONS[3];
-  const table = getSortedTable(world, div);
-  const n = table.length;
-  const en = getLang() === "en";
-
-  const divLabel = t("div." + div) || info.name || "";
-  $("#table-title").textContent = t("table.titleNamed", { name: divLabel });
-  const parts = [`${n} ${en ? "clubs" : "支球队"}`];
-  if (info.promote) {
-    const up = DIVISIONS[info.upperDivision];
-    const upName = up ? t("div." + info.upperDivision) || up.name : en ? "upper tier" : "上级";
-    parts.push(en ? `top ${info.promote} promote to ${upName}` : `前 ${info.promote} 名升${upName}`);
-  }
-  if (info.relegate) {
-    const low = DIVISIONS[info.lowerDivision];
-    const lowName = low ? t("div." + info.lowerDivision) || low.name : en ? "lower tier" : "下级";
-    parts.push(en ? `bottom ${info.relegate} relegate to ${lowName}` : `后 ${info.relegate} 名降${lowName}`);
-  }
-  $("#table-hint").textContent = parts.join(en ? " · " : " · ");
-
-  const tbody = $("#league-table tbody");
-  const upN = info.promote || 0;
-  const downN = info.relegate || 0;
-  tbody.innerHTML = table.length
-    ? table
-        .map((r, i) => {
-          const me = r.id === world.userClubId;
-          const rank = i + 1;
-          let zone = "";
-          if (upN && rank <= upN) zone = ` <span class="badge MID">${en ? "Promotion" : "升级区"}</span>`;
-          if (downN && rank > n - downN) zone = ` <span class="badge ATT">${en ? "Relegation" : "降级区"}</span>`;
-          return `<tr class="${me ? "me" : ""}">
-            <td>${rank}</td>
-            <td>${clubLinkHtml(r.id, r.name)}${me ? " ★" : ""}${zone}</td>
-            <td>${r.played}</td>
-            <td>${r.w}</td>
-            <td>${r.d}</td>
-            <td>${r.l}</td>
-            <td>${r.gf}</td>
-            <td>${r.ga}</td>
-            <td>${r.gd > 0 ? "+" : ""}${r.gd}</td>
-            <td><strong>${r.pts}</strong></td>
-          </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="10" class="muted">${en ? "No clubs in this division. Start a new save to use the complete five-nation league structure." : "该级别暂无球队（请开新档体验完整五国联赛）"}</td></tr>`;
+  if (!world) return;
+  renderTableView(world, getUserClub(world), leagueCentreState, {
+    fillDivisionSelects,
+    onRerender: () => renderTable(),
+  });
 }
 
 function setLeagueCentreView(view) {
@@ -6387,146 +6305,9 @@ function setLeagueCentreView(view) {
   refreshAll();
 }
 
-function statsLeagueCompactLabel(division) {
-  const info = DIVISIONS[Number(division)];
-  if (!info) return "—";
-  if (getLang() === "en") return `${info.countryCode} ${info.tier}`;
-  const prefix = { ENG: "英", ESP: "西", GER: "德", ITA: "意", FRA: "法" }[info.countryCode] || info.countryCode;
-  const tier = info.countryCode === "ENG"
-    ? info.tier === 1
-      ? "超"
-      : info.tier === 2
-        ? "甲"
-        : "乙"
-    : info.tier === 1
-      ? "甲"
-      : "乙";
-  return `${prefix}${tier}`;
-}
-
-function statsLeagueCell(club) {
-  const division = Number(club?.division || 0);
-  const full = t(`div.${division}`) || DIVISIONS[division]?.name || "—";
-  return `<td class="stats-league-cell" title="${escapeHtml(full)}">${escapeHtml(statsLeagueCompactLabel(division))}</td>`;
-}
-
-function renderStatsScope() {
-  const select = $("#stats-division-filter");
-  if (!select) return selectedStatsDivision;
-  const ids = Object.keys(DIVISIONS).map(Number).sort((a, b) => a - b);
-  const requested = selectedStatsDivision;
-  select.innerHTML = [
-    `<option value="all">${escapeHtml(t("stats.allLeagues"))}</option>`,
-    ...ids.map((id) => `<option value="${id}">${escapeHtml(t(`div.${id}`) || DIVISIONS[id]?.name || String(id))}</option>`),
-  ].join("");
-  select.value = requested === "all" || ids.includes(Number(requested)) ? String(requested) : "all";
-  selectedStatsDivision = select.value;
-  if (!select._bound) {
-    select._bound = true;
-    select.addEventListener("change", () => {
-      selectedStatsDivision = select.value;
-      if (select.value !== "all") selectedLeagueDivision = Number(select.value);
-      renderStats();
-    });
-  }
-  const summary = $("#stats-scope-summary");
-  if (summary) {
-    summary.textContent = selectedStatsDivision === "all"
-      ? t("stats.scopeAllHint", { n: ids.length })
-      : t("stats.scopeOneHint", { name: t(`div.${selectedStatsDivision}`) || "—" });
-  }
-  return selectedStatsDivision;
-}
-
 function renderStats() {
-  const scope = renderStatsScope();
-  const { goals, assists, keepers, ratings } = getStatLeaders(world, scope === "all" ? "all" : Number(scope));
-  const uid = world.userClubId;
-  const en = getLang() === "en";
-
-  const goalsBody = $("#stats-goals tbody");
-  goalsBody.innerHTML = goals.length
-    ? goals
-        .map(({ player: p, club, stats }, i) => {
-          const s = stats || playerStats(p);
-          const avgR = seasonAvgRating(p);
-          const me = club.id === uid;
-          return `<tr class="${me ? "me" : ""}">
-            <td>${i + 1}</td>
-            <td>${playerLinkHtml(p.id, p.name)}</td>
-            <td>${clubLinkHtml(club.id, club.short)}</td>
-            ${statsLeagueCell(club)}
-            <td><strong>${s.goals}</strong></td>
-            <td>${s.assists}</td>
-            <td>${s.apps}</td>
-            <td class="rating-cell ${ratingClass(avgR)}">${formatRating(avgR)}</td>
-          </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="8" class="muted">${en ? "No goals yet in this scope. This table updates after matches." : "当前范围暂无进球数据，踢完比赛后更新"}</td></tr>`;
-
-  const assistsBody = $("#stats-assists tbody");
-  assistsBody.innerHTML = assists.length
-    ? assists
-        .map(({ player: p, club, stats }, i) => {
-          const s = stats || playerStats(p);
-          const avgR = seasonAvgRating(p);
-          const me = club.id === uid;
-          return `<tr class="${me ? "me" : ""}">
-            <td>${i + 1}</td>
-            <td>${playerLinkHtml(p.id, p.name)}</td>
-            <td>${clubLinkHtml(club.id, club.short)}</td>
-            ${statsLeagueCell(club)}
-            <td><strong>${s.assists}</strong></td>
-            <td>${s.goals}</td>
-            <td>${s.apps}</td>
-            <td class="rating-cell ${ratingClass(avgR)}">${formatRating(avgR)}</td>
-          </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="8" class="muted">${en ? "No assists yet in this scope. This table updates after matches." : "当前范围暂无助攻数据，踢完比赛后更新"}</td></tr>`;
-
-  const ratingsBody = $("#stats-ratings tbody");
-  if (ratingsBody) {
-    ratingsBody.innerHTML = ratings?.length
-      ? ratings
-          .map(({ player: p, club, avgRating, lastRating, apps }, i) => {
-            const me = club.id === uid;
-            return `<tr class="${me ? "me" : ""}">
-            <td>${i + 1}</td>
-            <td>${playerLinkHtml(p.id, p.name)}</td>
-            <td>${clubLinkHtml(club.id, club.short)}</td>
-            ${statsLeagueCell(club)}
-            <td class="rating-cell ${ratingClass(avgRating)}"><strong>${formatRating(avgRating)}</strong></td>
-            <td class="rating-cell ${ratingClass(lastRating)}">${formatRating(lastRating)}</td>
-            <td>${apps}</td>
-          </tr>`;
-          })
-          .join("")
-      : `<tr><td colspan="7" class="muted">${en ? "The ratings table appears after at least three appearances in this scope." : "当前范围至少 3 场出场后显示评分榜"}</td></tr>`;
-  }
-
-  const keepersBody = $("#stats-keepers tbody");
-  keepersBody.innerHTML = keepers.length
-    ? keepers
-        .map(({ player: p, club, stats, gaPerGame }, i) => {
-          const s = stats || playerStats(p);
-          const avgR = seasonAvgRating(p);
-          const me = club.id === uid;
-          return `<tr class="${me ? "me" : ""}">
-            <td>${i + 1}</td>
-            <td>${playerLinkHtml(p.id, p.name)}</td>
-            <td>${clubLinkHtml(club.id, club.short)}</td>
-            ${statsLeagueCell(club)}
-            <td>${s.apps}</td>
-            <td><strong>${s.cleanSheets}</strong></td>
-            <td>${s.goalsConceded}</td>
-            <td>${gaPerGame.toFixed(2)}</td>
-            <td class="rating-cell ${ratingClass(avgR)}">${formatRating(avgR)}</td>
-          </tr>`;
-        })
-        .join("")
-    : `<tr><td colspan="9" class="muted">${en ? "No goalkeeper data yet in this scope. This table updates after matches." : "当前范围暂无门将数据，踢完比赛后更新"}</td></tr>`;
+  if (!world) return;
+  renderStatsView(world, leagueCentreState, () => renderStats());
 }
 
 function parseMoneyInput(value) {

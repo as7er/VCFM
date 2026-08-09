@@ -57,6 +57,7 @@ const navGroupByTab = {
   tactics: "team",
   facilities: "team",
   fixtures: "matches",
+  table: "matches",
   transfer: "transfer",
   clubs: "world",
 };
@@ -96,7 +97,7 @@ try {
   assert.notEqual(await page.locator("#date-label").innerText(), dateBeforeWorkerAdvance);
   assert.equal(await page.locator("#btn-advance").isEnabled(), true);
 
-  for (const tab of ["finance", "squad", "staff", "training", "tactics", "facilities", "media", "fixtures", "career"]) {
+  for (const tab of ["finance", "squad", "staff", "training", "tactics", "facilities", "media", "fixtures", "table", "career"]) {
     await openTab(page, tab);
     await page.waitForTimeout(100);
     await assertNoHorizontalOverflow(page, `desktop ${tab}`);
@@ -119,6 +120,20 @@ try {
       // 开局有揭幕报道；即使为空也必须渲染出占位文案，不能是空白面板
       assert.ok((await page.locator("#media-count").innerText()).trim().length > 0);
       assert.ok((await page.locator("#media-feed").innerText()).trim().length > 0);
+    }
+    if (tab === "table") {
+      await page.waitForSelector("#league-table tbody tr");
+      assert.equal(await page.locator("#league-table tbody tr").count(), 18);
+      assert.equal(await page.locator("#league-table tbody tr.me").count(), 1, "user club must be highlighted once");
+      assert.ok((await page.locator("#table-title").innerText()).trim().length > 0);
+      assert.ok((await page.locator("#table-hint").innerText()).trim().length > 0);
+      // 数据榜与积分榜共享筛选状态，切过去必须同样渲染出来
+      await page.locator('[data-league-centre-view="stats"]:visible').click();
+      await page.waitForSelector("#stats-goals tbody tr");
+      assert.ok((await page.locator("#stats-scope-summary").innerText()).trim().length > 0);
+      assert.ok(await page.locator("#stats-goals tbody tr").count() > 0);
+      assert.ok(await page.locator("#stats-keepers tbody tr").count() > 0);
+      await page.locator('[data-league-centre-view="table"]:visible').click();
     }
     if (tab === "squad") {
       await page.waitForSelector("#squad-plan-summary .squad-plan-table");

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { CLUB_TEMPLATES } from "../js/data.js";
@@ -14,6 +14,11 @@ const repo = resolve(import.meta.dirname, "..");
 const read = (file) => readFileSync(resolve(repo, file), "utf8");
 const index = read("index.html");
 const main = read("js/main.js");
+// 渲染层按页签拆到 js/ui/ 后，徽章渲染面不再全部落在 main.js
+const uiSources = readdirSync(resolve(repo, "js/ui"))
+  .filter((file) => file.endsWith(".js"))
+  .map((file) => read(`js/ui/${file}`));
+const uiLayer = [main, ...uiSources].join("\n");
 const css = read("css/style.css");
 const serviceWorker = read("sw.js");
 
@@ -44,7 +49,7 @@ assert.match(decorative, /width="18" height="18" alt="" aria-hidden="true"/);
 assert.match(labelled, new RegExp(`width="96" height="96" alt="${sample.nameEn}"`));
 
 assert.ok(index.includes('id="start-club-preview"'), "new-career club preview must exist");
-assert.match(main, /from "\.\/club-crest\.js\?v=\d+";/, "main UI must import the crest renderer");
+assert.match(uiLayer, /from "\.\.?\/(?:\.\.\/)?club-crest\.js\?v=\d+";/, "the UI layer must import the crest renderer");
 for (const surface of [
   "start-club-crest",
   "topbar-club-crest",
@@ -53,7 +58,7 @@ for (const surface of [
   "club-modal-crest",
   "match-club-crest",
 ]) {
-  assert.ok(main.includes(`className: "${surface}"`), `${surface} must render a real club crest`);
+  assert.ok(uiLayer.includes(`className: "${surface}"`), `${surface} must render a real club crest`);
 }
 assert.ok(css.includes(".club-crest"), "crest images need stable shared sizing styles");
 assert.ok(serviceWorker.includes('"./js/club-crest.js"'), "crest renderer must work offline");
