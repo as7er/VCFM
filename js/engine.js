@@ -676,7 +676,7 @@ export function releaseYouth(world, clubId, playerId) {
       text: `青训：已与 ${player.name} 解约`,
     });
   }
-  return { ok: true, msg: `已释放 ${player.name}` };
+  return { ok: true, msg: `已与 ${player.name} 解约` };
 }
 
 // 青训升级：走 facilities 工期系统（re-export 见文件底部 import）

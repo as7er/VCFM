@@ -3987,7 +3987,7 @@ function renderSquadPlan(club) {
     develop: en ? "Develop" : "培养",
     replace: en ? "Successor" : "接班",
     sell: en ? "Sell" : "出售",
-    release: en ? "Release" : "释放",
+    release: en ? "Release" : "解约",
   };
   const actionTone = {
     renew: "DEF",
@@ -5043,7 +5043,7 @@ function renderYouth() {
             <td>
               <button class="btn small" data-player-link="${p.id}">${en ? "Info" : "详情"}</button>
               <button class="btn small primary" data-promote="${p.id}">${en ? "Promote" : "提拔"}</button>
-              <button class="btn small danger" data-release="${p.id}">${en ? "Release" : "释放"}</button>
+              <button class="btn small danger" data-release="${p.id}">${en ? "Release" : "解约"}</button>
             </td>
           </tr>`;
         })
@@ -5062,7 +5062,7 @@ function renderYouth() {
   });
   tbody.querySelectorAll("[data-release]").forEach((btn) => {
     btn.onclick = () => {
-      if (!confirm(en ? "Release this academy player?" : "确认释放该青训球员？")) return;
+      if (!confirm(en ? "Release this academy player?" : "确认与该青训球员解约？")) return;
       const res = releaseYouth(world, world.userClubId, btn.dataset.release);
       toast(res.msg);
       if (res.ok) {
