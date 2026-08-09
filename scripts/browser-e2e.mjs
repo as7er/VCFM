@@ -54,6 +54,7 @@ const navGroupByTab = {
   staff: "team",
   training: "team",
   tactics: "team",
+  facilities: "team",
   fixtures: "matches",
   transfer: "transfer",
   clubs: "world",
@@ -94,7 +95,7 @@ try {
   assert.notEqual(await page.locator("#date-label").innerText(), dateBeforeWorkerAdvance);
   assert.equal(await page.locator("#btn-advance").isEnabled(), true);
 
-  for (const tab of ["finance", "squad", "staff", "training", "tactics", "fixtures", "career"]) {
+  for (const tab of ["finance", "squad", "staff", "training", "tactics", "facilities", "fixtures", "career"]) {
     await openTab(page, tab);
     await page.waitForTimeout(100);
     await assertNoHorizontalOverflow(page, `desktop ${tab}`);
@@ -103,6 +104,15 @@ try {
       assert.equal(await page.locator("#finance-sponsorship .sponsor-offer").count(), 3);
       assert.ok((await page.locator("#finance-debt").innerText()).trim().length > 0);
       assert.ok((await page.locator("#finance-budget-projection").innerText()).trim().length > 0);
+    }
+    if (tab === "facilities") {
+      await page.waitForSelector("#facilities-grid .facility-card");
+      assert.equal(await page.locator("#facilities-grid .facility-card").count(), 3);
+      assert.equal(await page.locator("#facilities-grid .facility-level").count(), 3);
+      for (const effect of await page.locator("#facilities-grid .facility-effect").allInnerTexts()) {
+        assert.ok(effect.trim().length > 0, "each facility card must explain its current effect");
+      }
+      assert.ok((await page.locator("#facilities-hint").innerText()).trim().length > 0);
     }
     if (tab === "squad") {
       await page.waitForSelector("#squad-plan-summary .squad-plan-table");
