@@ -1,6 +1,6 @@
 /** 国家队：征召、国际赛事与个人国际数据。 */
 
-import { NATIONALITIES } from "./data.js";
+import { NATIONALITIES, DIVISIONS } from "./data.js";
 
 const EUROPEAN_CODES = new Set([
   "ENG",
@@ -155,6 +155,10 @@ export function nationalCallupScore(world, player, club = null, latestIds = null
       : null;
 
   let score = Number(player.ovr) || 10;
+  // 舞台高度：现实中低级别联赛球员即使数据亮眼也极难获得强国征召，
+  // 顶级联赛的日常对抗强度本身就是选拔依据。只影响入选顺位，不改能力。
+  const tier = Number(DIVISIONS[resolvedClub?.division]?.tier) || 2;
+  score += tier === 1 ? 0.35 : tier === 2 ? -0.55 : -1.4;
   if (avgRating != null && apps >= 3) score += bounded((avgRating - 6.6) * 0.55, -0.8, 0.9);
   if (form != null && formRatings.length >= 2) score += bounded((form - 6.5) * 0.22, -0.4, 0.5);
   else if (lastRating != null) score += bounded((lastRating - 6.5) * 0.18, -0.35, 0.45);

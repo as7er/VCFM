@@ -81,6 +81,21 @@ export function nationalTalentOffset(code) {
   return Number.isFinite(strength) ? (strength - TALENT_REFERENCE) * TALENT_SCALE : 0;
 }
 
+/**
+ * 各国联赛现实中的主要外援来源（语言、殖民史、地理与转会走廊）。
+ * 只影响外籍球员来自哪国，不改任何人的能力——葡超该有巴西人，
+ * 荷甲该有比利时与北欧人，而不是全球国籍平均抽签。
+ */
+const RECRUITMENT_CORRIDORS = Object.freeze({
+  ENG: { IRL: 3.2, SCO: 3.0, WAL: 2.6, FRA: 1.8, NED: 1.6, BEL: 1.5, POR: 1.4, BRA: 1.3, ESP: 1.2 },
+  ESP: { ARG: 3.4, BRA: 2.6, POR: 2.0, URU: 2.0, FRA: 1.6, ITA: 1.2 },
+  GER: { AUT: 3.2, SUI: 2.8, POL: 2.6, TUR: 2.4, SRB: 2.0, CRO: 1.9, NED: 1.6, BRA: 1.3 },
+  ITA: { ARG: 2.6, BRA: 2.4, CRO: 2.0, SRB: 1.9, FRA: 1.7, ESP: 1.3 },
+  FRA: { BEL: 2.4, POR: 2.2, BRA: 1.8, ESP: 1.5, ITA: 1.3, NED: 1.2 },
+  NED: { BEL: 3.4, DEN: 2.2, SWE: 2.0, NOR: 1.9, GER: 1.8, BRA: 1.6, POR: 1.3 },
+  POR: { BRA: 4.2, ARG: 2.2, ESP: 1.8, URU: 1.6, FRA: 1.3 },
+});
+
 function pickPlayerNation(homeNation, isYouth, power) {
   const home = NATIONALITIES.find((nation) => nation.code === homeNation);
   if (home) {
@@ -92,9 +107,10 @@ function pickPlayerNation(homeNation, isYouth, power) {
   // 高水平俱乐部更常吸引成熟足球强国球员；低级别联赛承载更多弱国球员。
   // 这只影响球员出现在哪个档位的俱乐部，不会在国家队阶段篡改其能力。
   const clubLevel = Math.max(-0.85, Math.min(1, (power - 62) / 20));
+  const corridor = RECRUITMENT_CORRIDORS[homeNation] || {};
   const weights = foreignPool.map((nation) => {
     const strength = NATIONAL_TEAM_BASE_STRENGTH[nation.code] ?? 17.2;
-    return Math.exp((strength - 17.2) * clubLevel * 0.55);
+    return Math.exp((strength - 17.2) * clubLevel * 0.55) * (corridor[nation.code] || 1);
   });
   let roll = Math.random() * weights.reduce((sum, weight) => sum + weight, 0);
   for (let i = 0; i < foreignPool.length; i++) {
