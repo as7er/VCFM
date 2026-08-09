@@ -139,6 +139,13 @@ try {
       await page.waitForSelector("#squad-plan-summary .squad-plan-table");
       assert.equal(await page.locator("#squad-plan-summary .squad-plan-table tbody tr").count(), 4);
       assert.match(await page.locator("#squad-plan-summary").innerText(), /多年阵容规划|Multi-year squad plan/);
+      // 更衣室：领袖/小圈子/不合三块必须都渲染出来（空队也要有占位文案）
+      await page.waitForSelector("#dressing-room-summary .dressing-room-block");
+      assert.equal(await page.locator("#dressing-room-summary .dressing-room-block").count(), 3);
+      assert.match(await page.locator("#dressing-room-summary").innerText(), /更衣室|Dressing room/);
+      for (const block of await page.locator("#dressing-room-summary .dressing-room-block ul").allInnerTexts()) {
+        assert.ok(block.trim().length > 0, "each dressing-room block must render content or a placeholder");
+      }
     }
     if (tab === "staff") {
       const coachCard = page.locator("#staff-current .staff-card").first();

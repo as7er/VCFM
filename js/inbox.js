@@ -3,7 +3,7 @@
  * 与 news 并行：news 仍是时间线，inbox 是可处理事项。
  */
 
-import { formatMoney } from "./models.js";
+import { formatMoney, estimateValue } from "./models.js";
 import { ensureContract, needsContractAttention, renewOffer } from "./contracts.js";
 import { acceptPoachBid, rejectPoachBid, ensurePoachBids } from "./poaching.js";
 import { pushMedia } from "./media.js";
@@ -12,6 +12,7 @@ import { applyPlayerTalk } from "./relations.js";
 import {
   ensureTransferNegotiations,
   respondTransferNegotiation,
+  submitSaleListing,
 } from "./transfer-negotiations.js";
 import {
   ensureDealNegotiations,
@@ -561,6 +562,44 @@ export function resolveInboxAction(world, mailId, actionId) {
   }
 
   // —— 关系约谈请求 / 球员诉求 ——
+  // —— 转会申请：批准挂牌 / 驳回 / 承诺挽留 ——
+  if (mail.ref?.kind === "transfer_request") {
+    const club = world.clubs?.find((c) => c.id === world.userClubId);
+    const player = club?.players?.find((p) => p.id === mail.ref.playerId);
+    if (!player) {
+      finishMail(mail, "球员已不在队中");
+      return { ok: true, msg: "球员已不在队中" };
+    }
+    if (act === "grant_request") {
+      const askingFee = Math.round(player.value || estimateValue(player) || 0);
+      const res = submitSaleListing(world, player.id, { askingFee });
+      if (!res.ok) return res;
+      player.transferRequest = { ...player.transferRequest, status: "granted", day: world.day || 0 };
+      // 诉求被正视，关系不再继续恶化
+      player.relation = Math.max(-2, Math.min(2, Number(player.relation || 0) + 1));
+      finishMail(mail, res.msg);
+      return res;
+    }
+    if (act === "reject_request") {
+      player.transferRequest = { ...player.transferRequest, status: "rejected", day: world.day || 0 };
+      player.relation = Math.max(-2, Number(player.relation || 0) - 1);
+      player.morale = Math.max(20, Math.round(Number(player.morale || 70) - 8));
+      const msg = `已驳回 ${player.name} 的转会申请，他的情绪进一步恶化`;
+      finishMail(mail, msg);
+      return { ok: true, msg };
+    }
+    if (act === "promise") {
+      const res = applyPlayerTalk(world, player.id, "promise", {
+        requestedRole: mail.ref.requestedRole || null,
+      });
+      if (res.ok) {
+        player.transferRequest = { ...player.transferRequest, status: "withdrawn", day: world.day || 0 };
+        finishMail(mail, res.msg);
+      }
+      return res;
+    }
+  }
+
   if (mail.ref?.kind === "player_talk" || mail.ref?.kind === "player") {
     const mapAct = {
       praise: "praise",

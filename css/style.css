@@ -6945,6 +6945,19 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
 .squad-plan-priorities ul { display: grid; gap: 0.55rem; margin: 0; padding: 0; list-style: none; }
 .squad-plan-priorities li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.25rem 0.45rem; align-items: center; }
 .squad-plan-priorities li .muted { grid-column: 2; font-size: 0.78rem; line-height: 1.35; }
+/* 更衣室：领袖 / 小圈子 / 不合三列等宽，与阵容规划同一套视觉 */
+.dressing-room-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.dressing-room-block {
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg2);
+  min-width: 0;
+}
+.dressing-room-block h3 { margin: 0 0 0.55rem; font-size: 0.95rem; }
+.dressing-room-block ul { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.dressing-room-block li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.4rem; min-width: 0; }
+.dressing-room-block li .muted { font-size: 0.78rem; }
 .view-switch {
   display: inline-flex;
   padding: 0.18rem;
@@ -7083,6 +7096,7 @@ summary:focus-visible {
   .squad-plan-metrics > div:nth-child(2) { border-right: 0; }
   .squad-plan-metrics > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
   .squad-plan-grid { grid-template-columns: minmax(0, 1fr); }
+  .dressing-room-grid { grid-template-columns: minmax(0, 1fr); }
   .registration-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .registration-summary > div:nth-child(2) { border-right: 0; }
   .registration-summary > div:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }

@@ -263,6 +263,11 @@ import {
   ensureSquadRelations,
   ensurePlayerRelation,
   applyPlayerTalk,
+  dressingRoomLeaders,
+  dressingRoomFactions,
+  dressingRoomFrictions,
+  dressingRoomHarmony,
+  harmonyLabel,
   ensurePlayerPathway,
   setPlayingTimeRole,
   playingTimeProgress,
@@ -4067,6 +4072,78 @@ function renderSquadPlan(club) {
     </div>`;
 }
 
+/** 更衣室：领袖、派系与摩擦。关系由现有事实推导，此处只做呈现。 */
+function renderDressingRoom(club) {
+  const root = $("#dressing-room-summary");
+  if (!root || !club) return;
+  const en = getLang() === "en";
+  const harmony = dressingRoomHarmony(club, world);
+  const leaders = dressingRoomLeaders(club, world, 4);
+  const factions = dressingRoomFactions(club, world);
+  const frictions = dressingRoomFrictions(club, world, 4);
+  const captainId = club.tactics?.captainId || null;
+  const tone = harmony >= 60 ? "DEF" : harmony >= 42 ? "MID" : "ATT";
+
+  const leaderHtml = leaders.length
+    ? leaders.map((p) => {
+        const badge = p.id === captainId ? `<span class="badge DEF">${en ? "Captain" : "队长"}</span>` : "";
+        return `<li>
+          <strong>${playerLinkHtml(p.id, p.name)}</strong> ${badge}
+          <span class="muted">${escapeHtml(`${p.age}${en ? "y" : "岁"} · ${relationLabel(p.relation || 0, en ? "en" : "zh")}`)}</span>
+        </li>`;
+      }).join("")
+    : `<li class="muted">${en ? "No established leaders yet." : "尚未形成队内领袖。"}</li>`;
+
+  const factionHtml = factions.length
+    ? factions.map((f) => {
+        const stanceLabel = f.stance >= 0.5
+          ? (en ? "Backs the manager" : "支持主帅")
+          : f.stance <= -0.5
+            ? (en ? "Unsettled" : "离心")
+            : (en ? "Neutral" : "中立");
+        const stanceTone = f.stance >= 0.5 ? "DEF" : f.stance <= -0.5 ? "ATT" : "MID";
+        return `<li>
+          <span class="badge ${stanceTone}">${escapeHtml(stanceLabel)}</span>
+          <strong>${playerLinkHtml(f.leaderId, f.leaderName)}</strong>
+          <span class="muted">${escapeHtml(en ? `${f.size} players` : `${f.size} 人`)}</span>
+        </li>`;
+      }).join("")
+    : `<li class="muted">${en ? "No distinct cliques — the squad mixes freely." : "没有明显的小圈子，全队相处平顺。"}</li>`;
+
+  const frictionHtml = frictions.length
+    ? frictions.map((f) => `<li>
+        <strong>${playerLinkHtml(f.aId, f.aName)}</strong>
+        <span class="muted">${en ? "vs" : "与"}</span>
+        <strong>${playerLinkHtml(f.bId, f.bName)}</strong>
+      </li>`).join("")
+    : `<li class="muted">${en ? "No notable clashes in the squad." : "队内暂无明显不合。"}</li>`;
+
+  root.innerHTML = `
+    <div class="row-between squad-plan-heading">
+      <div>
+        <h2>${en ? "Dressing room" : "更衣室"}</h2>
+        <p class="hint">${en
+          ? "Bonds are derived from shared nationality, age, youth-team background, seasons together and positional rivalry. They shape who speaks up, never a hidden match bonus."
+          : "关系由同国籍、年龄、青训出身、共事赛季与位置竞争推导，只影响谁会发声，不写入隐藏比赛加成。"}</p>
+      </div>
+      <span class="badge ${tone}">${escapeHtml(harmonyLabel(harmony, en ? "en" : "zh"))} ${harmony}</span>
+    </div>
+    <div class="squad-plan-grid dressing-room-grid">
+      <div class="dressing-room-block">
+        <h3>${en ? "Leaders" : "队内领袖"}</h3>
+        <ul>${leaderHtml}</ul>
+      </div>
+      <div class="dressing-room-block">
+        <h3>${en ? "Cliques" : "小圈子"}</h3>
+        <ul>${factionHtml}</ul>
+      </div>
+      <div class="dressing-room-block">
+        <h3>${en ? "Friction" : "队内不合"}</h3>
+        <ul>${frictionHtml}</ul>
+      </div>
+    </div>`;
+}
+
 function renderSquad() {
   const club = getUserClub(world);
   const en = getLang() === "en";
@@ -4182,6 +4259,7 @@ function renderSquad() {
     btn.onclick = () => showPlayerModal(btn.dataset.pid);
   });
   renderSquadPlan(club);
+  renderDressingRoom(club);
   renderSquadRegistration();
 }
 

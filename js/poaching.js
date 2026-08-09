@@ -30,17 +30,24 @@ export function processPoachingDay(world) {
   const user = world.clubs.find((c) => c.id === world.userClubId);
   if (!user || user.players.length <= 15) return;
 
-  // 目标：合同短 / 年轻高潜 / 能力高
+  // 目标：公开要求转会 / 合同短 / 年轻高潜 / 能力高
   const candidates = user.players
     .filter((p) => {
       ensureContract(p);
       if ((p.injured || 0) > 0) return false;
+      // 递交了转会申请的球员，中介与买家会第一时间盯上
+      if (p.transferRequest?.status === "pending" || p.transferRequest?.status === "granted") return true;
       if ((p.contractYears || 0) <= 1) return true;
       if (p.age <= 23 && (p.potential || p.ovr) >= 14) return true;
       if (p.ovr >= 15) return Math.random() < 0.4;
       return false;
     })
-    .sort((a, b) => b.ovr - a.ovr);
+    // 想走的球员排在最前，最可能收到报价
+    .sort((a, b) => {
+      const wantsA = a.transferRequest?.status === "pending" || a.transferRequest?.status === "granted" ? 1 : 0;
+      const wantsB = b.transferRequest?.status === "pending" || b.transferRequest?.status === "granted" ? 1 : 0;
+      return wantsB - wantsA || b.ovr - a.ovr;
+    });
 
   if (!candidates.length) return;
   const target = candidates[Math.floor(Math.random() * Math.min(4, candidates.length))];

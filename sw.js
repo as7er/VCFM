@@ -62,6 +62,7 @@ const ASSETS = [
   "./js/squad-planning.js",
   "./js/inbox.js",
   "./js/relations.js",
+  "./js/dressing-room.js",
   "./js/worldpulse.js",
   // 运行时依赖（此前遗漏会导致离线半残）
   "./js/media.js",

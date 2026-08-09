@@ -313,6 +313,15 @@ import {
   submitRenewalNegotiation,
 } from "./deal-negotiations.js";
 import {
+  processDressingRoomDay,
+  dressingRoomLeaders,
+  dressingRoomFactions,
+  dressingRoomFrictions,
+  dressingRoomHarmony,
+  harmonyLabel,
+  playerBond,
+} from "./dressing-room.js";
+import {
   processRelationsDay,
   ensureSquadRelations,
   clubAtmosphere,
@@ -436,6 +445,12 @@ export {
   relationLabel,
   applyPlayerTalk,
   ensurePlayerRelation,
+  dressingRoomLeaders,
+  dressingRoomFactions,
+  dressingRoomFrictions,
+  dressingRoomHarmony,
+  harmonyLabel,
+  playerBond,
   processScoutMissions,
   startScoutMission,
   processWorldPulse,
@@ -715,6 +730,12 @@ export function advanceDay(world, options = {}) {
     if (draft.priority >= 3) {
       events.push({ type: "playing_time_breach", playerId: draft.ref?.playerId });
     }
+  }
+  // 更衣室：派系与领袖不满（关系网由现有事实推导，不写入隐藏修正）
+  const roomOut = processDressingRoomDay(world);
+  if (roomOut?.inboxDraft) {
+    pushInbox(world, roomOut.inboxDraft);
+    events.push({ type: "dressing_room_unrest", playerId: roomOut.inboxDraft.ref?.playerId });
   }
   processScoutMissions(world);
   processWorldPulse(world);
