@@ -7,6 +7,9 @@ const ASSETS = [
   "./index.html",
   "./css/style.css",
   "./js/main.js",
+  // 页签渲染层拆到 js/ui/（漏登记会导致离线时该页签白屏）
+  "./js/ui/dom.js",
+  "./js/ui/finance.js",
   "./js/engine.js",
   "./js/match.js",
   "./js/match-presentation.js",
