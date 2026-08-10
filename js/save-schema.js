@@ -174,7 +174,7 @@ export function validateSaveStructure(world, options = {}) {
     if (!isRecord(world.development) || !Array.isArray(world.development.matches)) {
       throw new Error("invalid save: development football is invalid");
     }
-    for (const field of ["version", "lastMatchDay", "nextMatchDay", "nextMatchSeq"]) {
+    for (const field of ["version", "lastMatchDay", "nextMatchDay", "nextMatchSeq", "matchdayCount"]) {
       finiteIfPresent(world.development[field], `development football ${field}`);
     }
     const developmentIds = new Set();

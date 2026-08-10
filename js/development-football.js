@@ -59,6 +59,7 @@ function ensureDevelopmentState(world) {
       lastMatchDay: null,
       nextMatchDay: MATCHDAY_INTERVAL,
       nextMatchSeq: 1,
+      matchdayCount: 0,
       matches: [],
       seasonArchive: [],
     };
@@ -67,6 +68,7 @@ function ensureDevelopmentState(world) {
   state.version = DEVELOPMENT_VERSION;
   state.nextMatchDay = Math.max(1, Math.floor(Number(state.nextMatchDay) || MATCHDAY_INTERVAL));
   state.nextMatchSeq = Math.max(1, Math.floor(Number(state.nextMatchSeq) || 1));
+  state.matchdayCount = Math.max(0, Math.floor(Number(state.matchdayCount) || 0));
   if (!Array.isArray(state.matches)) state.matches = [];
   if (!Array.isArray(state.seasonArchive)) state.seasonArchive = [];
   return state;
@@ -118,10 +120,14 @@ function pickDevelopmentXI(candidates, club) {
 }
 
 function buildDevelopmentTeam(club, xi, suffix) {
+  // 战术必须深拷到发展队自己的对象上：ensureLineupResponsibilities 会按本队首发
+  // 改写 setPieces / roles，若仍指向真实俱乐部就会用发展队球员覆盖用户的选择。
   const tactics = { ...(club.tactics || {}) };
   tactics.lineup = xi.map((player) => player.id);
   tactics.lineupRoles = Array(xi.length).fill(null);
   tactics.responsibilities = { ...(club.tactics?.responsibilities || {}) };
+  tactics.setPieces = { ...(club.tactics?.setPieces || {}) };
+  tactics.roles = Array.isArray(club.tactics?.roles) ? [...club.tactics.roles] : club.tactics?.roles;
   const team = {
     id: `${club.id}:development:${suffix}`,
     name: `${club.name} 发展队`,
@@ -297,25 +303,31 @@ export function processDevelopmentMatchesForDay(world, options = {}) {
   if (Number(world.day || 0) < state.nextMatchDay) return [];
   if (state.lastMatchDay === world.day) return [];
   const pairs = developmentPairs(world);
-  const dayIndex = Math.floor(Number(world.day || 0) / MATCHDAY_INTERVAL);
   const userId = world.userClubId;
   const records = [];
   const selected = new Set();
-  const offset = ((Math.max(0, dayIndex - 1) * MATCHES_PER_DAY) % Math.max(1, pairs.length));
+  // 偏移由单调递增的 matchdayCount 驱动，而不是 world.day：
+  // world.day 每赛季重置为 1，用它会让每个赛季都从同一批对阵开始。
+  const offset = ((Math.max(0, state.matchdayCount - 1) * MATCHES_PER_DAY) % Math.max(1, pairs.length));
   for (let step = 0; step < Math.min(MATCHES_PER_DAY, pairs.length); step++) {
     selected.add((offset + step) % pairs.length);
   }
   const userPairIndex = pairs.findIndex(([home, away]) => home.id === userId || away.id === userId);
+  // 用户队凑不满完整发展 XI 时只让这一对缺席，世界其他对阵照常进行；
+  // 比赛日本身照常推进，不能让一次伤病潮冻结全世界的发展足球。
+  let userPairPlayable = false;
   if (userPairIndex >= 0) {
     const [userHome, userAway] = pairs[userPairIndex];
-    if (!pickDevelopmentXI(developmentCandidates(world, userHome).all, userHome)
-      || !pickDevelopmentXI(developmentCandidates(world, userAway).all, userAway)) {
-      return [];
-    }
+    userPairPlayable = Boolean(
+      pickDevelopmentXI(developmentCandidates(world, userHome).all, userHome)
+      && pickDevelopmentXI(developmentCandidates(world, userAway).all, userAway)
+    );
   }
   state.lastMatchDay = world.day;
   state.nextMatchDay = Number(world.day || 0) + MATCHDAY_INTERVAL;
-  if (userPairIndex >= 0) selected.add(userPairIndex);
+  state.matchdayCount = (state.matchdayCount || 0) + 1;
+  if (userPairPlayable) selected.add(userPairIndex);
+  else selected.delete(userPairIndex);
   [...selected].sort((a, b) => a - b).forEach((index) => {
     const [home, away] = pairs[index];
     const record = runDevelopmentMatch(world, home, away, options);
@@ -338,6 +350,7 @@ export function archiveDevelopmentSeason(world) {
   if (state.seasonArchive.length > 8) state.seasonArchive.length = 8;
   state.lastMatchDay = null;
   state.nextMatchDay = MATCHDAY_INTERVAL;
+  state.matchdayCount = 0;
   return archived;
 }
 
