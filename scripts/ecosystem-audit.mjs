@@ -81,16 +81,31 @@ function playUserFixturesAsBackground(world, fixtures) {
 }
 
 const seasons = Math.max(3, Number(process.env.VCFM_ECO_SEASONS) || 5);
+const progressEnabled = process.env.VCFM_ECO_PROGRESS === "1";
+const progressDays = Math.max(1, Number(process.env.VCFM_ECO_PROGRESS_DAYS) || 30);
 const startClub = CLUB_TEMPLATES.find((club) => club.division === 3);
 assert.ok(startClub, "ecosystem audit needs a valid starting club");
+
+const auditStartedAt = performance.now();
+function logProgress(phase, details = {}) {
+  if (!progressEnabled) return;
+  console.log("ecosystem progress", JSON.stringify({
+    phase,
+    elapsedSeconds: Math.round((performance.now() - auditStartedAt) / 100) / 10,
+    ...details,
+  }));
+}
 
 const originalRandom = Math.random;
 Math.random = seededRandom(0x1692026);
 
 try {
   const world = createWorld(startClub.id, "Ecosystem Audit");
+  logProgress("parity-world-created");
   ensureWorldStaff(world);
+  logProgress("parity-staff-ready");
   ensureWorldFinances(world);
+  logProgress("parity-finances-ready");
 
   // Direct parity check: user and AI clubs both receive the exact shared weekly settlement.
   const user = world.clubs.find((club) => club.id === world.userClubId);
@@ -99,6 +114,7 @@ try {
   const expected = new Map([user, ai].map((club) => [club.id, clubWeeklyOperatingSnapshot(world, club)]));
   world.day = 7;
   settleWorldWeeklyFinances(world);
+  logProgress("parity-settled");
   for (const club of [user, ai]) {
     const snapshot = expected.get(club.id);
     assert.equal(club.money, before.get(club.id) + snapshot.net, `${club.id} shared weekly settlement`);
@@ -109,20 +125,39 @@ try {
 
   // Restart after the parity probe so the longitudinal sample begins from a clean day-one world.
   const longWorld = createWorld(startClub.id, "Long Ecosystem Audit");
+  logProgress("long-world-created");
   ensureWorldStaff(longWorld);
+  logProgress("long-staff-ready");
   ensureWorldFinances(longWorld);
+  logProgress("long-finances-ready");
   const snapshots = [];
 
   for (let index = 0; index < seasons; index++) {
     let guard = 0;
+    let advanceMs = 0;
+    let userMatchMs = 0;
+    const seasonStartedAt = performance.now();
     while (!longWorld.seasonOver && guard < 420) {
       if (longWorld.board) {
         longWorld.board.targetPos = 18;
         longWorld.board.sackWarnings = 0;
       }
+      const advanceStartedAt = performance.now();
       const result = advanceDay(longWorld);
+      advanceMs += performance.now() - advanceStartedAt;
+      const userMatchStartedAt = performance.now();
       playUserFixturesAsBackground(longWorld, result.userMatches);
+      userMatchMs += performance.now() - userMatchStartedAt;
       guard++;
+      if (progressEnabled && guard % progressDays === 0) {
+        console.log("ecosystem progress", JSON.stringify({
+          season: longWorld.season,
+          days: guard,
+          elapsedSeconds: Math.round((performance.now() - seasonStartedAt) / 100) / 10,
+          advanceSeconds: Math.round(advanceMs / 100) / 10,
+          userMatchSeconds: Math.round(userMatchMs / 100) / 10,
+        }));
+      }
     }
     assert.ok(longWorld.seasonOver, `season ${longWorld.season} should complete within 420 days`);
     const snapshot = seasonSnapshot(longWorld);

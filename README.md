@@ -36,7 +36,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 ### 快速开始
 
-1. 从五国任一低级别联赛选择一家俱乐部，创建经理并开始赛季。
+1. 从七国任一低级别联赛选择一家俱乐部，创建经理并开始赛季。
 2. 在阵容和战术板安排首发、阵型、槽位角色与核心球员。
 3. 推进一天或推进到比赛日；紧急信箱、伤病和比赛会自动中断推进。
 4. 比赛日选择直播、快速高光或一键完赛：直播和快速高光使用同一套空间事件，一键完赛直接生成纯战报。
@@ -45,8 +45,8 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 ### 游戏世界
 
-- **五国联赛体系**：11 个联赛、每个联赛 18 队，共 198 家虚构俱乐部；包含升降级、国内杯赛和完整赛程。
-- **俱乐部洲际赛事**：欧冠、欧联和欧协联采用 8 场联赛阶段与淘汰赛，资格由五国顶级联赛排名决定。
+- **七国联赛体系**：15 个联赛、每个联赛 18 队，共 270 家虚构俱乐部；包含升降级、国内杯赛和完整赛程。
+- **俱乐部洲际赛事**：欧冠、欧联和欧协联采用 8 场联赛阶段与淘汰赛，资格由七国顶级联赛排名决定。
 - **国家队**：俱乐部球员与国家队共享同一能力、状态和伤病数据；包含世界国家杯、欧洲杯、国际比赛日、征召与赛事数据榜。
 - **联赛与赛事中心**：可查看积分、赛程、赛果、射手、助攻、评分和门将榜；国内联赛、杯赛、洲际赛分别记账。
 - **现实层级、虚构品牌**：球队实力、财政和人才分布参考现实竞争层级，但不保存或展示现实俱乐部身份。
@@ -174,7 +174,7 @@ Earlier releases (v197–v204): post-match replays and full ratings, live-broadc
 
 ### Quick start
 
-1. Choose a club from any of the five nations' lower divisions and create your manager.
+1. Choose a club from any of the seven nations' lower divisions and create your manager.
 2. Set the lineup, formation, slot roles, and core player on the tactics board.
 3. Advance one day or to matchday; urgent inbox items, injuries, and matches stop progression automatically.
 4. Choose Live, Quick Highlights, or Instant Finish. Live and Quick Highlights share the same spatial events; Instant Finish opens a report without playing the pitch animation.
@@ -183,7 +183,7 @@ Earlier releases (v197–v204): post-match replays and full ratings, live-broadc
 
 ### Game world
 
-- **Five-nation pyramid**: 11 leagues, 18 clubs per league, and 198 fictional clubs in total, with promotion, relegation, domestic cups, and full schedules.
+- **Seven-nation pyramid**: 15 leagues, 18 clubs per league, and 270 fictional clubs in total, with promotion, relegation, domestic cups, and full schedules.
 - **Continental club competitions**: Champions League, Europa League, and Conference League with an eight-match league phase and knockouts. Qualification comes from top-flight finishes.
 - **International football**: national teams share the same player ability, form, fitness, and injury data as clubs. Includes the World Nations Cup, European Championship, international breaks, call-ups, and competition leaderboards.
 - **Competition centres**: tables, fixtures, results, scorers, assists, ratings, and goalkeeper rankings, with separate domestic-league, cup, and continental stat ledgers.

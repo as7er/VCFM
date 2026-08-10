@@ -7,6 +7,7 @@
  */
 
 export const PLAYER_POSITION_VERSION = 1;
+const validatedProfiles = new WeakSet();
 
 export const DETAILED_POSITIONS = Object.freeze([
   "GK", "LB", "CB", "RB", "DM", "CM", "LM", "RM", "AM", "LW", "RW", "CF", "ST",
@@ -191,6 +192,7 @@ export function derivePositionRatings(player) {
 
 export function ensurePlayerPositionProfile(player) {
   if (!player) return false;
+  if (validatedProfiles.has(player)) return false;
   const current = player.positionProfile;
   if (!current || typeof current !== "object" || Number(current.version || 0) < PLAYER_POSITION_VERSION) {
     const ratings = derivePositionRatings(player);
@@ -204,6 +206,7 @@ export function ensurePlayerPositionProfile(player) {
       natural: natural.length ? natural : [primary],
       ratings,
     };
+    validatedProfiles.add(player);
     return true;
   }
   // 旧档修补：任何一次实际修正都必须回报 changed，否则存档不会落盘，
@@ -239,6 +242,7 @@ export function ensurePlayerPositionProfile(player) {
   if (current.natural.join(",") !== naturalBefore) changed = true;
   if (current.version !== PLAYER_POSITION_VERSION) changed = true;
   current.version = PLAYER_POSITION_VERSION;
+  validatedProfiles.add(player);
   return changed;
 }
 
@@ -303,4 +307,3 @@ export function positionCoverage(player, slot, slots = []) {
     natural: player?.positionProfile?.natural?.includes(fit.target) || false,
   };
 }
-

@@ -120,7 +120,7 @@ export function renderTable(world, club, state, deps) {
           </tr>`;
         })
         .join("")
-    : `<tr><td colspan="10" class="muted">${en ? "No clubs in this division. Start a new save to use the complete five-nation league structure." : "该级别暂无球队（请开新档体验完整五国联赛）"}</td></tr>`;
+    : `<tr><td colspan="10" class="muted">${en ? "No clubs in this division. Start a new save to use the complete seven-nation league structure." : "该级别暂无球队（请开新档体验完整七国联赛）"}</td></tr>`;
 }
 
 /** 数据榜的范围选择器；返回当前生效范围 */

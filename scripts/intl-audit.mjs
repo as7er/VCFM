@@ -29,6 +29,14 @@ function actualXiStrength(world, code) {
   return picked.length ? picked.reduce((sum, player) => sum + player.ovr, 0) / picked.length : 0;
 }
 
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
 const startClubId = CLUB_TEMPLATES.find((club) => club.division === 3)?.id;
 assert.ok(startClubId, "a playable starting club is required");
 const japanRanks = [];
@@ -194,16 +202,23 @@ function simulateTournament(season, expectedKey, breaks, expectedMatches) {
 
 // 世界杯 32 队：小组 48 + 十六强 8 + 八强 4 + 半决 2 + 决赛 1 = 63，共 7 个国际比赛日
 // 欧洲杯 16 队：小组 24 + 八强 4 + 半决 2 + 决赛 1 = 31，共 6 个国际比赛日
-const worldCup = simulateTournament(2026, "world", 7, 63);
-const european = simulateTournament(2028, "europe", 6, 31);
+const originalRandom = Math.random;
+Math.random = seededRandom(0x170205);
 
-for (let i = 0; i < 6; i++) {
-  const probeWorld = createWorld(startClubId, `Rank Audit ${i + 1}`);
-  const teams = listNationalTeams(probeWorld);
-  japanRanks.push(teams.findIndex((nation) => nation.code === "JPN") + 1);
+try {
+  const worldCup = simulateTournament(2026, "world", 7, 63);
+  const european = simulateTournament(2028, "europe", 6, 31);
+
+  for (let i = 0; i < 6; i++) {
+    const probeWorld = createWorld(startClubId, `Rank Audit ${i + 1}`);
+    const teams = listNationalTeams(probeWorld);
+    japanRanks.push(teams.findIndex((nation) => nation.code === "JPN") + 1);
+  }
+  const japanAverageRank = japanRanks.reduce((sum, rank) => sum + rank, 0) / japanRanks.length;
+  assert.ok(japanRanks.every((rank) => rank >= 8 && rank <= 30), `Japan has an implausible rank outlier: ${japanRanks.join(", ")}`);
+  assert.ok(japanAverageRank >= 14 && japanAverageRank <= 23, `Japan average rank should stay near the realistic chasing tier, got ${japanAverageRank}`);
+
+  console.log(JSON.stringify({ worldCup, european, japanRanks, japanAverageRank }, null, 2));
+} finally {
+  Math.random = originalRandom;
 }
-const japanAverageRank = japanRanks.reduce((sum, rank) => sum + rank, 0) / japanRanks.length;
-assert.ok(japanRanks.every((rank) => rank >= 8 && rank <= 30), `Japan has an implausible rank outlier: ${japanRanks.join(", ")}`);
-assert.ok(japanAverageRank >= 14 && japanAverageRank <= 23, `Japan average rank should stay near the realistic chasing tier, got ${japanAverageRank}`);
-
-console.log(JSON.stringify({ worldCup, european, japanRanks, japanAverageRank }, null, 2));

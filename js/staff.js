@@ -1287,6 +1287,7 @@ function managerCandidateRows(world, buyer) {
   }
 
   const dismissedId = buyer.managerReview?.lastDismissedCoachId || null;
+  const formationFitCache = new Map();
   return rows
     .filter((row) => row.staff.id !== dismissedId)
     .map((row) => {
@@ -1298,7 +1299,7 @@ function managerCandidateRows(world, buyer) {
       return {
         ...row,
         initialCost,
-        score: coachClubFitScore(row.staff, buyer) + platformBonus - affordabilityPenalty,
+        score: coachClubFitScore(row.staff, buyer, { formationFitCache }) + platformBonus - affordabilityPenalty,
       };
     })
     .sort((a, b) => b.score - a.score || (b.staff.rating || 0) - (a.staff.rating || 0));

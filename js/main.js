@@ -870,7 +870,7 @@ function refreshSlotUI() {
   }
 }
 
-/** 当前开局所选国家（五国之一）；默认英格兰/克朗兰 */
+/** 当前开局所选国家（七国之一）；默认英格兰/克朗兰 */
 function getStartCountryId() {
   const sel = $("#select-country");
   const v = sel?.value;
@@ -883,7 +883,7 @@ function startDivisionsForCountry(countryId) {
   return START_DIVISIONS.filter((id) => DIVISIONS[id]?.countryId === countryId);
 }
 
-/** 联赛下拉选项（五国全部级别） */
+/** 联赛下拉选项（七国全部级别） */
 function divisionSelectOptionsHtml(includeAll = false) {
   const en = getLang() === "en";
   const parts = [];
@@ -1169,7 +1169,7 @@ function repairWorldFields(w) {
   }
   ensureWorldRegistrations(w);
   applyWorldClubBranding(w, clubBrandingById, getLang());
-  // 旧档若缺少当前五国联赛结构，提示开新档体验完整升降级
+  // 旧档若缺少当前七国联赛结构，提示开新档体验完整升降级
   const divisionIds = Object.keys(DIVISIONS).map(Number).filter(Number.isFinite);
   const counts = Object.fromEntries(divisionIds.map((id) => [id, 0]));
   for (const c of w.clubs || []) {
@@ -1178,7 +1178,7 @@ function repairWorldFields(w) {
   }
   if (divisionIds.some((division) => counts[division] < 4)) {
     // 仍可玩，但升降级可能跳过
-    console.warn("存档联赛结构不完整，建议开新档体验完整五国联赛");
+    console.warn("存档联赛结构不完整，建议开新档体验完整七国联赛");
   }
 }
 
@@ -6086,7 +6086,7 @@ function renderClubs() {
   const divFilter = sel?.value || "all";
   const q = (searchEl?.value || "").trim().toLowerCase();
 
-  // 各级积分榜排名缓存（五国全部联赛）
+  // 各级积分榜排名缓存（七国全部联赛）
   const rankMap = new Map();
   for (const d of DIVISION_IDS) {
     getSortedTable(world, d).forEach((r, i) => {

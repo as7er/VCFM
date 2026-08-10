@@ -146,7 +146,7 @@ const expandedFirstTeam = legacyWorld.clubs.flatMap((club) => club.players);
 assert.deepEqual(
   Object.fromEntries([18, 19, 20].map((ovr) => [ovr, expandedFirstTeam.filter((player) => player.ovr === ovr).length])),
   expectedAbilityQuotas(expandedFirstTeam.length),
-  "old saves expanded to five countries must be recalibrated as one world"
+  "old saves expanded to seven countries must be recalibrated as one world"
 );
 assert.equal(legacyWorld.abilityDistributionVersion, 1, "expanded old saves store the ability distribution version");
 assert.equal(ensureWorldClubTemplates(legacyWorld, "zh"), 0, "club expansion is idempotent");

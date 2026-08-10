@@ -469,20 +469,21 @@ function pickWeighted(pairs) {
   return pairs[0][0];
 }
 
-function nextMatchDaysForClub(world, clubId) {
-  const fixtures = [
-    ...(world.fixtures || []),
-    ...allCompetitionFixtures(world),
-  ];
-  let best = null;
+function nextMatchDaysByClub(world) {
+  const nextDays = new Map();
+  const currentDay = world.day || 0;
+  const fixtures = [...(world.fixtures || []), ...allCompetitionFixtures(world)];
   for (const f of fixtures) {
     if (f.played) continue;
-    if (f.home !== clubId && f.away !== clubId) continue;
-    const d = (f.day || 0) - (world.day || 0);
+    const d = (f.day || 0) - currentDay;
     if (d < 0) continue;
-    if (best == null || d < best) best = d;
+    for (const clubId of [f.home, f.away]) {
+      if (!clubId) continue;
+      const best = nextDays.get(clubId);
+      if (best == null || d < best) nextDays.set(clubId, d);
+    }
   }
-  return best;
+  return nextDays;
 }
 
 /**
@@ -491,6 +492,7 @@ function nextMatchDaysForClub(world, clubId) {
  */
 export function processTrainingDay(world) {
   const logs = [];
+  const nextMatchDays = nextMatchDaysByClub(world);
 
   for (const club of world.clubs || []) {
     ensureStaff(club);
@@ -498,7 +500,7 @@ export function processTrainingDay(world) {
 
     const isUser = club.id === world.userClubId;
     if (!isUser) {
-      autoPickTraining(club, nextMatchDaysForClub(world, club.id));
+      autoPickTraining(club, nextMatchDays.get(club.id) ?? null);
     }
 
     const t = ensureTraining(club);

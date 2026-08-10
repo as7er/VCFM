@@ -159,7 +159,8 @@ export function coachIdentityFacts(coach, lang = "zh") {
   ];
 }
 
-function formationSquadFit(club, formationId) {
+function formationSquadFit(club, formationId, cache = null) {
+  if (cache?.has(formationId)) return cache.get(formationId);
   const formation = FORMATIONS[formationId];
   if (!formation) return -Infinity;
   const players = (club?.players || []).filter(
@@ -168,18 +169,14 @@ function formationSquadFit(club, formationId) {
   const used = new Set();
   let score = 0;
   for (const slot of formation.slots || []) {
-    const candidates = players
-      .filter((player) => !used.has(player.id))
-      .map((player) => {
-        const sameGroup = positionGroup(player.pos) === positionGroup(slot.pos);
-        const fit = positionFitForSlot(player, slot, formation.slots).rating;
-        return {
-          player,
-          score: (Number(player.ovr) || 10) * 0.75 + fit * 0.5 + (sameGroup ? 5 : -14),
-        };
-      })
-      .sort((a, b) => b.score - a.score);
-    const picked = candidates[0];
+    let picked = null;
+    for (const player of players) {
+      if (used.has(player.id)) continue;
+      const sameGroup = positionGroup(player.pos) === positionGroup(slot.pos);
+      const fit = positionFitForSlot(player, slot, formation.slots).rating;
+      const candidateScore = (Number(player.ovr) || 10) * 0.75 + fit * 0.5 + (sameGroup ? 5 : -14);
+      if (!picked || candidateScore > picked.score) picked = { player, score: candidateScore };
+    }
     if (!picked) {
       score -= 30;
       continue;
@@ -187,6 +184,7 @@ function formationSquadFit(club, formationId) {
     used.add(picked.player.id);
     score += picked.score;
   }
+  cache?.set(formationId, score);
   return score;
 }
 
@@ -244,7 +242,7 @@ const PLAN_ARCHETYPE_FIT = Object.freeze({
   balanced: new Set(["balanced", "controlled", "counter"]),
 });
 
-export function coachClubFitScore(coach, club) {
+export function coachClubFitScore(coach, club, options = {}) {
   const identity = ensureCoachIdentity(coach);
   if (!identity || !club) return -Infinity;
   const planKey = club.seasonPlan?.key || "balanced";
@@ -253,7 +251,9 @@ export function coachClubFitScore(coach, club) {
     ? identity.youthTrust * 2
     : identity.adaptability;
   const formationFit = Math.max(
-    ...identity.preferredFormations.map((formation) => formationSquadFit(club, formation))
+    ...identity.preferredFormations.map((formation) =>
+      formationSquadFit(club, formation, options.formationFitCache)
+    )
   );
   return (Number(coach.rating) || 8) * 4 + styleFit + youthFit + formationFit * 0.08;
 }
