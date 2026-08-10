@@ -10,7 +10,11 @@ import {
   injuryRiskMultiplier,
   processInjuryRecoveryDay,
 } from "./injuries.js";
-import { recordPlayerDevelopment } from "./player-pathway.js";
+import {
+  developmentGrowthMultiplier,
+  developmentSharpness,
+  recordPlayerDevelopment,
+} from "./player-pathway.js";
 import { ensurePlayerPositionProfile } from "./player-positions.js";
 
 export const TRAINING_FOCUSES = {
@@ -287,6 +291,7 @@ function growFirstTeamPlayer(player, growthRate, focusCfg, context = {}) {
         coachRating: context.coachRating ?? null,
         growthRate: Math.round(growthRate * ageGrowthFactor(player.age) * 1000) / 1000,
         ageFactor: ageGrowthFactor(player.age),
+        matchSharpness: Number(context.matchSharpness || 0),
       },
     });
   }
@@ -575,15 +580,18 @@ export function processTrainingDay(world) {
       );
       for (const p of club.players || []) {
         const growthFocus = TRAINING_FOCUSES[playerFocus.get(p.id)] || focus;
-        const growthRate =
+        const baseGrowthRate =
           growthFocus.growth * inten.growthMult +
           coachGrowthBonus(club) +
           trainingGrowthBonus(club);
+        const matchSharpness = developmentSharpness(world, p);
+        const growthRate = baseGrowthRate * developmentGrowthMultiplier(world, p);
         if (growFirstTeamPlayer(p, growthRate, growthFocus, {
           world,
           club,
           intensity: inten,
           coachRating: coach,
+          matchSharpness,
           record: isUser,
         })) {
           if (isUser) grewNames.push(p.name);

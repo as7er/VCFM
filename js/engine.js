@@ -30,6 +30,12 @@ import {
 } from "./models.js";
 import { STYLE_MOD, FORMATIONS, POS_LABEL } from "./data.js";
 import { positionGroup, positionRating } from "./player-positions.js";
+import { processInjuryRecoveryDay } from "./injuries.js";
+import {
+  archiveDevelopmentSeason,
+  processDevelopmentMatchesForDay,
+} from "./development-football.js";
+import { developmentGrowthMultiplier } from "./player-pathway.js";
 import {
   mediaAfterUserMatch,
   mediaTransfer,
@@ -52,6 +58,7 @@ import {
   scoutSellMod,
   scoutYouthPotBonus,
   doctorInjuryMod,
+  doctorHealBonus,
   generateStaffMarket,
   refreshStaffMarket,
   hireStaff,
@@ -342,6 +349,7 @@ import {
 } from "./worldpulse.js";
 import {
   ensurePlayerPathway,
+  ensureDevelopmentStats,
   processPlayingTimePromises,
   recordPlayerDevelopment,
   setPlayingTimeRole,
@@ -349,6 +357,8 @@ import {
   playingTimeRoleLabel,
   playerDevelopmentTimeline,
   developmentAttrLabel,
+  developmentSharpness,
+  recentMatchMinutes,
   PLAYING_TIME_ROLES,
 } from "./player-pathway.js";
 import { runCalendarWorker } from "./sim/calendar-worker-client.js";
@@ -472,11 +482,14 @@ export {
   resignCooldownLeft,
   isManagerEmployed,
   ensurePlayerPathway,
+  ensureDevelopmentStats,
   setPlayingTimeRole,
   playingTimeProgress,
   playingTimeRoleLabel,
   playerDevelopmentTimeline,
   developmentAttrLabel,
+  developmentSharpness,
+  recentMatchMinutes,
   PLAYING_TIME_ROLES,
 };
 
@@ -530,7 +543,12 @@ function growYouthPlayer(player, growthRate, context = {}) {
             ovrAfter: playerOverall(player),
             reason: "青训设施、教练能力与本周培养计划共同推动成长",
             reasonEn: "Academy facilities, coaching and the weekly development plan drove improvement",
-            details: { academyLevel: context.club?.youth?.level || 1, growthRate },
+            details: {
+              academyLevel: context.club?.youth?.level || 1,
+              growthRate,
+              developmentMinutes: Number(context.developmentMinutes || 0),
+              developmentSharpness: Number(context.developmentSharpness || 0),
+            },
           });
         }
       }
@@ -550,6 +568,12 @@ function processYouthDay(world) {
     const ya = ensureYouthAcademy(club);
     const cfg = YOUTH_LEVELS[ya.level] || YOUTH_LEVELS[1];
     ya.daysSinceIntake = (ya.daysSinceIntake || 0) + 1;
+    for (const yp of ya.players) {
+      processInjuryRecoveryDay(yp, {
+        doctorBonus: doctorHealBonus(club),
+        facilityBonus: trainingHealBonus(club),
+      });
+    }
 
     // 每周成长（教练加成）
     if (world.day % 7 === 0) {
@@ -557,7 +581,15 @@ function processYouthDay(world) {
       const growth =
         (cfg.growth + coachGrowthBonus(club) + trainingGrowthBonus(club) * 0.5) * yMult;
       for (const yp of ya.players) {
-        growYouthPlayer(yp, growth, { world, club, record: club.id === world.userClubId });
+        const matchSharpness = developmentSharpness(world, yp);
+        const matchExposure = developmentGrowthMultiplier(world, yp);
+        growYouthPlayer(yp, growth * matchExposure, {
+          world,
+          club,
+          record: club.id === world.userClubId,
+          developmentMinutes: Math.round(recentMatchMinutes(world, yp)),
+          developmentSharpness: matchSharpness,
+        });
       }
       for (const p of club.players) {
         if (p.fromYouth && p.age <= 22 && p.potential && p.ovr < p.potential && chance(growth * 0.35)) {
@@ -803,6 +835,26 @@ export function advanceDay(world, options = {}) {
     : processManagerEcosystemDay(world, { alreadyEnsured: true });
   if (managerEvents.length) events.push(...managerEvents);
 
+  // 发展队比赛在完整日历日运行；用户正式比赛会在 finalizeMatch 后再触发，
+  // 以便先锁定当天一线队的真实出场与体能事实。
+  if (!userMatches.length) {
+    const developmentMatches = processDevelopmentMatchesForDay(world);
+    if (developmentMatches.length) {
+      events.push({
+        type: "development_matches",
+        count: developmentMatches.length,
+        matches: developmentMatches
+          .filter((match) => match.home === world.userClubId || match.away === world.userClubId)
+          .map((match) => ({
+            home: match.home,
+            away: match.away,
+            homeGoals: match.score.home,
+            awayGoals: match.score.away,
+          })),
+      });
+    }
+  }
+
   // 租借到期归还
   ensureLoans(world);
   const loanResult = processLoansDay(world);
@@ -982,6 +1034,8 @@ function checkBoardEvent(world) {
  */
 export function finishSeason(world) {
   if (world.seasonOver) return { retired: [] };
+
+  archiveDevelopmentSeason(world);
 
   // Record the actual club and association where each 15-21-year-old trained
   // before ages advance and loans return for the next season.

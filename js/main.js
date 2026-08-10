@@ -40,8 +40,8 @@ import {
   positionCoverage,
   positionLabel as detailedPositionLabel,
 } from "./player-positions.js";
-import { nationFlagHtml } from "./flags.js?v=205";
-import { clubCrestHtml } from "./club-crest.js?v=205";
+import { nationFlagHtml } from "./flags.js?v=206";
+import { clubCrestHtml } from "./club-crest.js?v=206";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -269,11 +269,13 @@ import {
   dressingRoomHarmony,
   harmonyLabel,
   ensurePlayerPathway,
+  ensureDevelopmentStats,
   setPlayingTimeRole,
   playingTimeProgress,
   playingTimeRoleLabel,
   playerDevelopmentTimeline,
   developmentAttrLabel,
+  developmentSharpness,
   PLAYING_TIME_ROLES,
   financeSnapshot,
   startScoutMission,
@@ -294,7 +296,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=205";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=206";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -360,7 +362,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=205";
+} from "./avatar.js?v=206";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -450,7 +452,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=205").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=206").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -4196,7 +4198,8 @@ function renderSquad() {
       const form = playerForm(p);
       const playingTime = ensurePlayerPathway(p, club, world);
       const playingProgress = playingTimeProgress(world, club, p);
-      const playingTitle = `${playingTimeRoleLabel(playingTime.role, en ? "en" : "zh")} · ${Math.round(playingProgress.minutesShare * 100)}% / ${Math.round(playingProgress.target * 100)}%`;
+      const matchSharpness = developmentSharpness(world, p);
+      const playingTitle = `${playingTimeRoleLabel(playingTime.role, en ? "en" : "zh")} · ${Math.round(playingProgress.minutesShare * 100)}% / ${Math.round(playingProgress.target * 100)}% · ${en ? "match sharpness" : "比赛锐度"} ${matchSharpness}`;
       const formTitle = form == null
         ? (en ? "Form: no recent ratings yet" : "状态：暂无近期评分")
         : `${en ? "Form" : "状态"} ${formatForm(form)} · ${formToneLabel(form, en ? "en" : "zh")} (${en ? "last" : "近"}${(s.recentRatings || []).length}${en ? " apps" : "场"})`;
@@ -4465,7 +4468,7 @@ function showPlayerModal(playerId, context = {}) {
           : ""
       }
     </p>
-    <p class="muted" style="margin:0.35rem 0 0" title="${escapeHtml(en ? "Rolling average of last up to 5 rated appearances (league, cup and continental)" : "最近最多 5 场已评分出场的滚动均值（含联赛/杯赛/洲际）")}">
+    <p class="muted" style="margin:0.35rem 0 0" title="${escapeHtml(en ? "Rolling average of last up to 5 rated appearances (league, cup, continental and development)" : "最近最多 5 场已评分出场的滚动均值（含联赛/杯赛/洲际/发展队）")}">
       ${en ? "Form" : "状态"}
       <strong class="${formClass(curForm)}">${formatForm(curForm)}</strong>
       ${curForm != null ? ` <span class="form-pill ${formClass(curForm)}">${escapeHtml(formToneLabel(curForm, en ? "en" : "zh"))}</span>` : ""}
@@ -4652,6 +4655,7 @@ function renderPlayerTalkPanel(player) {
   const club = world.clubs?.find((item) => item.id === world.userClubId);
   const playingTime = ensurePlayerPathway(player, club, world);
   const progress = playingTimeProgress(world, club, player);
+  const matchSharpness = developmentSharpness(world, player);
   const targetPct = Math.round(progress.target * 100);
   const actualPct = Math.round(progress.minutesShare * 100);
   const promise = playingTime.promise;
@@ -4672,7 +4676,7 @@ function renderPlayerTalkPanel(player) {
         <strong>${en ? "Playing-time status" : "出场定位承诺"}</strong>
         <span class="badge ${progress.fulfilment >= 0.9 ? "DEF" : progress.fulfilment >= 0.7 ? "MID" : "ATT"}">${actualPct}% / ${targetPct}%</span>
       </div>
-      <p class="muted">${escapeHtml(playingTimeRoleLabel(playingTime.role, en ? "en" : "zh"))} · ${progress.availableMatches} ${en ? "available matches" : "场可用比赛"} · ${progress.appearances} ${en ? "apps" : "次出场"} · ${progress.starts} ${en ? "starts" : "次首发"} · ${progress.minutes} ${en ? "minutes" : "分钟"}${promise?.dueDay ? ` · ${en ? "review D" : "复核 D"}${promise.dueDay}` : ` · ${en ? "inferred, not promised" : "当前为阵容推定，尚未正式承诺"}`}</p>
+      <p class="muted">${escapeHtml(playingTimeRoleLabel(playingTime.role, en ? "en" : "zh"))} · ${progress.availableMatches} ${en ? "available matches" : "场可用比赛"} · ${progress.appearances} ${en ? "apps" : "次出场"} · ${progress.starts} ${en ? "starts" : "次首发"} · ${progress.minutes} ${en ? "minutes" : "分钟"} · ${en ? "match sharpness" : "比赛锐度"} ${matchSharpness}/100${promise?.dueDay ? ` · ${en ? "review D" : "复核 D"}${promise.dueDay}` : ` · ${en ? "inferred, not promised" : "当前为阵容推定，尚未正式承诺"}`}</p>
       <div class="playing-time-role-controls">
         <select data-playing-time-role aria-label="${escapeHtml(en ? "Playing-time role" : "出场定位")}">${roleOptions}</select>
         <button type="button" class="btn small" data-playing-time-save ${roleCooling ? "disabled" : ""}>${en ? "Agree role" : "确认承诺"}</button>
@@ -4691,10 +4695,13 @@ function renderPlayerTalkPanel(player) {
 function renderPlayerDevelopmentPanel(player) {
   const en = getLang() === "en";
   const entries = playerDevelopmentTimeline(player, 10);
+  const developmentStats = ensureDevelopmentStats(player);
+  const latestArchive = player.developmentHistory?.[0] || null;
+  const developmentSummary = `<div class="player-development-summary muted">${en ? "Development football" : "发展队比赛"} · ${developmentStats.apps} ${en ? "apps" : "场"} · ${developmentStats.minutes} ${en ? "minutes" : "分钟"} · ${developmentStats.goals} ${en ? "goals" : "球"} · ${developmentStats.assists} ${en ? "assists" : "助攻"}${latestArchive ? ` · ${en ? "last season" : "上季"} ${latestArchive.apps} ${en ? "apps" : "场"} / ${latestArchive.minutes} ${en ? "min" : "分钟"}` : ""}</div>`;
   if (!entries.length) {
-    return `<div class="player-development-empty muted">${en ? "No recorded attribute changes yet. Weekly training and season transitions will add explainable entries." : "暂无属性变化记录；每周训练和赛季转换后会记录具体变化与原因。"}</div>`;
+    return `<div class="player-development-empty">${developmentSummary}<p class="muted">${en ? "No recorded attribute changes yet. Weekly training and season transitions will add explainable entries." : "暂无属性变化记录；每周训练和赛季转换后会记录具体变化与原因。"}</p></div>`;
   }
-  return `<div class="player-development-log">${entries.map((entry) => {
+  return `<div class="player-development-log">${developmentSummary}${entries.map((entry) => {
     const date = entry.season != null
       ? `S${entry.season}${entry.day != null ? ` · D${entry.day}` : ""}`
       : entry.day != null ? `D${entry.day}` : "—";

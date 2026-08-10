@@ -11,6 +11,7 @@ export const PLAYING_TIME_ROLES = {
 const ROLE_ORDER = ["prospect", "squad", "rotation", "important", "star"];
 const DEVELOPMENT_LOG_LIMIT = 48;
 const PLAYING_TIME_HISTORY_LIMIT = 72;
+const DEVELOPMENT_HISTORY_LIMIT = 12;
 
 export const DEVELOPMENT_ATTR_LABELS = {
   pace: ["速度", "Pace"],
@@ -105,6 +106,76 @@ export function ensurePlayerPathway(player, club = null, world = null) {
   delete player._promisedPlay;
   delete player._promiseAppsBase;
   return status;
+}
+
+export function emptyDevelopmentStats() {
+  return {
+    apps: 0,
+    starts: 0,
+    minutes: 0,
+    goals: 0,
+    assists: 0,
+    ratingSum: 0,
+    lastDay: null,
+  };
+}
+
+export function ensureDevelopmentStats(player) {
+  if (!player) return emptyDevelopmentStats();
+  if (!player.developmentStats || typeof player.developmentStats !== "object" || Array.isArray(player.developmentStats)) {
+    player.developmentStats = emptyDevelopmentStats();
+  }
+  const stats = player.developmentStats;
+  for (const key of ["apps", "starts", "minutes", "goals", "assists", "ratingSum"]) {
+    if (!Number.isFinite(Number(stats[key]))) stats[key] = 0;
+  }
+  if (!Array.isArray(player.developmentHistory)) player.developmentHistory = [];
+  return stats;
+}
+
+export function recentMatchMinutes(world, player, windowDays = 28) {
+  if (!player) return 0;
+  ensurePlayerPathway(player);
+  const endDay = Number(world?.day || 0);
+  const startDay = endDay > 0 ? endDay - Math.max(1, Number(windowDays || 28)) + 1 : -Infinity;
+  const season = world?.season;
+  return player.playingTime.history
+    .filter((entry) => season == null || entry.season === season)
+    .filter((entry) => Number(entry.day || 0) >= startDay && Number(entry.day || 0) <= endDay)
+    .reduce((sum, entry) => sum + Math.max(0, Number(entry.minutes || 0)), 0);
+}
+
+export function developmentSharpness(world, player, windowDays = 28) {
+  const minutes = recentMatchMinutes(world, player, windowDays);
+  return clamp(Math.round((minutes / 180) * 100), 0, 100);
+}
+
+export function developmentGrowthMultiplier(world, player) {
+  return clamp(0.84 + developmentSharpness(world, player) * 0.0024, 0.84, 1.08);
+}
+
+export function archiveDevelopmentStats(player, season, clubId = null, clubName = null) {
+  const stats = ensureDevelopmentStats(player);
+  let archived = null;
+  if (Number(stats.apps || 0) > 0 || Number(stats.minutes || 0) > 0) {
+    archived = {
+      season,
+      clubId,
+      clubName,
+      apps: Number(stats.apps || 0),
+      starts: Number(stats.starts || 0),
+      minutes: Number(stats.minutes || 0),
+      goals: Number(stats.goals || 0),
+      assists: Number(stats.assists || 0),
+      avgRating: stats.apps ? Number((Number(stats.ratingSum || 0) / stats.apps).toFixed(2)) : 0,
+    };
+    player.developmentHistory.unshift(archived);
+    if (player.developmentHistory.length > DEVELOPMENT_HISTORY_LIMIT) {
+      player.developmentHistory.length = DEVELOPMENT_HISTORY_LIMIT;
+    }
+  }
+  player.developmentStats = emptyDevelopmentStats();
+  return archived;
 }
 
 export function recordPlayerDevelopment(player, event = {}) {
@@ -216,9 +287,12 @@ export function recordMatchPlayingTime(world, club, context = {}) {
     }
   }
   const eligibleIds = context.eligibleIds instanceof Set ? context.eligibleIds : null;
+  const availableIds = context.availableIds instanceof Set ? context.availableIds : null;
+  const historyLimit = clamp(Math.floor(Number(context.historyLimit) || PLAYING_TIME_HISTORY_LIMIT), 4, PLAYING_TIME_HISTORY_LIMIT);
   const key = playingTimeEntryKey(world, context.fixture);
   const result = new Map();
-  for (const player of club.players || []) {
+  const players = Array.isArray(context.players) ? context.players : (club.players || []);
+  for (const player of players) {
     const status = ensurePlayerPathway(player, club, world);
     const start = started.has(player.id);
     const inMinute = subIn.get(player.id);
@@ -229,7 +303,7 @@ export function recordMatchPlayingTime(world, club, context = {}) {
       : inMinute != null
         ? Math.max(1, Math.round(offMinute - inMinute))
         : 0;
-    const registered = !eligibleIds || eligibleIds.has(player.id);
+    const registered = availableIds ? availableIds.has(player.id) : (!eligibleIds || eligibleIds.has(player.id));
     const available = appeared || (registered && !(player.injured > 0) && !(player.suspendedMatches > 0));
     const entry = {
       key,
@@ -245,8 +319,8 @@ export function recordMatchPlayingTime(world, club, context = {}) {
     const existing = status.history.findIndex((item) => item.key === key);
     if (existing >= 0) status.history[existing] = entry;
     else status.history.push(entry);
-    if (status.history.length > PLAYING_TIME_HISTORY_LIMIT) {
-      status.history = status.history.slice(-PLAYING_TIME_HISTORY_LIMIT);
+    if (status.history.length > historyLimit) {
+      status.history = status.history.slice(-historyLimit);
     }
     result.set(player.id, entry);
   }
@@ -260,7 +334,8 @@ export function playingTimeProgress(world, club, player, options = {}) {
   const startDay = Number(promise?.startDay ?? Math.max(1, Number(world?.day || 1) - 27));
   const endDay = Number(options.endDay ?? world?.day ?? promise?.dueDay ?? startDay);
   const entries = status.history.filter((entry) =>
-    entry.season === season && Number(entry.day) >= startDay && Number(entry.day) <= endDay && entry.available
+    entry.season === season && entry.competitionType !== "development"
+    && Number(entry.day) >= startDay && Number(entry.day) <= endDay && entry.available
   );
   const availableMatches = entries.length;
   const appearances = entries.filter((entry) => entry.appeared).length;

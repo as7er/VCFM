@@ -79,6 +79,7 @@ import {
 import { eligiblePlayerIds } from "./squad-registration.js";
 import { deriveMatchAnalysis } from "./match-analysis.js";
 import { recordMatchPlayingTime } from "./player-pathway.js";
+import { processDevelopmentMatchesForDay } from "./development-football.js";
 import {
   applyPreMatchDelegation,
   isFullyDelegated,
@@ -2953,15 +2954,14 @@ export function finalizeMatch(state) {
         player.lastPlayedDay = world.day;
       }
     }
-    if (club.id === world.userClubId) {
-      recordMatchPlayingTime(world, club, {
-        fixture,
-        startedIds: started,
-        events,
-        eligibleIds: state.eligiblePlayerIds?.[side],
-        isCup,
-      });
-    }
+    recordMatchPlayingTime(world, club, {
+      fixture,
+      startedIds: started,
+      events,
+      eligibleIds: state.eligiblePlayerIds?.[side],
+      historyLimit: club.id === world.userClubId ? 72 : 12,
+      isCup,
+    });
   }
 
   // 上座与票价只能由开赛前已知的信息决定。这里先锁定上下文，稍后再做账，
@@ -3219,6 +3219,26 @@ export function finalizeMatch(state) {
           });
         }
       }
+    }
+  }
+
+  // 用户正式比赛结算后才运行当天发展队比赛，保证球员不会同时被两类比赛使用。
+  if (fixture.home === world.userClubId || fixture.away === world.userClubId) {
+    const developmentMatches = processDevelopmentMatchesForDay(world);
+    const userDevelopment = developmentMatches.filter(
+      (match) => match.home === world.userClubId || match.away === world.userClubId
+    );
+    if (userDevelopment.length) {
+      const match = userDevelopment[0];
+      const userHome = match.home === world.userClubId;
+      const opponentId = userHome ? match.away : match.home;
+      const opponent = clubById(world, opponentId);
+      const myGoals = userHome ? match.score.home : match.score.away;
+      const opponentGoals = userHome ? match.score.away : match.score.home;
+      world.news.unshift({
+        day: world.day,
+        text: `发展队：${userHome ? home.name : away.name} ${myGoals}-${opponentGoals} ${opponent?.name || "对手发展队"}`,
+      });
     }
   }
 

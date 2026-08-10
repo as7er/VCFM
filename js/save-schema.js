@@ -108,6 +108,28 @@ export function validateSaveStructure(world, options = {}) {
       for (const [attribute, value] of Object.entries(player.attrs || {})) {
         finiteIfPresent(value, `player ${player.id} attribute ${attribute}`);
       }
+      if (player.developmentStats != null) {
+        if (!isRecord(player.developmentStats)) throw new Error(`invalid save: player ${player.id} development stats are invalid`);
+        for (const field of ["apps", "starts", "minutes", "goals", "assists", "ratingSum", "lastDay"]) {
+          finiteIfPresent(player.developmentStats[field], `player ${player.id} development ${field}`);
+        }
+      }
+    }
+    for (const player of club.youth?.players || []) {
+      if (!isRecord(player) || typeof player.id !== "string" || !player.id.trim()) {
+        throw new Error(`invalid save: youth player id is missing at club ${club.id}`);
+      }
+      if (playerIds.has(player.id)) throw new Error(`invalid save: duplicate player id ${player.id}`);
+      playerIds.add(player.id);
+      for (const field of ["age", "ovr", "potential", "fitness", "morale", "wage", "value"]) {
+        finiteIfPresent(player[field], `youth player ${player.id} ${field}`);
+      }
+      if (player.developmentStats != null) {
+        if (!isRecord(player.developmentStats)) throw new Error(`invalid save: youth player ${player.id} development stats are invalid`);
+        for (const field of ["apps", "starts", "minutes", "goals", "assists", "ratingSum", "lastDay"]) {
+          finiteIfPresent(player.developmentStats[field], `youth player ${player.id} development ${field}`);
+        }
+      }
     }
     if (club.tactics?.lineup != null) {
       if (!Array.isArray(club.tactics.lineup)) {
@@ -146,6 +168,34 @@ export function validateSaveStructure(world, options = {}) {
     }
     for (const field of ["day", "homeGoals", "awayGoals", "matchSeed"]) {
       finiteIfPresent(fixture[field], `fixture ${fixture.id} ${field}`);
+    }
+  }
+  if (world.development != null) {
+    if (!isRecord(world.development) || !Array.isArray(world.development.matches)) {
+      throw new Error("invalid save: development football is invalid");
+    }
+    for (const field of ["version", "lastMatchDay", "nextMatchDay", "nextMatchSeq"]) {
+      finiteIfPresent(world.development[field], `development football ${field}`);
+    }
+    const developmentIds = new Set();
+    for (const match of world.development.matches) {
+      if (!isRecord(match) || typeof match.id !== "string" || !match.id) {
+        throw new Error("invalid save: development football contains an invalid match");
+      }
+      if (developmentIds.has(match.id)) throw new Error("invalid save: duplicate development match id");
+      developmentIds.add(match.id);
+      if (!clubIds.has(match.home) || !clubIds.has(match.away) || match.home === match.away) {
+        throw new Error(`invalid save: development match ${match.id} has invalid clubs`);
+      }
+      for (const field of ["day", "season", "matchSeed", "timeStep", "separationPasses"]) {
+        finiteIfPresent(match[field], `development match ${match.id} ${field}`);
+      }
+      for (const side of ["home", "away"]) {
+        finiteIfPresent(match.score?.[side], `development match ${match.id} ${side} score`);
+      }
+      if (!Array.isArray(match.playerIds) || match.playerIds.some((playerId) => typeof playerId !== "string" || !playerId)) {
+        throw new Error(`invalid save: development match ${match.id} has invalid player references`);
+      }
     }
   }
   for (const [clubId, row] of Object.entries(world.table)) {

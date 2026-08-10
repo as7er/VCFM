@@ -6,6 +6,7 @@
 import { FORMATIONS } from "./data.js";
 import { ensureClubSeasonPlan, clubPlanDef } from "./board.js";
 import { developmentStatus } from "./squad-registration.js";
+import { developmentSharpness } from "./player-pathway.js";
 import {
   positionCoverage,
   positionGroup,
@@ -365,6 +366,7 @@ function playerDecision(world, club, player, positionPlan, seasonPlan, decisionP
   const positionFit = bestDetailedFit(player, formation.slots || []);
   const weakForClub = playerOvr(player) < Math.max(6, positionPlan.starterAverage - 3);
   const protectedYouth = age <= 22 && growthRoom >= 2;
+  const matchSharpness = developmentSharpness(world, player);
   const poorSlotFit = positionFit.rating > 0 && positionFit.rating < 9;
   let action = "retain";
   let priority = 30;
@@ -378,14 +380,22 @@ function playerDecision(world, club, player, positionPlan, seasonPlan, decisionP
     reasonEn = starter ? "Expiring starter; renewal prevents a depth break" : "Depth need makes renewal more coherent than replacement";
   } else if (protectedYouth && !starter && rank > positionPlan.slots + 1 && positionPlan.current > positionPlan.minimum) {
     action = "loan";
-    priority = 62 + growthRoom * 3;
-    reason = "高潜年轻球员暂缺稳定一线队分钟，适合外租发展";
-    reasonEn = "High-potential youngster currently lacks reliable first-team minutes";
+    priority = 62 + growthRoom * 3 + Math.max(0, 45 - matchSharpness) * 0.12;
+    reason = matchSharpness < 25
+      ? "高潜年轻球员比赛锐度不足且暂缺一线队分钟，适合外租发展"
+      : "高潜年轻球员暂缺稳定一线队分钟，适合外租发展";
+    reasonEn = matchSharpness < 25
+      ? "High-potential youngster lacks match sharpness and reliable first-team minutes"
+      : "High-potential youngster currently lacks reliable first-team minutes";
   } else if (protectedYouth) {
     action = "develop";
     priority = 58 + growthRoom * 3 + (status.clubTrained ? 5 : 0);
-    reason = status.clubTrained ? "高潜且具本俱乐部培养价值，应保留培养" : "能力仍有明确成长空间，应进入轮换培养";
-    reasonEn = status.clubTrained ? "High upside with club-trained value" : "Clear development room merits rotation minutes";
+    reason = matchSharpness < 25
+      ? "比赛锐度偏低，应先通过发展队比赛积累真实分钟"
+      : status.clubTrained ? "高潜且具本俱乐部培养价值，应保留培养" : "能力仍有明确成长空间，应进入轮换培养";
+    reasonEn = matchSharpness < 25
+      ? "Match sharpness is low; real development minutes should come first"
+      : status.clubTrained ? "High upside with club-trained value" : "Clear development room merits rotation minutes";
   } else if (starter && (age >= replacementAge || poorSlotFit)) {
     action = "replace";
     priority = 64 + Math.max(0, age - replacementAge) * 4 + (poorSlotFit ? 7 : 0);
@@ -431,6 +441,7 @@ function playerDecision(world, club, player, positionPlan, seasonPlan, decisionP
     protectedYouth,
     clubTrained: status.clubTrained,
     associationTrained: status.associationTrained,
+    matchSharpness,
     styleFit: styleFit(seasonPlan?.key, player),
   };
 }
@@ -448,6 +459,7 @@ function planSignature(world, club, seasonPlan) {
       player.pos,
       number(player.age),
       playerOvr(player),
+      developmentSharpness(world, player),
       playerPotential(player),
       number(player.contractYears),
       number(player.wage),
@@ -702,11 +714,13 @@ export function evaluateYouthCandidate(world, club, player, options = {}) {
   const potential = playerPotential(player);
   const readinessGap = ability - Math.max(6, position.starterAverage - 3);
   const status = developmentStatus(world, club, player);
+  const matchSharpness = developmentSharpness(world, player);
   const score = round(
     potential * 2 +
     ability * 1.2 +
     position.needScore * 0.35 +
     Math.max(0, readinessGap) * 4 +
+    matchSharpness * 0.06 +
     (age >= 19 ? 6 : 0) +
     (status.clubTrained ? 4 : 0) -
     Math.max(0, (club.players || []).length - 23) * 4
@@ -715,7 +729,8 @@ export function evaluateYouthCandidate(world, club, player, options = {}) {
     score,
     promote: score >= 48 && (potential >= 13 || position.needScore >= 18),
     positionNeed: position.needScore,
-    reason: position.reasons[0],
-    reasonEn: position.reasonsEn[0],
+    matchSharpness,
+    reason: `${position.reasons[0]}；比赛锐度 ${matchSharpness}/100`,
+    reasonEn: `${position.reasonsEn[0]}; match sharpness ${matchSharpness}/100`,
   };
 }
