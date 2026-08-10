@@ -1,4 +1,4 @@
-/** 五国国内杯与三项欧洲俱乐部赛事。所有后台比赛继续使用轻量概率引擎。 */
+/** 七国国内杯与三项欧洲俱乐部赛事。所有后台比赛继续使用轻量概率引擎。 */
 
 import { uid } from "./models.js";
 import {
@@ -169,11 +169,14 @@ function rankedTopClubs(world, countryId) {
   });
 }
 
-/** 当前排名快照生成下赛季欧洲赛事席位：五国各赛事 4 席。 */
+/** 当前排名快照生成下赛季欧洲赛事席位：各国每赛事 4 席。 */
 export function buildContinentalQualifiers(world) {
   const result = {};
   for (const config of Object.values(CONTINENTAL_COMPETITIONS)) result[config.id] = [];
+  // 只为实际有球队的国家分配席位，与 validQualifierSet 的口径保持一致
+  const presentCountries = new Set((world.clubs || []).map(countryOfClub));
   for (const country of COUNTRY_LIST) {
+    if (!presentCountries.has(country.id)) continue;
     const ranked = rankedTopClubs(world, country.id);
     for (const config of Object.values(CONTINENTAL_COMPETITIONS)) {
       result[config.id].push(
@@ -339,9 +342,12 @@ function refreshContinentalBranding(tournament, config) {
 
 function validQualifierSet(world, qualifiers) {
   const ids = new Set(world.clubs.map((c) => c.id));
+  // 席位数 = 有球队参赛的国家数 × 每赛事 4 席；不写死队数，加国家自动扩容
+  const presentCountries = new Set((world.clubs || []).map(countryOfClub));
+  const expected = COUNTRY_LIST.filter((country) => presentCountries.has(country.id)).length * 4;
   return Object.values(CONTINENTAL_COMPETITIONS).every((config) => {
     const list = qualifiers?.[config.id];
-    return Array.isArray(list) && list.length === 20 && list.every((id) => ids.has(id));
+    return Array.isArray(list) && list.length === expected && list.every((id) => ids.has(id));
   });
 }
 

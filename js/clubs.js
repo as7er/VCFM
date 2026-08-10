@@ -1,9 +1,9 @@
 /**
- * 五国 198 家原创俱乐部（11 联赛 × 18 队，v152 起双循环 34 轮）。
+ * 七国 270 家原创俱乐部（15 联赛 × 18 队，v152 起双循环 34 轮）。
  * 旧名称仅保留在 legacyName 迁移字段中；clubId 与虚构品牌层稳定。
  */
 
-import { COUNTRY_BRANDING } from "./branding.js";
+import { COUNTRY_BRANDING, LEAGUE_BRANDING } from "./branding.js";
 
 const BRAND_COLORS = [
   "#0f766e", "#b91c1c", "#1d4ed8", "#a16207", "#7e22ce", "#047857",
@@ -182,8 +182,13 @@ function makeShortName(nameEn, cityEn, clubId) {
   return code;
 }
 
-const TOP_DIVISIONS = new Set([1, 4, 6, 8, 10]);
-const SECOND_DIVISIONS = new Set([2, 5, 7, 9, 11]);
+// 层级从 LEAGUE_BRANDING 的 tier 派生，避免每加一个联赛都要手工维护集合。
+const TOP_DIVISIONS = new Set(
+  Object.values(LEAGUE_BRANDING).filter((l) => l.tier === 1).map((l) => l.id)
+);
+const SECOND_DIVISIONS = new Set(
+  Object.values(LEAGUE_BRANDING).filter((l) => l.tier === 2).map((l) => l.id)
+);
 
 function buildRealityProfile(countryCode, division, index, count, power, money) {
   const tier = TOP_DIVISIONS.has(division) ? 1 : SECOND_DIVISIONS.has(division) ? 2 : 3;
@@ -561,6 +566,38 @@ const LUMERA_SECOND = [
   "Fontnoble", "Valdore SC",
 ];
 
+const TULIPA_TOP = [
+  "Amstelveen", "Rijnmond", "Zuiderhaven", "Nieuwdam",
+  "Sparta Veldhoek", "Willemstad", "Molenbeek", "Oostvliet",
+  "Duinkerk", "Groenwoud", "Hoogeveld", "Waterlinie",
+  "Zeearend", "Kanaalstad", "Bloemendijk", "Noordwijk",
+  "Steenbergen", "Vesting",
+];
+
+const TULIPA_SECOND = [
+  "Klaverdijk", "Roodbrug", "Meerhoven", "Turfmarkt",
+  "Zandvoort", "Elzenhof", "Havenkwartier", "Sluisberg",
+  "Kleiveld", "Wilgenbeek", "Boomgaard", "Polderzicht",
+  "Windmolen", "Vlietstroom", "Grasland", "Kanaaloever",
+  "Duinrand", "Veenendam",
+];
+
+const NAVERA_TOP = [
+  "Portomar", "Benfica Serrano", "Estrela do Norte", "Rio Douro",
+  "Sporting Vilamar", "Serra Verde", "Oliveira", "Atlantico",
+  "Montalegre", "Praia Dourada", "Vinhedo", "Castelo Branco",
+  "Uniao Ribeira", "Sol Nascente", "Alvorada", "Pedravela",
+  "Marinheiro", "Lusitano",
+];
+
+const NAVERA_SECOND = [
+  "Vale Fundo", "Ponte Velha", "Azulejo", "Ribamar",
+  "Douradinha", "Terra Nova", "Pinhal", "Costa Azul",
+  "Barrocal", "Alentejo", "Uniao Salgueiro", "Fonte Clara",
+  "Miradouro", "Carvalhal", "Vila Nova", "Penedo",
+  "Amoreira", "Cabo Real",
+];
+
 // 匿名现实竞争曲线：只保存联赛席位层级，不保存或展示现实俱乐部身份。
 // 顶部断层、争冠集团和中下游密度分别贴近五国当代联赛生态。
 // 调整为18队以匹配德甲/法甲现实，提供更合理的34轮双循环赛制。
@@ -580,6 +617,15 @@ const TOP_REALITY_CURVES = Object.freeze({
   FRA: {
     power: [81, 76, 75, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61, 60, 59],
     money: [50, 34, 30, 27, 24, 22, 20, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8].map((n) => n * 1_000_000),
+  },
+  // 荷甲/葡超：顶部两三家垄断，与第四名起的断层比五大联赛更陡
+  NED: {
+    power: [78, 76, 74, 66, 64, 63, 62, 61, 60, 60, 59, 59, 58, 58, 57, 57, 56, 55],
+    money: [34, 30, 26, 14, 12, 11, 10, 10, 9, 9, 8, 8, 8, 7, 7, 7, 7, 6].map((n) => n * 1_000_000),
+  },
+  POR: {
+    power: [78, 77, 75, 64, 62, 61, 60, 59, 59, 58, 58, 57, 57, 56, 56, 56, 55, 55],
+    money: [30, 28, 25, 11, 10, 9, 8, 8, 7, 7, 7, 6, 6, 6, 6, 5, 5, 5].map((n) => n * 1_000_000),
   },
 });
 
@@ -752,6 +798,90 @@ const FRA_SECOND_BRANDS = [
   ["Olympique Valdore", "瓦尔多雷奥林匹克"],
 ];
 
+const NED_TOP_BRANDS = [
+  ["Amstelveen", "阿姆斯特芬"],
+  ["Rijnmond", "莱茵蒙德"],
+  ["Zuiderhaven", "南港"],
+  ["Nieuwdam", "尼乌达姆"],
+  ["Sparta Veldhoek", "费尔德胡克斯巴达"],
+  ["Willemstad", "威廉斯塔德"],
+  ["Molenbeek", "莫伦贝克"],
+  ["Oostvliet", "东弗利特"],
+  ["Duinkerk", "杜因凯克"],
+  ["Groenwoud", "赫罗恩沃德"],
+  ["Hoogeveld", "霍赫费尔德"],
+  ["Waterlinie", "水线"],
+  ["Zeearend", "海鹰"],
+  ["Kanaalstad", "运河城"],
+  ["Bloemendijk", "布卢门代克"],
+  ["Noordwijk", "诺德韦克"],
+  ["Steenbergen", "斯滕贝尔亨"],
+  ["Vesting", "费斯廷"],
+];
+
+const NED_SECOND_BRANDS = [
+  ["Klaverdijk", "克拉弗代克"],
+  ["Roodbrug", "红桥"],
+  ["Meerhoven", "梅尔霍芬"],
+  ["Turfmarkt", "图尔夫马克特"],
+  ["Zandvoort", "赞德沃特"],
+  ["Elzenhof", "埃尔森霍夫"],
+  ["Havenkwartier", "港区"],
+  ["Sluisberg", "斯勒伊斯贝尔赫"],
+  ["Kleiveld", "克莱费尔德"],
+  ["Wilgenbeek", "维尔亨贝克"],
+  ["Boomgaard", "博姆加德"],
+  ["Polderzicht", "波尔德济赫特"],
+  ["Windmolen", "风车"],
+  ["Vlietstroom", "弗利特斯特罗姆"],
+  ["Grasland", "赫拉斯兰"],
+  ["Kanaaloever", "运河岸"],
+  ["Duinrand", "杜因兰德"],
+  ["Veenendam", "费嫩达姆"],
+];
+
+const POR_TOP_BRANDS = [
+  ["Portomar", "波尔托马尔"],
+  ["Benfica Serrano", "塞拉诺本菲卡"],
+  ["Estrela do Norte", "北极星"],
+  ["Rio Douro", "杜罗河"],
+  ["Sporting Vilamar", "维拉马尔竞技"],
+  ["Serra Verde", "青山"],
+  ["Oliveira", "奥利维拉"],
+  ["Atlantico", "大西洋"],
+  ["Montalegre", "蒙塔莱格里"],
+  ["Praia Dourada", "金滩"],
+  ["Vinhedo", "维涅多"],
+  ["Castelo Branco", "白堡"],
+  ["Uniao Ribeira", "里贝拉联"],
+  ["Sol Nascente", "朝阳"],
+  ["Alvorada", "阿尔沃拉达"],
+  ["Pedravela", "佩德拉维拉"],
+  ["Marinheiro", "水手"],
+  ["Lusitano", "卢西塔诺"],
+];
+
+const POR_SECOND_BRANDS = [
+  ["Vale Fundo", "深谷"],
+  ["Ponte Velha", "古桥"],
+  ["Azulejo", "阿祖莱茹"],
+  ["Ribamar", "里巴马尔"],
+  ["Douradinha", "多拉迪纽"],
+  ["Terra Nova", "新地"],
+  ["Pinhal", "皮尼亚尔"],
+  ["Costa Azul", "蓝岸"],
+  ["Barrocal", "巴罗卡尔"],
+  ["Alentejo", "阿连特茹"],
+  ["Uniao Salgueiro", "萨尔盖罗联"],
+  ["Fonte Clara", "清泉"],
+  ["Miradouro", "米拉多罗"],
+  ["Carvalhal", "卡瓦利亚尔"],
+  ["Vila Nova", "新镇"],
+  ["Penedo", "佩内多"],
+  ["Amoreira", "阿莫雷拉"],
+  ["Cabo Real", "皇家角"],
+];
+
 export const CLUB_TEMPLATES = [
   ...pack(D1, ENG_D1_BRANDS, 1, "crownland"),
   ...pack(D2, ENG_D2_BRANDS, 2, "crownland"),
@@ -776,6 +906,16 @@ export const CLUB_TEMPLATES = [
     powerCurve: TOP_REALITY_CURVES.FRA.power, moneyCurve: TOP_REALITY_CURVES.FRA.money,
   }),
   ...packGenerated(LUMERA_SECOND, FRA_SECOND_BRANDS, 11, "lumera", { maxPower: 61, minPower: 46, maxMoney: 8_800_000, minMoney: 1_800_000 }),
+  ...packGenerated(TULIPA_TOP, NED_TOP_BRANDS, 12, "tulipa", {
+    maxPower: 78, minPower: 57, maxMoney: 34_000_000, minMoney: 6_500_000,
+    powerCurve: TOP_REALITY_CURVES.NED.power, moneyCurve: TOP_REALITY_CURVES.NED.money,
+  }),
+  ...packGenerated(TULIPA_SECOND, NED_SECOND_BRANDS, 13, "tulipa", { maxPower: 57, minPower: 43, maxMoney: 5_200_000, minMoney: 1_100_000 }),
+  ...packGenerated(NAVERA_TOP, POR_TOP_BRANDS, 14, "navera", {
+    maxPower: 78, minPower: 55, maxMoney: 30_000_000, minMoney: 5_000_000,
+    powerCurve: TOP_REALITY_CURVES.POR.power, moneyCurve: TOP_REALITY_CURVES.POR.money,
+  }),
+  ...packGenerated(NAVERA_SECOND, POR_SECOND_BRANDS, 15, "navera", { maxPower: 55, minPower: 42, maxMoney: 4_600_000, minMoney: 950_000 }),
 ];
 
 /** Complete, reviewable old-name to new-brand migration map. */

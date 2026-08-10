@@ -128,9 +128,9 @@ try {
     const snapshot = seasonSnapshot(longWorld);
     snapshots.push(snapshot);
     console.log("ecosystem season", JSON.stringify(snapshot));
-    assert.equal(snapshot.clubs, 198, "five-country club population remains stable");
-    assert.ok(snapshot.players >= 198 * 16, "every club retains a viable first team");
-    assert.ok(snapshot.players <= 198 * 25, "first-team population should not exceed a realistic 25-player average");
+    assert.equal(snapshot.clubs, 270, "seven-country club population remains stable");
+    assert.ok(snapshot.players >= 270 * 16, "every club retains a viable first team");
+    assert.ok(snapshot.players <= 270 * 25, "first-team population should not exceed a realistic 25-player average");
     assert.equal(snapshot.missingPositionClubs, 0, "every club retains all four position groups");
     assert.equal(snapshot.invalidFinanceClubs, 0, "all club ledgers remain finite and non-negative");
     assert.ok(snapshot.negativeClubs <= Math.ceil(snapshot.clubs * 0.15), "widespread insolvency detected");

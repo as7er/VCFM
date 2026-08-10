@@ -3184,7 +3184,7 @@ export function finalizeMatch(state) {
         body: fixture.penalties
           ? "90 分钟难解难分，最终在点球大战中分出胜负。淘汰赛的压力在最后一刻达到顶峰。"
           : fixture.competitionType === "continental-league-stage"
-            ? "五国强队在大陆赛场相遇，积分与净胜球都可能决定晋级命运。"
+            ? "各国强队在大陆赛场相遇，积分与净胜球都可能决定晋级命运。"
             : `一场跨级别的较量吸引了媒体目光。${result.includes("晋级") ? "赢家笑到最后。" : "球队只能专注联赛。"}`,
         tone: result.includes("晋级") ? "positive" : "negative",
         category: "cup",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { CLUB_TEMPLATES, DIVISIONS } from "../js/data.js";
 import { createWorld } from "../js/models.js";
 
-const EXPECTED_CLUBS = 198;
+const EXPECTED_CLUBS = 270;
 const ABILITY_REFERENCE_POPULATION = 3572;
 
 function seededRandom(seed) {
@@ -23,7 +23,7 @@ function expectedAbilityQuotas(population, reference = ABILITY_REFERENCE_POPULAT
   return { 18: scaled(110), 19: scaled(24), 20: scaled(2) };
 }
 
-const topDivisions = [1, 4, 6, 8, 10];
+const topDivisions = [1, 4, 6, 8, 10, 12, 14];
 // v152：顶级联赛统一 18 队，非线性实力曲线见 js/clubs.js TOP_REALITY_CURVES
 const expectedTopPowers = new Map([
   [1, [82, 80, 79, 78, 77, 76, 75, 74, 74, 73, 73, 72, 72, 71, 71, 70, 70, 69]],
@@ -31,9 +31,12 @@ const expectedTopPowers = new Map([
   [6, [82, 78, 77, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61]],
   [8, [79, 78, 77, 76, 75, 74, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62]],
   [10, [81, 76, 75, 73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61, 60, 59]],
+  // 荷甲/葡超：顶部两三家垄断，第四名起断层比五大联赛更陡
+  [12, [78, 76, 74, 66, 64, 63, 62, 61, 60, 60, 59, 59, 58, 58, 57, 57, 56, 55]],
+  [14, [78, 77, 75, 64, 62, 61, 60, 59, 59, 58, 58, 57, 57, 56, 56, 56, 55, 55]],
 ]);
 
-assert.equal(CLUB_TEMPLATES.length, EXPECTED_CLUBS, "the five-country pyramid should keep all 198 clubs (11 × 18)");
+assert.equal(CLUB_TEMPLATES.length, EXPECTED_CLUBS, "the seven-country pyramid should keep all 270 clubs (15 × 18)");
 assert.ok(CLUB_TEMPLATES.every((club) => club.realityProfile?.version === 1), "every club needs a reality profile");
 const slots = CLUB_TEMPLATES.map((club) => club.realityProfile.referenceSlot);
 assert.equal(new Set(slots).size, CLUB_TEMPLATES.length, "anonymous reality slots must be unique");

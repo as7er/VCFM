@@ -51,6 +51,24 @@ export const COUNTRY_BRANDING = Object.freeze({
     cupNameZh: "法国全国杯",
     cupNameEn: "France National Cup",
   },
+  tulipa: {
+    id: "tulipa",
+    countryCode: "NED",
+    nameZh: "荷兰",
+    nameEn: "Netherlands",
+    shortName: "NED",
+    cupNameZh: "荷兰全国杯",
+    cupNameEn: "Netherlands National Cup",
+  },
+  navera: {
+    id: "navera",
+    countryCode: "POR",
+    nameZh: "葡萄牙",
+    nameEn: "Portugal",
+    shortName: "POR",
+    cupNameZh: "葡萄牙全国杯",
+    cupNameEn: "Portugal National Cup",
+  },
 });
 
 export const LEAGUE_BRANDING = Object.freeze({
@@ -65,6 +83,10 @@ export const LEAGUE_BRANDING = Object.freeze({
   9: { id: 9, countryId: "belladoro", countryCode: "ITA", tier: 2, nameZh: "意大利乙级联赛", nameEn: "Italian Second Division", shortName: "ISD" },
   10: { id: 10, countryId: "lumera", countryCode: "FRA", tier: 1, nameZh: "法国甲级联赛", nameEn: "French First Division", shortName: "FFD" },
   11: { id: 11, countryId: "lumera", countryCode: "FRA", tier: 2, nameZh: "法国乙级联赛", nameEn: "French Second Division", shortName: "FSD" },
+  12: { id: 12, countryId: "tulipa", countryCode: "NED", tier: 1, nameZh: "荷兰甲级联赛", nameEn: "Dutch First Division", shortName: "NFD" },
+  13: { id: 13, countryId: "tulipa", countryCode: "NED", tier: 2, nameZh: "荷兰乙级联赛", nameEn: "Dutch Second Division", shortName: "NSD" },
+  14: { id: 14, countryId: "navera", countryCode: "POR", tier: 1, nameZh: "葡萄牙甲级联赛", nameEn: "Portuguese First Division", shortName: "PFD" },
+  15: { id: 15, countryId: "navera", countryCode: "POR", tier: 2, nameZh: "葡萄牙乙级联赛", nameEn: "Portuguese Second Division", shortName: "PSD" },
 });
 
 export const COUNTRY_ID_BY_CODE = Object.freeze(

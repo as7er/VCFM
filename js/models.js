@@ -2187,7 +2187,7 @@ export function createWorld(userClubId, managerName, lang = "zh") {
     news: [
       {
         day: 1,
-        text: `${managerName} 正式执教 ${user.name}，从${divName}起步！五国联赛与三项大陆赛事已经启航。`,
+        text: `${managerName} 正式执教 ${user.name}，从${divName}起步！七国联赛与三项大陆赛事已经启航。`,
       },
     ],
     matchIndex: 0,

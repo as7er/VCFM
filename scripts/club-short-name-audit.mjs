@@ -6,7 +6,7 @@ import { CLUB_TEMPLATES, DIVISION_IDS, clubBrandingById } from "../js/data.js";
 import { applyClubBranding } from "../js/branding.js";
 
 const codes = CLUB_TEMPLATES.map((club) => club.shortName);
-assert.equal(CLUB_TEMPLATES.length, 198);
+assert.equal(CLUB_TEMPLATES.length, 270);
 assert.equal(new Set(codes).size, CLUB_TEMPLATES.length, "club short names must be globally unique");
 assert.ok(codes.every((code) => /^[A-Z]{3,4}$/.test(code)), "club short names must use 3-4 letters");
 assert.ok(codes.filter((code) => code.length === 3).length >= 150, "three-letter codes should remain the default");

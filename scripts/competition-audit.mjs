@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   CONTINENTAL_COMPETITIONS,
   CLUB_TEMPLATES,
+  COUNTRY_LIST,
   DIVISIONS,
   START_DIVISIONS,
 } from "../js/data.js";
@@ -22,13 +23,17 @@ const countryOf = (clubId) => {
   return club?.countryId || DIVISIONS[club?.division]?.countryId;
 };
 
+// 席位 = 参赛国数 × 每赛事 4 席；联赛阶段每队 8 场，故场次 = 队数 × 8 / 2
+const EXPECTED_PARTICIPANTS = COUNTRY_LIST.length * 4;
+const EXPECTED_LEAGUE_FIXTURES = (EXPECTED_PARTICIPANTS * 8) / 2;
+
 for (const config of Object.values(CONTINENTAL_COMPETITIONS)) {
   const competition = world.continentals[config.id];
   assert.ok(competition, `${config.id} competition missing`);
   assert.equal(competition.name, config.name);
   assert.equal(competition.nameEn, config.nameEn);
-  assert.equal(competition.participants.length, 20, `${config.id} participant count`);
-  assert.equal(competition.fixtures.length, 80, `${config.id} league-phase fixture count`);
+  assert.equal(competition.participants.length, EXPECTED_PARTICIPANTS, `${config.id} participant count`);
+  assert.equal(competition.fixtures.length, EXPECTED_LEAGUE_FIXTURES, `${config.id} league-phase fixture count`);
 
   const appearances = new Map(competition.participants.map((id) => [id, 0]));
   const homeMatches = new Map(competition.participants.map((id) => [id, 0]));
@@ -49,7 +54,9 @@ for (const config of Object.values(CONTINENTAL_COMPETITIONS)) {
     assert.equal(homeMatches.get(clubId), 4, `${config.id} ${clubId} home match count`);
   }
   assert.equal(matchDays.size, 8, `${config.id} matchday count`);
-  for (const count of matchDays.values()) assert.equal(count, 10, `${config.id} matches per matchday`);
+  for (const count of matchDays.values()) {
+    assert.equal(count, EXPECTED_PARTICIPANTS / 2, `${config.id} matches per matchday`);
+  }
 }
 
 const auditedFixtures = world.continentals.champions.fixtures.slice(0, 4);
@@ -150,4 +157,4 @@ applyLang("en");
 assert.equal(t("competitionCentre.clubs"), "Club competitions");
 assert.match(t("intl.hint"), /European Championship/);
 
-console.log("Competition audit passed: 3 competitions, 20 clubs, 8 matchdays, 4 home and 4 away per club, legacy names migrated.");
+console.log(`Competition audit passed: 3 competitions, ${EXPECTED_PARTICIPANTS} clubs, 8 matchdays, 4 home and 4 away per club, legacy names migrated.`);

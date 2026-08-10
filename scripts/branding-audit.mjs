@@ -50,21 +50,23 @@ const expectedCountries = {
   ITA: ["意大利", "Italy"],
   GER: ["德国", "Germany"],
   FRA: ["法国", "France"],
+  NED: ["荷兰", "Netherlands"],
+  POR: ["葡萄牙", "Portugal"],
 };
-assert.equal(COUNTRY_LIST.length, 5);
+assert.equal(COUNTRY_LIST.length, 7);
 for (const country of COUNTRY_LIST) {
   assert.deepEqual([country.nameZh, country.nameEn], expectedCountries[country.countryCode]);
 }
 
-assert.equal(DIVISION_IDS.length, 11);
+assert.equal(DIVISION_IDS.length, 15);
 for (const league of Object.values(DIVISIONS)) {
   const country = COUNTRIES[league.countryId];
   assert.ok(country, `league ${league.id} has a country`);
   assert.equal(league.countryCode, country.countryCode);
 }
 
-// v152 起：11 联赛 × 18 队双循环 = 198 队（对齐德甲/法甲赛制）
-const EXPECTED_CLUBS = 198;
+// 15 联赛 × 18 队双循环 = 270 队（七国体系，对齐德甲/法甲赛制）
+const EXPECTED_CLUBS = 270;
 const EXPECTED_LEAGUE_FIXTURES = 18 * 17 * DIVISION_IDS.length; // 3366
 assert.equal(CLUB_TEMPLATES.length, EXPECTED_CLUBS);
 assert.equal(Object.keys(clubBrandingById).length, EXPECTED_CLUBS);
@@ -99,6 +101,7 @@ const leagueCounts = Object.fromEntries(
 assert.deepEqual(leagueCounts, {
   1: 18, 2: 18, 3: 18,
   4: 18, 5: 18, 6: 18, 7: 18, 8: 18, 9: 18, 10: 18, 11: 18,
+  12: 18, 13: 18, 14: 18, 15: 18,
 });
 
 /** 与 models.calibrateWorldAbilityDistribution 同源的人口缩放配额 */

@@ -22,7 +22,7 @@ const uiLayer = [main, ...uiSources].join("\n");
 const css = read("css/style.css");
 const serviceWorker = read("sw.js");
 
-assert.equal(CLUB_TEMPLATES.length, 198);
+assert.equal(CLUB_TEMPLATES.length, 270);
 
 const signatures = CLUB_TEMPLATES.map(crestVisualSignature);
 const svgDocuments = CLUB_TEMPLATES.map(clubCrestSvg);

@@ -620,6 +620,10 @@ const DIVISION_RULES = {
   9: { promote: 3, relegate: 0, upperDivision: 8, lowerDivision: null, startEligible: true },
   10: { promote: 0, relegate: 3, upperDivision: null, lowerDivision: 11, startEligible: false },
   11: { promote: 3, relegate: 0, upperDivision: 10, lowerDivision: null, startEligible: true },
+  12: { promote: 0, relegate: 3, upperDivision: null, lowerDivision: 13, startEligible: false },
+  13: { promote: 3, relegate: 0, upperDivision: 12, lowerDivision: null, startEligible: true },
+  14: { promote: 0, relegate: 3, upperDivision: null, lowerDivision: 15, startEligible: false },
+  15: { promote: 3, relegate: 0, upperDivision: 14, lowerDivision: null, startEligible: true },
 };
 
 export const DIVISIONS = Object.fromEntries(
