@@ -112,6 +112,9 @@ const totals = {
   shots: 0,
   saves: 0,
   passes: 0,
+  completedPasses: 0,
+  crosses: 0,
+  throughPasses: 0,
   tackles: 0,
   interceptions: 0,
   fouls: 0,
@@ -177,7 +180,11 @@ for (let match = 0; match < matches; match++) {
     else if (event.type === "gk_claim") totals.goalkeeperClaims++;
     else if (event.type === "gk_block") totals.goalkeeperBlocks++;
     else if (event.type === "gk_challenge") totals.goalkeeperChallenges++;
-    else if (event.type === "pass") totals.passes++;
+    else if (event.type === "pass") {
+      totals.passes++;
+      if (event.cross) totals.crosses++;
+      if (event.through && !event.cross) totals.throughPasses++;
+    } else if (event.type === "receive") totals.completedPasses++;
     else if (event.type === "tackle") totals.tackles++;
     else if (event.type === "intercept") totals.interceptions++;
     else if (event.type === "corner") {
@@ -231,6 +238,9 @@ const report = {
     shots: perMatch(totals.shots),
     saves: perMatch(totals.saves),
     passes: perMatch(totals.passes),
+    completedPasses: perMatch(totals.completedPasses),
+    crosses: perMatch(totals.crosses),
+    throughPasses: perMatch(totals.throughPasses),
     tackles: perMatch(totals.tackles),
     interceptions: perMatch(totals.interceptions),
     fouls: perMatch(totals.fouls),
@@ -252,6 +262,9 @@ const report = {
     penaltyGoals: perMatch(totals.penaltyGoals),
   },
   shotConversionPct: pct(totals.goals, totals.shots),
+  passCompletionPct: pct(totals.completedPasses, totals.passes),
+  crossSharePct: pct(totals.crosses, totals.passes),
+  throughPassSharePct: pct(totals.throughPasses, totals.passes),
   openGoalReasons: Object.fromEntries(
     Object.entries(totals.openGoalReasons).map(([reason, count]) => [reason, perMatch(count)])
   ),
@@ -274,6 +287,9 @@ console.log(JSON.stringify(report, null, 2));
 assert.equal(totals.stalls, 0, "spatial engine must not need watchdog clearances");
 assert.ok(report.perMatch.goals >= 2.5 && report.perMatch.goals <= 3.3, "goals per match left the calibration envelope");
 assert.ok(report.shotConversionPct >= 9 && report.shotConversionPct <= 15, "shot conversion left the calibration envelope");
+assert.ok(report.perMatch.passes >= 800 && report.perMatch.passes <= 1250, "pass volume left the calibration envelope");
+assert.ok(report.passCompletionPct >= 72 && report.passCompletionPct <= 88, "pass completion left the calibration envelope");
+assert.ok(report.crossSharePct >= 3 && report.crossSharePct <= 14, "cross share left the calibration envelope");
 assert.ok(
   report.outsideBoxSharePct >= 25 && report.outsideBoxSharePct <= 50,
   "outside-box shot share left the calibration envelope"

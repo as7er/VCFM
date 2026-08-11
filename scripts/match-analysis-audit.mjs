@@ -125,3 +125,11 @@ console.log(JSON.stringify({
   },
 }, null, 2));
 
+for (const team of ["home", "away"]) {
+  const completion = first.analysis[team].progression.passCompletionPct;
+  assert.ok(
+    completion >= 68 && completion <= 90,
+    `${team} pass completion ${completion}% left the plausible range`
+  );
+}
+

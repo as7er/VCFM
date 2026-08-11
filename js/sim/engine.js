@@ -542,8 +542,8 @@ export class SimEngine {
   _nextControlDecision(a) {
     const tempo = this._tacticLevel(a.team, "tempo");
     const decisions = a?.attr?.decisions || 0.58;
-    const base = clamp(1.9 - (tempo - 3) * 0.18 - (decisions - 0.58) * 0.32, 1.22, 2.5);
-    const spread = clamp(1.7 - (tempo - 3) * 0.1 - (decisions - 0.58) * 0.34, 0.95, 2.15);
+    const base = clamp(2.35 - (tempo - 3) * 0.2 - (decisions - 0.58) * 0.34, 1.55, 2.95);
+    const spread = clamp(2.1 - (tempo - 3) * 0.12 - (decisions - 0.58) * 0.38, 1.2, 2.55);
     return this.t + base + this.random() * spread;
   }
 
@@ -762,8 +762,8 @@ export class SimEngine {
         const tempo = this._tacticLevel(a.team, "tempo");
         a.decisionUntil =
           this.t +
-          clamp(0.9 - (tempo - 3) * 0.06, 0.7, 1.15) +
-          this.random() * 0.7;
+          clamp(1.2 - (tempo - 3) * 0.08, 0.88, 1.5) +
+          this.random() * 0.9;
         this._decideOnBall(a);
       }
       // 执行上次意图（盘带/护球朝目标带球；传/射在 decide 内瞬时触发）
@@ -2854,7 +2854,7 @@ export class SimEngine {
         const cover = clamp(1 - dPath / reach, 0, 1);
         // 路线正确：门将对射正球应有稳定基础覆盖；空门/远侧再大幅降低。
         let pSave =
-          0.36 +
+          0.33 +
           0.28 * cover +
           0.55 * ref +
           0.22 * hand -
@@ -3218,11 +3218,11 @@ export class SimEngine {
           : 0.42 + 0.34 * aerial + 0.06 * (best.attr.positioning || 0.55);
       } else {
         ctl = intendedReceive
-          ? 0.9 + 0.12 * best.attr.dribbling
+          ? 0.965 + 0.1 * best.attr.dribbling + 0.04 * (best.attr.decisions || 0.55)
           : 0.66 + 0.3 * best.attr.dribbling;
       }
       if (best.role === "GK") ctl = 0.75 + 0.22 * (best.attr.handling || 0.5);
-      const speedScale = wasPass && b.isCrossPass ? (intendedReceive ? 180 : 135) : (intendedReceive ? 210 : 125);
+      const speedScale = wasPass && b.isCrossPass ? (intendedReceive ? 180 : 135) : (intendedReceive ? 310 : 125);
       const p = clamp(ctl - speed / speedScale, 0.15, 0.99);
       if (this.random() < p) {
         const passFrom = b.lastKicker;

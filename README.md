@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v206** · 发展队比赛与统一比赛锐度 |
+| 当前版本 | **v207** · 比赛传球节奏与真实性基准 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `localStorage`，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -25,14 +25,14 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 仓库：https://github.com/as7er/vcfm
 
-### v206 更新亮点
+### v207 更新亮点
 
-- 青训与边缘球员组成真实发展队首发，使用与一线队相同的空间引擎生成比分、射手、助攻、伤病、体能和评分。
-- 发展队比赛不会污染联赛积分或正式出场统计，但逐场可用状态、首发和真实分钟会进入球员现有出场事实；AI 正式比赛也为双方记录同一事实。
-- 比赛锐度读取最近 28 天所有真实比赛分钟，青训成长、AI 提拔、培养和外租决策共用这份数据；发展队分钟不能用于兑现一线队出场承诺。
-- 用户队每 28 天固定参加发展队比赛，其他同级对阵稳定轮转；赛季末归档球员的发展队出场、分钟、进球、助攻和平均评分。
+- 接球后的处理节奏读取球队节奏与球员决策属性，减少过快、过密的无意义出球。
+- 明确目标的普通传球按球速、接球队员盘带与决策属性结算停球；传中、拦截和压迫失误继续读取真实空间风险。
+- 真实性审计正式约束传球量、成功率和传中占比，并分别报告完成传球与非传中直塞。
+- 24 场标准样本为 2.63 球、24.83 射门、1144.5 次传球、75.5% 成功率和零停滞；强弱差在 400 场五联赛样本中保持稳定。
 
-前序版本（v198–v205）：直播因果与定位球表现、球员特征与定位球职责、职员姓名与国籍因果、后台空间比赛 Worker、多年阵容规划与 AI 建队、球员细分位置与多位置适应性、禁区决策与门将出击、AI 主教练生态与战术身份。完整条目见 [CHANGELOG.md](./CHANGELOG.md)。
+前序版本（v199–v206）：球员特征与定位球职责、职员姓名与国籍因果、后台空间比赛 Worker、多年阵容规划与 AI 建队、球员细分位置与多位置适应性、禁区决策与门将出击、AI 主教练生态与战术身份、发展队比赛与统一比赛锐度。完整条目见 [CHANGELOG.md](./CHANGELOG.md)。
 
 ### 快速开始
 
@@ -154,7 +154,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v206** · development football and unified match sharpness |
+| Current version | **v207** · passing rhythm and realism baselines |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Browser `localStorage`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -163,14 +163,14 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 Repository: https://github.com/as7er/vcfm
 
-### What's new in v206
+### What's new in v207
 
-- Academy and fringe players form real development XIs whose score, scorers, assists, injuries, fitness, and ratings come from the same spatial engine as first-team football.
-- Development matches do not alter league tables or formal appearances, but availability, starts, and actual minutes enter the player's existing playing-time facts. Official AI matches now persist the same facts for both clubs.
-- Match sharpness reads all real minutes from the previous 28 days. Academy growth, AI promotion, development, and loan priorities share that visible fact, while development minutes cannot satisfy a first-team playing-time promise.
-- The user's development team plays every 28 days while other same-tier fixtures rotate deterministically. Appearances, minutes, goals, assists, and average ratings are archived by player at season end.
+- A player's first action after receiving the ball now reads team tempo and decision-making, reducing unrealistically rapid and repetitive passing.
+- Ordinary targeted passes resolve control from ball speed, dribbling, and decisions, while crosses, interceptions, and pressure retain their spatial risks.
+- The realism audit now enforces pass volume, completion, and crossing-share ranges while reporting completed passes and non-cross through balls separately.
+- The 24-match standard sample produces 2.63 goals, 24.83 shots, 1,144.5 passes, 75.5% completion, and no stalls; a 400-match five-league sample preserves the ability gap.
 
-Earlier releases (v198–v205): live-broadcast causality and set-piece presentation, player traits and set-piece duties, staff naming and nationality causality, the background spatial match worker, multi-year squad planning with AI squad building, detailed positional aptitude, box/goalkeeper decisions, and the AI head-coach ecosystem. See [CHANGELOG.md](./CHANGELOG.md) for full entries.
+Earlier releases (v199–v206): player traits and set-piece duties, staff naming and nationality causality, the background spatial match worker, multi-year squad planning with AI squad building, detailed positional aptitude, box/goalkeeper decisions, the AI head-coach ecosystem, and development football with unified match sharpness. See [CHANGELOG.md](./CHANGELOG.md) for full entries.
 
 ### Quick start
 
