@@ -23,6 +23,7 @@ import {
   isCssColor,
   isValidShortName,
 } from "../js/branding.js";
+import { applyLang, t } from "../js/i18n.js";
 import { ensureCompetitions } from "../js/cup.js";
 import { simulateMatch } from "../js/engine.js";
 import { listSlots, loadGame, saveGame } from "../js/save.js";
@@ -64,6 +65,15 @@ for (const league of Object.values(DIVISIONS)) {
   assert.ok(country, `league ${league.id} has a country`);
   assert.equal(league.countryCode, country.countryCode);
 }
+
+for (const lang of ["zh", "en"]) {
+  applyLang(lang);
+  for (const league of Object.values(DIVISIONS)) {
+    const expected = lang === "en" ? league.nameEn : league.nameZh;
+    assert.equal(t(`div.${league.id}`), expected, `division ${league.id} ${lang} label`);
+  }
+}
+applyLang("zh");
 
 // 15 联赛 × 18 队双循环 = 270 队（七国体系，对齐德甲/法甲赛制）
 const EXPECTED_CLUBS = 270;

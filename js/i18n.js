@@ -381,6 +381,10 @@ const dict = {
     "div.9": "意大利乙级联赛",
     "div.10": "法国甲级联赛",
     "div.11": "法国乙级联赛",
+    "div.12": "荷兰甲级联赛",
+    "div.13": "荷兰乙级联赛",
+    "div.14": "葡萄牙甲级联赛",
+    "div.15": "葡萄牙乙级联赛",
 
     "competitionCentre.clubs": "俱乐部赛事",
     "competitionCentre.nations": "国家队赛事",
@@ -920,6 +924,10 @@ const dict = {
     "div.9": "Italian Second Division",
     "div.10": "French First Division",
     "div.11": "French Second Division",
+    "div.12": "Dutch First Division",
+    "div.13": "Dutch Second Division",
+    "div.14": "Portuguese First Division",
+    "div.15": "Portuguese Second Division",
 
     "competitionCentre.clubs": "Club competitions",
     "competitionCentre.nations": "National teams",
