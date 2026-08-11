@@ -23,6 +23,29 @@ function validateSponsorshipContract(contract, label) {
   }
 }
 
+function validatePlayerHabits(player, label) {
+  if (
+    player.playingHabits != null &&
+    (!Array.isArray(player.playingHabits) ||
+      player.playingHabits.some((habitId) => typeof habitId !== "string" || !habitId))
+  ) {
+    throw new Error(`invalid save: ${label} habits are invalid`);
+  }
+  if (player.habitTraining == null) return;
+  if (
+    !isRecord(player.habitTraining) ||
+    typeof player.habitTraining.habitId !== "string" ||
+    !["learn", "unlearn"].includes(player.habitTraining.mode)
+  ) {
+    throw new Error(`invalid save: ${label} habit training is invalid`);
+  }
+  for (const field of [
+    "progress", "startedSeason", "startedDay", "lastProcessedSeason", "lastProcessedDay",
+  ]) {
+    finiteIfPresent(player.habitTraining[field], `${label} habit training ${field}`);
+  }
+}
+
 export function validateSaveStructure(world, options = {}) {
   if (!isRecord(world)) throw new Error("invalid save: root must be an object");
   if (!Array.isArray(world.clubs) || world.clubs.length === 0) {
@@ -108,6 +131,7 @@ export function validateSaveStructure(world, options = {}) {
       for (const [attribute, value] of Object.entries(player.attrs || {})) {
         finiteIfPresent(value, `player ${player.id} attribute ${attribute}`);
       }
+      validatePlayerHabits(player, `player ${player.id}`);
       if (player.developmentStats != null) {
         if (!isRecord(player.developmentStats)) throw new Error(`invalid save: player ${player.id} development stats are invalid`);
         for (const field of ["apps", "starts", "minutes", "goals", "assists", "ratingSum", "lastDay"]) {
@@ -124,6 +148,7 @@ export function validateSaveStructure(world, options = {}) {
       for (const field of ["age", "ovr", "potential", "fitness", "morale", "wage", "value"]) {
         finiteIfPresent(player[field], `youth player ${player.id} ${field}`);
       }
+      validatePlayerHabits(player, `youth player ${player.id}`);
       if (player.developmentStats != null) {
         if (!isRecord(player.developmentStats)) throw new Error(`invalid save: youth player ${player.id} development stats are invalid`);
         for (const field of ["apps", "starts", "minutes", "goals", "assists", "ratingSum", "lastDay"]) {
@@ -255,6 +280,12 @@ export function validateSaveStructure(world, options = {}) {
           for (const [attribute, value] of Object.entries(item.attrs)) {
             finiteIfPresent(value, `scouting knowledge ${group} ${key} attribute ${attribute}`);
           }
+        }
+        if (
+          item.habitIds != null &&
+          (!Array.isArray(item.habitIds) || item.habitIds.some((habitId) => typeof habitId !== "string" || !habitId))
+        ) {
+          throw new Error(`invalid save: scouting knowledge ${group} ${key} habits are invalid`);
         }
       }
     }

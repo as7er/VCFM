@@ -40,8 +40,15 @@ import {
   positionCoverage,
   positionLabel as detailedPositionLabel,
 } from "./player-positions.js";
-import { nationFlagHtml } from "./flags.js?v=207";
-import { clubCrestHtml } from "./club-crest.js?v=207";
+import {
+  availableHabitTraining,
+  cancelHabitTraining,
+  habitDescription,
+  habitLabel,
+  startHabitTraining,
+} from "./player-habits.js";
+import { nationFlagHtml } from "./flags.js?v=208";
+import { clubCrestHtml } from "./club-crest.js?v=208";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -296,7 +303,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=207";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=208";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -362,7 +369,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=207";
+} from "./avatar.js?v=208";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -452,7 +459,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=207").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=208").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -4311,6 +4318,10 @@ function showPlayerModal(playerId, context = {}) {
     world,
   });
   const playerScout = isOther ? scoutPlayerSnapshot(world, player, club) : null;
+  const isManagedPlayer =
+    !isOther &&
+    (club.players?.some((item) => item.id === player.id) ||
+      club.youth?.players?.some((item) => item.id === player.id));
 
   const pot = isOther
       ? formatScoutPotFog(player, club, {
@@ -4451,6 +4462,12 @@ function showPlayerModal(playerId, context = {}) {
           )
         : ""
     }
+    ${renderPlayerHabitsPanel(player, {
+      isOther,
+      snapshot: playerScout,
+      canManage: isManagedPlayer && !world?.sacked,
+      delegated: isManagedPlayer && isFullyDelegated(world, club, "development"),
+    })}
     ${!fromOther && !isYouth ? renderPlayerTalkPanel(player) : ""}
     ${!isYouth ? renderPlayerContractActions(player, fromOther) : ""}
 
@@ -4541,6 +4558,7 @@ function showPlayerModal(playerId, context = {}) {
   openSharedModal();
   $("#modal-card").scrollTop = 0;
   bindPlayerBrowseControls();
+  if (isManagedPlayer) bindPlayerHabitActions(player, browseContext);
   if (!isYouth) {
     bindPlayerContractActions(player, fromOther);
     bindPlayerTalkActions(player, fromOther, browseContext);
@@ -4645,6 +4663,137 @@ function bindPlayerBrowseControls() {
   });
   body?.querySelectorAll("[data-player-browse-step]").forEach((button) => {
     button.addEventListener("click", () => navigatePlayerBrowse(Number(button.dataset.playerBrowseStep || 0)));
+  });
+}
+
+function renderPlayerHabitsPanel(player, options = {}) {
+  const en = getLang() === "en";
+  const snapshot = options.snapshot || null;
+  const habitIds = options.isOther
+    ? Array.isArray(snapshot?.habitIds)
+      ? snapshot.habitIds
+      : []
+    : Array.isArray(player?.playingHabits)
+      ? player.playingHabits
+      : [];
+  const knownHtml = habitIds.length
+    ? `<div class="player-habit-grid">${habitIds
+        .map(
+          (habitId) => `<div class="player-habit-item">
+            <strong>${escapeHtml(habitLabel(habitId, en ? "en" : "zh"))}</strong>
+            <span class="muted">${escapeHtml(habitDescription(habitId, en ? "en" : "zh"))}</span>
+          </div>`
+        )
+        .join("")}</div>`
+    : `<p class="muted" style="margin:0">${escapeHtml(
+        options.isOther
+          ? en
+            ? "No playing habit has been confirmed by your scouting knowledge."
+            : "现有球探知识尚未确认这名球员的个人习惯。"
+          : en
+            ? "No established playing habit."
+            : "暂无已形成的个人踢球习惯。"
+      )}</p>`;
+  const scoutingNote = options.isOther && !snapshot?.habitsExact
+    ? `<p class="hint" style="margin:0.35rem 0 0">${escapeHtml(
+        en
+          ? "Further observation may reveal additional habits; old reports do not update automatically."
+          : "继续观察可能确认更多习惯；旧球探报告不会自动刷新。"
+      )}</p>`
+    : "";
+  if (!options.canManage) {
+    return `<section class="player-habits-panel">
+      <h3>${escapeHtml(en ? "Playing habits" : "个人踢球习惯")}</h3>
+      ${knownHtml}${scoutingNote}
+    </section>`;
+  }
+
+  const training = player.habitTraining;
+  const availability = availableHabitTraining(player);
+  const learnOptions = availability.learn
+    .map(
+      (definition) => `<option value="learn:${escapeHtml(definition.id)}">${escapeHtml(
+        en ? `Learn · ${definition.labelEn}` : `培养 · ${definition.label}`
+      )}</option>`
+    )
+    .join("");
+  const unlearnOptions = availability.unlearn
+    .map(
+      (definition) => `<option value="unlearn:${escapeHtml(definition.id)}">${escapeHtml(
+        en ? `Unlearn · ${definition.labelEn}` : `纠正 · ${definition.label}`
+      )}</option>`
+    )
+    .join("");
+  const trainingHtml = training
+    ? `<div class="player-habit-training">
+        <div class="row-between" style="gap:0.5rem;flex-wrap:wrap">
+          <span><strong>${escapeHtml(
+            training.mode === "unlearn"
+              ? en ? "Unlearning" : "正在纠正"
+              : en ? "Learning" : "正在培养"
+          )}：</strong>${escapeHtml(habitLabel(training.habitId, en ? "en" : "zh"))}</span>
+          <span>${Math.round(training.progress || 0)}%</span>
+        </div>
+        <div class="bar"><i style="width:${Math.max(2, Math.round(training.progress || 0))}%"></i></div>
+        <button type="button" class="btn small" data-habit-cancel ${options.delegated ? "disabled" : ""}>${escapeHtml(
+          en ? "Cancel programme" : "取消训练"
+        )}</button>
+      </div>`
+    : `<div class="playing-time-role-controls">
+        <select data-habit-program aria-label="${escapeHtml(en ? "Personal habit programme" : "个人习惯训练")}" ${options.delegated ? "disabled" : ""}>
+          ${learnOptions ? `<optgroup label="${escapeHtml(en ? "Learn" : "培养新习惯")}">${learnOptions}</optgroup>` : ""}
+          ${unlearnOptions ? `<optgroup label="${escapeHtml(en ? "Unlearn" : "纠正现有习惯")}">${unlearnOptions}</optgroup>` : ""}
+        </select>
+        <button type="button" class="btn small primary" data-habit-start ${options.delegated || (!learnOptions && !unlearnOptions) ? "disabled" : ""}>${escapeHtml(
+          en ? "Start programme" : "开始训练"
+        )}</button>
+      </div>`;
+  const delegatedNote = options.delegated
+    ? `<p class="hint" style="margin:0.35rem 0 0">${escapeHtml(
+        en
+          ? "Player development is delegated to the coaching staff."
+          : "年轻球员培养已委托给教练团队，玩家不能直接改写个人计划。"
+      )}</p>`
+    : `<p class="hint" style="margin:0.35rem 0 0">${escapeHtml(
+        en
+          ? "Progress is settled weekly from the same coach, workload, age and decision-making facts used by training."
+          : "进度每周结算，读取现有教练能力、训练强度、年龄和决策属性；习惯不提高属性。"
+      )}</p>`;
+  return `<section class="player-habits-panel">
+    <h3>${escapeHtml(en ? "Playing habits" : "个人踢球习惯")}</h3>
+    ${knownHtml}
+    <div class="player-habit-programme">
+      <strong>${escapeHtml(en ? "Individual programme" : "个人习惯训练")}</strong>
+      ${trainingHtml}${delegatedNote}
+    </div>
+  </section>`;
+}
+
+function bindPlayerHabitActions(player, browseContext = null) {
+  const body = $("#modal-body");
+  if (!body || !player) return;
+  body.querySelector("[data-habit-start]")?.addEventListener("click", () => {
+    const value = body.querySelector("[data-habit-program]")?.value || "";
+    const separator = value.indexOf(":");
+    const mode = separator >= 0 ? value.slice(0, separator) : "learn";
+    const habitId = separator >= 0 ? value.slice(separator + 1) : value;
+    const result = startHabitTraining(player, habitId, mode, {
+      season: world.season,
+      day: world.day,
+    });
+    toast(getLang() === "en" ? result.msgEn : result.msg);
+    if (!result.ok) return;
+    saveGame(world);
+    showPlayerModal(player.id, browseContext || {});
+    refreshAll();
+  });
+  body.querySelector("[data-habit-cancel]")?.addEventListener("click", () => {
+    const result = cancelHabitTraining(player);
+    toast(getLang() === "en" ? result.msgEn : result.msg);
+    if (!result.ok) return;
+    saveGame(world);
+    showPlayerModal(player.id, browseContext || {});
+    refreshAll();
   });
 }
 

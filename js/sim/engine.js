@@ -276,6 +276,7 @@ export class SimEngine {
         },
         heightCm: Number(p?.heightCm) || 180,
         preferredFoot: p?.preferredFoot || "right",
+        habits: new Set(p?.playingHabits || []),
         // —— 决策缓存（P1 用）——
         decisionUntil: 0, // 到该时间前沿用上次决策
         attackThinkUntil: 0,
@@ -537,6 +538,10 @@ export class SimEngine {
 
   _tacticLevel(team, key, fallback = 3) {
     return clamp(Number(this._teamTactics(team)?.[key]) || fallback, 1, 5);
+  }
+
+  _hasHabit(agent, habitId) {
+    return agent?.habits instanceof Set && agent.habits.has(habitId);
   }
 
   _nextControlDecision(a) {
@@ -916,9 +921,12 @@ export class SimEngine {
       if (dOpp < 9) pressureNear++;
     }
     const underHeavyPressure = nearestOpp < 6.5 || pressureNear >= 2;
-    const passTo = underHeavyPressure ? null : this._bestPass(a);
+    const prefersShort = this._hasHabit(a, "distributes_short");
+    const launchesCounters = this._hasHabit(a, "launches_counters");
+    const bypassBuildUp = launchesCounters && !underHeavyPressure && this.random() < 0.62;
+    const passTo = underHeavyPressure || bypassBuildUp ? null : this._bestPass(a);
     // 有安全接球人且不太靠后 → 手抛/短传发动进攻
-    if (passTo && passTo.value > 0.22) {
+    if (passTo && passTo.value > (prefersShort ? 0.15 : 0.22)) {
       const recv = passTo.agent;
       const recvOk =
         recv &&
@@ -1119,6 +1127,10 @@ export class SimEngine {
     const isAtt = a.role === "ATT";
     const isFb = this._isFullback(a);
     const isWing = this._isWinger(a);
+    const cutsInside = this._hasHabit(a, "cuts_inside");
+    const hugsLine = this._hasHabit(a, "hugs_line");
+    const runsWithBall = this._hasHabit(a, "runs_with_ball");
+    const shootsFromDistance = this._hasHabit(a, "shoots_from_distance");
     // 边锋内切：x 已靠中时射门区更大；贴边时仍要先内切
     const cutInProgress = isWing ? clamp(1 - Math.abs(a.x - goalX) / 38, 0, 1) : 0;
     const SHOOT_ZONE = core ? 28 : isWing ? 22 + cutInProgress * 6 : isMid ? 24 : 20;
@@ -1185,6 +1197,25 @@ export class SimEngine {
         0.72,
         0.98
       );
+      const canRoundKeeper =
+        this._hasHabit(a, "rounds_keeper") &&
+        opportunity.goalkeeper &&
+        !opportunity.openGoal &&
+        dGoal < 13 &&
+        opportunity.keeperDepth > 5 &&
+        opportunity.keeperProjection > 0.14 &&
+        pressure < 0.66;
+      if (canRoundKeeper && this.random() < 0.18 + a.attr.dribbling * 0.08) {
+        const keeperSide = opportunity.goalkeeper.x >= a.x ? -1 : 1;
+        a.intent = {
+          type: "dribble",
+          tx: clamp(a.x + keeperSide * (5 + a.attr.dribbling * 3), 5, 95),
+          ty: clamp(a.y + dir * clamp(dGoal - 5, 2.5, 6), 3, 97),
+        };
+        a.decisionUntil = Math.min(a.decisionUntil || Infinity, this.t + 0.42);
+        a.fsm = "carry";
+        return;
+      }
       let takeShot = false;
       if (canShoot) {
         if (opportunity.clearOpenGoal) {
@@ -1264,7 +1295,15 @@ export class SimEngine {
         return;
       }
       // 核心 / 边锋：内切带进去
-      const tuckIn = isWing ? 0.55 + cutInProgress * 0.1 : core ? 0.55 : 0.4;
+      const tuckIn = isWing
+        ? cutsInside
+          ? 0.68 + cutInProgress * 0.08
+          : hugsLine
+            ? 0.2
+            : 0.55 + cutInProgress * 0.1
+        : core
+          ? 0.55
+          : 0.4;
       a.intent = {
         type: "dribble",
         tx: clamp(a.x + (goalX - a.x) * tuckIn, 4, 96),
@@ -1276,11 +1315,37 @@ export class SimEngine {
 
     // ——————————— 边锋高位：优先内切，其次传中/横传 —— 
     if (isWing && dGoal < 48 && Math.abs(a.x - goalX) > 14) {
+      const nearAttackingByline = Math.abs(a.y - goalY) < 6.5;
+      if (nearAttackingByline) {
+        const release = this._bestCutback(a) || this._bestCross(a);
+        if (release) {
+          this._pass(a, release);
+          return;
+        }
+        // 贴边习惯只要求保持宽度，不应让球员站在底线角落原地护球。
+        // 没有可传目标时先回撤一步，重新获得观察角度和传球线路。
+        const side = this._wingSide(a);
+        a.intent = {
+          type: "dribble",
+          tx: clamp(side < 0 ? 10 : 90, 6, 94),
+          ty: clamp(goalY - dir * 13, 5, 95),
+        };
+        a.fsm = "carry";
+        return;
+      }
       // 贴边时：先内切再射/传，而不是贴边死磕
       const burst = 0.55 * a.attr.dribbling + 0.45 * a.attr.pace;
       if (pressure < 0.72 && burst > 0.35 && this.t >= (a.cutInCdUntil || 0)) {
         // 偶尔立刻起脚横传/传中；多数情况内切
-        const wantCrossNow = pressure > 0.55 && this.random() < 0.28;
+        const wantCrossNow =
+          this.random() <
+          (hugsLine
+            ? 0.52 + pressure * 0.18
+            : cutsInside
+              ? 0.12 + pressure * 0.14
+              : pressure > 0.55
+                ? 0.28
+                : 0.08);
         if (wantCrossNow) {
           const cross = this._bestCross(a);
           if (cross) {
@@ -1290,10 +1355,23 @@ export class SimEngine {
         }
         a.cutInCdUntil = this.t + 0.55;
         const side = this._wingSide(a);
+        if (hugsLine && !cutsInside) {
+          a.intent = {
+            type: "dribble",
+            tx: clamp(side < 0 ? 7 : 93, 4, 96),
+            ty: clamp(a.y + dir * (10 + burst * 6), 4, 96),
+          };
+          a.fsm = "carry";
+          return;
+        }
         // 内切：向中路 + 向前，落点在禁区弧顶/肋部
         a.intent = {
           type: "dribble",
-          tx: clamp(a.x - side * (10 + burst * 8) + (goalX - a.x) * 0.25, 18, 82),
+          tx: clamp(
+            a.x - side * (10 + burst * 8) + (goalX - a.x) * (cutsInside ? 0.38 : 0.25),
+            18,
+            82
+          ),
           ty: clamp(a.y + dir * (10 + burst * 6), 5, 95),
         };
         a.fsm = "carry";
@@ -1339,6 +1417,7 @@ export class SimEngine {
         0.28;
       if (!core && throughPass.agent?.isCore) w *= 1.4;
       if (isWing) w *= 1.1;
+      if (this._hasHabit(a, "tries_through_balls")) w *= 1.55;
       options.push({ key: { act: "pass", target: throughPass }, w });
     }
     // 边后卫高位：把传中也放进候选
@@ -1367,6 +1446,7 @@ export class SimEngine {
       if (core) midBoost *= 1.45; // 核心盘带权重暴涨
       if (isFb) midBoost *= 0.9;
       if (isWing) midBoost *= 1.35; // 边锋爱带球内切
+      if (runsWithBall) midBoost *= 1.22;
       // 边锋：即使 aheadSpace 一般也鼓励内切盘带
       const spaceW = isWing ? Math.max(aheadSpace, 0.35 + cutInProgress * 0.2) : aheadSpace;
       options.push({
@@ -1374,8 +1454,8 @@ export class SimEngine {
         w: (0.12 + 0.9 * burst) * spaceW * (1 - pressure * 0.55) * midBoost,
       });
     }
-    const LONG_MIN = core ? 20 : isWing ? 18 : 24;
-    const LONG_MAX = core ? 40 : isWing ? 34 : 36;
+    const LONG_MIN = shootsFromDistance ? (isWing ? 18 : 20) : core ? 20 : isWing ? 18 : 24;
+    const LONG_MAX = shootsFromDistance ? 40 : core ? 40 : isWing ? 34 : 36;
     const canLong =
       (isMid || isAtt || core || isWing || (isFb && dGoal < 38)) &&
       dGoal >= LONG_MIN &&
@@ -1390,7 +1470,7 @@ export class SimEngine {
       // 但 weightedPick 使用 softmax，低权重动作仍会在每次决策中反复入池，
       // 最终让禁区外射门占到不现实的多数。距离越远，考虑出脚的概率应快速衰减。
       const longConsiderP = clamp(
-        0.09 + a.attr.shooting * 0.08 + (core ? 0.025 : 0) -
+        0.09 + a.attr.shooting * 0.08 + (core ? 0.025 : 0) + (shootsFromDistance ? 0.07 : 0) -
           (dGoal - LONG_MIN) * 0.008 - pressure * 0.045,
         0.012,
         0.16
@@ -1404,6 +1484,7 @@ export class SimEngine {
         if (isMid) longW *= 1.35;
         if (isWing) longW *= 1.25 + cutInProgress * 0.35; // 内切后远射
         if (core) longW *= 1.5;
+        if (shootsFromDistance) longW *= 1.42;
         longW *= 0.55;
         options.push({ key: { act: "longshot" }, w: longW });
       }
@@ -1427,10 +1508,18 @@ export class SimEngine {
         // 边锋盘带默认内切：向中 + 向前，而不是沿边线直冲
         const side = this._wingSide(a);
         const push = 12 + a.attr.pace * 5;
-        const inward = 9 + a.attr.dribbling * 7;
+        const inward = hugsLine
+          ? 2.5
+          : (cutsInside ? 12 : 9) + a.attr.dribbling * (cutsInside ? 8 : 7);
         a.intent = {
           type: "dribble",
-          tx: clamp(a.x - side * inward + (goalX - a.x) * 0.22, 16, 84),
+          tx: hugsLine
+            ? clamp(side < 0 ? 7 : 93, 4, 96)
+            : clamp(
+                a.x - side * inward + (goalX - a.x) * (cutsInside ? 0.32 : 0.22),
+                16,
+                84
+              ),
           ty: clamp(a.y + dir * push, 4, 96),
         };
       } else {
@@ -1610,8 +1699,13 @@ export class SimEngine {
         this.ball.lastPasserId === m.id &&
         this.ball.lastPassTeam === a.team &&
         this.t - (this.ball.lastPassAt || 0) < 8.5;
-      if (directReturn) value *= 0.02 + holderPressure * 0.05;
-      else if (Math.abs(m.x - a.x) > 18) value *= 1.08;
+      if (directReturn) {
+        value *= this._hasHabit(a, "plays_one_twos")
+          ? 0.38 + holderPressure * 0.12
+          : 0.02 + holderPressure * 0.05;
+      } else if (Math.abs(m.x - a.x) > 18) {
+        value *= this._hasHabit(a, "switches_play") ? 1.28 : 1.08;
+      }
 
       // AI 尽量避免把球直接传给出脚瞬间已经越位的队友；绝境下仍可能犯错，
       // 随后由裁判快照系统判罚，而不是在候选阶段彻底消灭越位事件。
@@ -1631,7 +1725,10 @@ export class SimEngine {
         lineGap < 11 &&
         receiverGoalDist < 44 &&
         safety > 0.28 &&
-        this.random() < 0.025 + a.attr.vision * 0.055 &&
+        this.random() <
+          0.025 +
+            a.attr.vision * 0.055 +
+            (this._hasHabit(a, "tries_through_balls") ? 0.07 : 0) &&
         this.t >= (this._teamThroughUntil[a.team] || 0)
       ) {
         const leadY = clamp(ty + dir * (6 + this.random() * 4), 3, 97);
@@ -1641,7 +1738,7 @@ export class SimEngine {
           (a.team === "home" ? leadY >= offY - 2 : leadY <= offY + 2);
         if (okOffside) {
           through = true;
-          value *= 0.72;
+          value *= this._hasHabit(a, "tries_through_balls") ? 0.9 : 0.72;
           ty = leadY;
           tx = clamp(tx + (50 - tx) * 0.1, 3, 97);
         }
@@ -1820,7 +1917,10 @@ export class SimEngine {
     // 传控改善后禁区内起脚质量更高；保留约 12% 的统一落点离散，避免
     // 等强样本回到 3.3 球/场以上，同时不通过 UI 或赛后缩放篡改结果。
     err *= freekick ? 1.08 : 1.22;
-    const aimX = 50 + (this.random() - 0.5) * err;
+    const placesShot = this._hasHabit(a, "places_shots") && !freekick && !long;
+    const placementSide = this.random() < 0.5 ? -1 : 1;
+    const aimCentre = placesShot ? 50 + placementSide * (2.8 + this.random()) : 50;
+    const aimX = aimCentre + (this.random() - 0.5) * err;
     const dx = aimX - b.x;
     const dy = goalY - b.y;
     const d = Math.hypot(dx, dy) || 1;
@@ -1829,7 +1929,7 @@ export class SimEngine {
       (long ? 42 : 38) + (freekick ? a.attr.kicking : a.attr.shooting) * (long ? 16 : 14),
       long ? 40 : 38,
       long ? 58 : 55
-    );
+    ) * (placesShot ? 0.9 : 1);
     // 助攻：8s 内队友传球 → 本脚射门
     let assistId = null;
     if (
@@ -1899,6 +1999,26 @@ export class SimEngine {
     const dBall = dist(a.x, a.y, b.x, b.y);
     const core = !!a.isCore;
     const finalThird = prog > 0.64;
+    const comesDeep = this._hasHabit(a, "comes_deep");
+    const getsForward = this._hasHabit(a, "gets_forward");
+    const hugsLine = this._hasHabit(a, "hugs_line");
+    const cutsInside = this._hasHabit(a, "cuts_inside");
+
+    if (
+      owner &&
+      owner.team === a.team &&
+      owner !== a &&
+      this._hasHabit(a, "plays_one_twos") &&
+      this.ball.lastPasserId === a.id &&
+      this.t - (this.ball.lastPassAt || 0) < 8.5
+    ) {
+      const side = a.x <= owner.x ? -1 : 1;
+      a.tx = clamp(owner.x + side * (5 + this.random() * 3), 6, 94);
+      a.ty = clamp(owner.y + dir * (5 + this.random() * 5), 5, 95);
+      a.fsm = "support";
+      this._clampOffside(a);
+      return;
+    }
 
     // 最后三区限制中央前插名额：三名前锋 + 一名最适合前插的中场。
     // 其他中场在球后形成两层接应，避免六七个人同时被吸到点球点附近。
@@ -1951,15 +2071,21 @@ export class SimEngine {
         prog < 0.72 &&
         (dBall < 42 ||
           core ||
-          this.random() < 0.32 + (prog < 0.48 ? 0.22 : 0) + a.attr.dribbling * 0.15);
+          this.random() <
+            0.32 +
+              (prog < 0.48 ? 0.22 : 0) +
+              a.attr.dribbling * 0.15 +
+              (comesDeep ? 0.32 : 0));
       if (drop) {
         // 组织阶段保持左右固定通道；旧逻辑围绕球只偏 8~12，双翼会一起挤进中路。
-        const wideAnchor = wingSide < 0 ? 17 : 83;
+        const wideAnchor = wingSide < 0 ? (hugsLine ? 10 : 17) : hugsLine ? 90 : 83;
         const ballSide = clamp(b.x + wingSide * 8, 8, 92);
         const pocketX = wideAnchor * 0.65 + ballSide * 0.35;
         // 进入前场后才稍微内收，己方半场/中场仍提供真正宽度。
         const softIn = clamp(
-          prog > 0.55 ? pocketX * 0.78 + 50 * 0.22 : pocketX,
+          prog > 0.55 && !hugsLine
+            ? pocketX * (cutsInside ? 0.66 : 0.78) + 50 * (cutsInside ? 0.34 : 0.22)
+            : pocketX,
           12,
           88
         );
@@ -1971,8 +2097,12 @@ export class SimEngine {
         return;
       }
       // 已过半场：肋部内切跑位（不是死钉边线）
-      if (prog > 0.48) {
-        const cutX = clamp(50 + wingSide * (14 + this.random() * 10), 18, 82);
+      if (prog > 0.48 && !hugsLine) {
+        const cutX = clamp(
+          50 + wingSide * ((cutsInside ? 8 : 14) + this.random() * (cutsInside ? 7 : 10)),
+          18,
+          82
+        );
         a.tx = clamp(cutX + (b.x - 50) * 0.08, 12, 88);
         a.ty = clamp(b.y + dir * (10 + this.random() * 10), 5, 95);
         a.fsm = "support";
@@ -1995,7 +2125,11 @@ export class SimEngine {
         prog < 0.68 &&
         (nearest ||
           core ||
-          this.random() < 0.22 + (prog < 0.45 ? 0.18 : 0));
+          this.random() <
+            0.22 +
+              (prog < 0.45 ? 0.18 : 0) +
+              (comesDeep ? 0.42 : 0) -
+              (getsForward ? 0.16 : 0));
       if (drop) {
         const side = a.baseX < 48 ? -1 : a.baseX > 52 ? 1 : a.x < b.x ? -1 : 1;
         // 回撤深度：到球与中场之间，而不是一直顶在越位线
@@ -2007,7 +2141,7 @@ export class SimEngine {
       }
       // 前插纵深
       a.tx = clamp(a.baseX + (b.x - 50) * 0.12, 6, 94);
-      a.ty = clamp(a.baseY + dir * (core ? 12 : 16), 3, 97);
+      a.ty = clamp(a.baseY + dir * (getsForward ? 18 : core ? 12 : 16), 3, 97);
       a.fsm = "home";
       this._clampOffside(a);
       return;
@@ -2020,7 +2154,8 @@ export class SimEngine {
       const wantRun =
         prog > 0.42 &&
         (advanced || burst > 0.48 || core) &&
-        (dBall > 16 || this.random() < 0.28 + burst * 0.35);
+        !comesDeep &&
+        (dBall > 16 || this.random() < 0.28 + burst * 0.35 + (getsForward ? 0.12 : 0));
 
       if (wantRun && dBall > 12) {
         const side =
@@ -2031,7 +2166,8 @@ export class SimEngine {
               : (a.num || 0) % 2
                 ? -0.45
                 : 0.45;
-        const depth = 11 + burst * 10 + (advanced ? 4 : 0) + (core ? 3 : 0);
+        const depth =
+          11 + burst * 10 + (advanced ? 4 : 0) + (core ? 3 : 0) + (getsForward ? 2 : 0);
         a.tx = clamp(
           b.x + side * (12 + this.random() * 6) + (a.baseX - 50) * 0.12,
           8,
@@ -2070,7 +2206,8 @@ export class SimEngine {
       // 本队控球且球已过半场：有概率沿边路前插
       const bombOn =
         prog > 0.38 &&
-        (prog > 0.55 || this.random() < 0.32 + a.attr.pace * 0.25) &&
+        (prog > 0.55 ||
+          this.random() < 0.32 + a.attr.pace * 0.25 + (getsForward ? 0.12 : 0)) &&
         dBall < 55;
       if (bombOn) {
         // 套边：贴边线 + 推到球的平行甚至更前，准备传中
@@ -2190,13 +2327,15 @@ export class SimEngine {
           0.4 * m.attr.dribbling +
           0.25 * m.attr.pace +
           0.2 * m.attr.finishing +
-          0.15 * m.attr.vision;
+          0.15 * m.attr.vision +
+          (this._hasHabit(m, "gets_forward") ? 0.45 : 0);
         const sn =
           (n.isCore ? 1.2 : 0) +
           0.4 * n.attr.dribbling +
           0.25 * n.attr.pace +
           0.2 * n.attr.finishing +
-          0.15 * n.attr.vision;
+          0.15 * n.attr.vision +
+          (this._hasHabit(n, "gets_forward") ? 0.45 : 0);
         return sn - sm || String(m.id).localeCompare(String(n.id));
       });
     return mids[0]?.id === a.id;
@@ -2854,7 +2993,7 @@ export class SimEngine {
         const cover = clamp(1 - dPath / reach, 0, 1);
         // 路线正确：门将对射正球应有稳定基础覆盖；空门/远侧再大幅降低。
         let pSave =
-          0.33 +
+          0.32 +
           0.28 * cover +
           0.55 * ref +
           0.22 * hand -
@@ -3064,8 +3203,9 @@ export class SimEngine {
         // 抢断尝试冷却：个人与全队都不能每 tick 掷骰子。
         if (this.t < (o.tackleCdUntil || 0)) continue;
         const d = dist(o.x, o.y, b.x, b.y);
-        if (d < SIM.CONTROL_RADIUS + 0.25) {
-          o.tackleCdUntil = this.t + 50 + this.random() * 10;
+        const divesIntoTackles = this._hasHabit(o, "dives_into_tackles");
+        if (d < SIM.CONTROL_RADIUS + (divesIntoTackles ? 0.7 : 0.25)) {
+          o.tackleCdUntil = this.t + (divesIntoTackles ? 36 : 50) + this.random() * 10;
           this._teamTackleUntil[defendingTeam] = this.t + 44 + this.random() * 10;
           this._emit("pressure", o, { onId: owner.id });
           // 抢断成功率：tackling vs 持球者 dribbling+strength（单次尝试，不再乘 tick）
@@ -3107,7 +3247,7 @@ export class SimEngine {
           } else {
             // 抢断失败 + 贴身接触：按 tackling 反比 + 战术凶狠度掷犯规。
             // 成立则判任意球/点球（禁区内），并按严重度掷黄/红，直接 return。
-            if (this._commitFoul(o, owner)) return;
+            if (this._commitFoul(o, owner, { aggressiveTackle: divesIntoTackles })) return;
           }
         }
       }
@@ -3335,6 +3475,7 @@ export class SimEngine {
     };
     a.heightCm = Number(player.heightCm) || 180;
     a.preferredFoot = player.preferredFoot || "right";
+    a.habits = new Set(player.playingHabits || []);
     a.fitness = player.fitness ?? 100;
     a.sentOff = false;
     a.injuredOff = false;
@@ -3504,7 +3645,7 @@ export class SimEngine {
     );
     pFoul *= contactSamplingScale;
     // 后卫在禁区内会收脚，但不应把点球压低两个数量级。
-    if (inBox && !goalkeeperChallenge) pFoul *= 0.16;
+    if (inBox && !goalkeeperChallenge) pFoul *= 0.14;
     if (this.random() >= pFoul) return false;
 
     // 被侵犯方获得球权重启

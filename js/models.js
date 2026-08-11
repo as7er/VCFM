@@ -25,6 +25,7 @@ import {
   positionFitForSlot,
   positionGroup,
 } from "./player-positions.js";
+import { ensurePlayerHabits } from "./player-habits.js";
 import {
   APPEARANCE_HAIR_COLORS as SHARED_APPEARANCE_HAIR_COLORS,
   APPEARANCE_HAIR_STYLE_IDS as SHARED_APPEARANCE_HAIR_STYLE_IDS,
@@ -278,6 +279,7 @@ export function ensureFootballProfile(p) {
     changed = true;
   }
   if (ensurePlayerPositionProfile(p)) changed = true;
+  if (ensurePlayerHabits(p)) changed = true;
   return changed;
 }
 

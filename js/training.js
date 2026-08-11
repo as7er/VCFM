@@ -16,6 +16,10 @@ import {
   recordPlayerDevelopment,
 } from "./player-pathway.js";
 import { ensurePlayerPositionProfile } from "./player-positions.js";
+import {
+  habitLabel,
+  processHabitTrainingWeek,
+} from "./player-habits.js";
 
 export const TRAINING_FOCUSES = {
   recovery: {
@@ -529,6 +533,7 @@ export function processTrainingDay(world) {
     let grewNames = [];
     let injuredNames = [];
     let recoveredNames = [];
+    let completedHabits = [];
 
     for (const p of club.players || []) {
       ensurePlayerInjury(p);
@@ -597,6 +602,21 @@ export function processTrainingDay(world) {
           if (isUser) grewNames.push(p.name);
         }
       }
+      for (const p of [...(club.players || []), ...(club.youth?.players || [])]) {
+        const habitResult = processHabitTrainingWeek(p, {
+          season: world.season,
+          day: world.day,
+          coachRating: coach,
+          intensity: t.intensity,
+        });
+        if (isUser && habitResult.completed) {
+          completedHabits.push({
+            name: p.name,
+            habitId: habitResult.habitId,
+            mode: habitResult.mode,
+          });
+        }
+      }
       if (isUser && grewNames.length) {
         const show = grewNames.slice(0, 4).join("、");
         const more = grewNames.length > 4 ? ` 等 ${grewNames.length} 人` : "";
@@ -606,6 +626,18 @@ export function processTrainingDay(world) {
         logs.push({
           day: world.day,
           text: `🏋️ 训练见效：${show}${more} 属性小幅提升（${focusLabel}·${inten.label}）`,
+        });
+      }
+      if (isUser && completedHabits.length) {
+        const summaries = completedHabits
+          .slice(0, 3)
+          .map((item) =>
+            `${item.name}${item.mode === "unlearn" ? "纠正" : "掌握"}“${habitLabel(item.habitId)}”`
+          )
+          .join("、");
+        logs.push({
+          day: world.day,
+          text: `🧠 个人习惯训练完成：${summaries}${completedHabits.length > 3 ? " 等" : ""}`,
         });
       }
     }

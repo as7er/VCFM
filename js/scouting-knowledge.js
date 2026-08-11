@@ -1,6 +1,8 @@
 /** Persistent scouting knowledge, estimates and recruitment shortlisting. */
 
-export const SCOUTING_KNOWLEDGE_VERSION = 1;
+import { observedHabitIds } from "./player-habits.js";
+
+export const SCOUTING_KNOWLEDGE_VERSION = 2;
 
 const DAYS_PER_SEASON = 220;
 const PUBLIC_KNOWLEDGE = 6;
@@ -250,6 +252,8 @@ export function scoutPlayerSnapshot(world, player, userClub, options = {}) {
       valueLo: value,
       valueHi: value,
       attrs,
+      habitIds: [...(player.playingHabits || [])],
+      habitsExact: true,
     };
   }
 
@@ -285,6 +289,11 @@ export function scoutPlayerSnapshot(world, player, userClub, options = {}) {
   for (const key of ATTRIBUTE_KEYS) attrs[key] = { ...range20(estimates.attrs[key] || 10, baseBand), exact: false };
   const ageDays = ageInDays(world, stored);
   const fogLevel = confidence >= 78 ? 3 : confidence >= 60 ? 2 : confidence >= 42 ? 1 : 0;
+  const habitIds = Array.isArray(stored?.habitIds)
+    ? stored.habitIds.filter((id) => typeof id === "string")
+    : stored?.observations > 0
+      ? observedHabitIds(player, storedLevel, `${player.id}:${stored.observations}:legacy-habits`)
+      : [];
 
   return {
     level,
@@ -306,6 +315,8 @@ export function scoutPlayerSnapshot(world, player, userClub, options = {}) {
     valueLo,
     valueHi,
     attrs,
+    habitIds,
+    habitsExact: level >= 86,
   };
 }
 
@@ -343,6 +354,11 @@ export function observeScoutingPlayer(
     potentialEstimate: estimates.potential,
     valueEstimate: estimates.value,
     attrs: estimates.attrs,
+    habitIds: observedHabitIds(
+      player,
+      level,
+      `${player.id}:${seedSalt || source}:${observations}:${current.season}:${current.day}`
+    ),
   };
   if (club) observeScoutingScope(world, club, { gain: 12 + intensity * 0.08, source });
   return scoutPlayerSnapshot(world, player, userClub);

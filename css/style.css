@@ -5957,6 +5957,26 @@ html[data-theme="light"] .badge-chip {
 .rel-bad { color: var(--bad); font-weight: 700; }
 .rel-neutral { color: var(--muted); }
 .player-talk-panel { margin-top: 0.35rem; }
+.player-habits-panel { margin-top: 0.75rem; }
+.player-habits-panel h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+.player-habit-grid { display: grid; gap: 0.38rem; }
+.player-habit-item {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.48rem 0.58rem;
+  border-left: 3px solid var(--accent);
+  background: var(--bg2);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.player-habit-programme {
+  display: grid;
+  gap: 0.42rem;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.player-habit-training { display: grid; gap: 0.4rem; }
 .player-talk-actions {
   display: flex;
   flex-wrap: wrap;
