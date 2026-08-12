@@ -55,13 +55,14 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=209";
-import { clubCrestHtml } from "./club-crest.js?v=209";
+import { nationFlagHtml } from "./flags.js?v=210";
+import { clubCrestHtml } from "./club-crest.js?v=210";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
 import { renderFacilities as renderFacilitiesView } from "./ui/facilities.js";
 import { renderMedia as renderMediaView } from "./ui/media.js";
+import { renderManagerWorkbench } from "./ui/manager-workbench.js";
 import {
   setLinkWorldSource,
   clubLinkHtml,
@@ -313,7 +314,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=209";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=210";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -379,7 +380,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=209";
+} from "./avatar.js?v=210";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -456,6 +457,8 @@ let world = null;
 // 共享链接工具按需读取当前世界；传取值函数而非 world 本身，读档替换后自动跟随
 setLinkWorldSource(() => world);
 let pendingMatch = null;
+/** 最近一次日期推进的关键变化，只属于当前运行会话，不写入存档 */
+let dashboardAdvanceDigest = null;
 let liveRunning = false;
 /** @type {import('./match.js').createMatchSession extends Function ? any : any} */
 let matchState = null;
@@ -469,7 +472,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=209").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=210").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1023,6 +1026,7 @@ function initStart() {
       const slot = getActiveSlot();
       if (hasSave(slot) && !confirm(t("start.overwriteConfirm", { n: slot }))) return;
       world = createWorld(clubId, manager, getLang());
+      dashboardAdvanceDigest = null;
       ensureScoutingKnowledge(world);
       ensureMedia(world);
       for (const c of world.clubs) ensureStaff(c);
@@ -1054,6 +1058,7 @@ function initStart() {
       return;
     }
     world = data;
+    dashboardAdvanceDigest = null;
     migrateWorld(world);
     enterMain();
   };
@@ -1089,6 +1094,7 @@ function initStart() {
       const slot = getActiveSlot();
       if (hasSave(slot) && !confirm(t("start.overwriteConfirm", { n: slot }))) return;
       world = data;
+      dashboardAdvanceDigest = null;
       migrateWorld(world);
       saveGame(world, slot);
       toast(t("toast.imported", { n: slot }));
@@ -1294,6 +1300,12 @@ function bindMainOnce() {
   if (dashInboxBtn) {
     dashInboxBtn.onclick = () => goToInboxTab();
   }
+  $("#tab-dashboard")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-dashboard-link]");
+    if (!button) return;
+    const target = button.dataset.dashboardLink;
+    if (target) activateMainTab(target);
+  });
   document.querySelectorAll("[data-squad-view]").forEach((button) => {
     button.addEventListener("click", () => {
       squadTableView = button.dataset.squadView === "full" ? "full" : "compact";
@@ -3591,10 +3603,165 @@ async function runTopbarContinue() {
   await onAdvance();
 }
 
+function collectDashboardWorkbench(club, next) {
+  const en = getLang() === "en";
+  const issues = [];
+  const actions = [];
+  const addAction = (target, icon, label, hint = "") => {
+    if (!target || actions.some((item) => item.target === target)) return;
+    actions.push({ target, icon, label, hint });
+  };
+
+  if (world.sacked || world.managerJob?.status === "unemployed") {
+    issues.push({
+      severity: "critical",
+      icon: "📋",
+      title: en ? "Manager position requires action" : "经理职位需要处理",
+      detail: en ? "Review available jobs and decide the next career step." : "查看工作邀请并决定下一段执教生涯。",
+      target: "career",
+      actionLabel: en ? "Career" : "查看生涯",
+    });
+    addAction("career", "📋", en ? "Career" : "经理生涯", en ? "Review job offers" : "处理工作邀请");
+    return { issues, actions, digest: dashboardAdvanceDigest };
+  }
+
+  const inboxItems = listInbox(world, { pendingOnly: true, limit: 50 });
+  const urgentMail = inboxItems.filter((item) => (item.priority || 1) >= 3);
+  if (urgentMail.length) {
+    issues.push({
+      severity: "critical",
+      icon: "✉️",
+      title: en ? `${urgentMail.length} urgent inbox item(s)` : `${urgentMail.length} 项紧急信箱待办`,
+      detail: en ? "Urgent decisions can block safe calendar progression." : "紧急决策可能影响日程推进，请优先处理。",
+      target: "inbox",
+      actionLabel: en ? "Inbox" : "打开信箱",
+    });
+  } else if (inboxItems.length) {
+    issues.push({
+      severity: "warning",
+      icon: "✉️",
+      title: en ? `${inboxItems.length} unresolved inbox item(s)` : `${inboxItems.length} 项信箱待办未解决`,
+      detail: en ? "Review the pending decisions before their deadlines." : "请在截止日前检查待处理决策。",
+      target: "inbox",
+      actionLabel: en ? "Review" : "查看待办",
+    });
+  }
+  if (inboxItems.length) addAction("inbox", "✉️", en ? "Inbox" : "信箱", en ? `${inboxItems.length} unresolved` : `${inboxItems.length} 项待办`);
+
+  const board = ensureBoardObjective(world);
+  const tone = boardTone(board);
+  if (tone === "danger" || tone === "warn") {
+    issues.push({
+      severity: tone === "danger" ? "critical" : "warning",
+      icon: "🏛️",
+      title: en ? "Board confidence is under pressure" : "董事会信心承压",
+      detail: en ? `Objective: finish in the top ${board.targetPos}.` : `赛季目标为联赛前 ${board.targetPos} 名。`,
+      target: "career",
+      actionLabel: en ? "Review" : "查看目标",
+    });
+    addAction("career", "🏛️", en ? "Board" : "董事会", en ? "Review expectations" : "检查赛季目标");
+  }
+
+  const finance = financeSnapshot(world);
+  if (finance?.critical || finance?.warning) {
+    issues.push({
+      severity: finance.critical ? "critical" : "warning",
+      icon: "💶",
+      title: en ? "Cash runway needs attention" : "现金续航需要关注",
+      detail: en
+        ? `Current cash covers about ${finance.weeksCover} week(s) at the present burn rate.`
+        : `按当前现金消耗，余额约可维持 ${finance.weeksCover} 周。`,
+      target: "finance",
+      actionLabel: en ? "Finances" : "查看财政",
+    });
+    addAction("finance", "💶", en ? "Finances" : "财政", en ? `${finance.weeksCover} weeks runway` : `可维持约 ${finance.weeksCover} 周`);
+  }
+
+  if (next) {
+    const ready = next.day <= world.day;
+    const daysLeft = Math.max(0, next.day - world.day);
+    const eligible = eligiblePlayerIds(world, club, next);
+    const lineup = getLineupPlayers(club);
+    const unavailable = lineup.filter(
+      (player) => !isAvailable(player) || !eligible.has(player.id)
+    );
+    if (unavailable.length) {
+      issues.push({
+        severity: ready || daysLeft <= 2 ? "critical" : "warning",
+        icon: "🚑",
+        title: en ? `${unavailable.length} selected player(s) unavailable` : `${unavailable.length} 名首发球员无法出场`,
+        detail: en ? "Injury, suspension or registration leaves the selected XI incomplete." : "伤病、停赛或报名资格导致当前首发不完整。",
+        target: "tactics",
+        actionLabel: en ? "Fix XI" : "调整首发",
+      });
+    }
+    if (eligible.size < 18) {
+      issues.push({
+        severity: ready || daysLeft <= 2 ? "critical" : "warning",
+        icon: "📋",
+        title: en ? "Match squad depth is below 18" : "比赛可用阵容不足 18 人",
+        detail: en ? `Only ${eligible.size} players are currently eligible.` : `当前仅有 ${eligible.size} 名球员具备参赛资格。`,
+        target: "squad",
+        actionLabel: en ? "Squad" : "检查阵容",
+      });
+    }
+    const registration = registrationSummary(world, club, next);
+    if (!registration.valid) {
+      issues.push({
+        severity: ready || daysLeft <= 3 ? "critical" : "warning",
+        icon: "🪪",
+        title: en ? "Competition registration is invalid" : "赛事报名名单不合规",
+        detail: en ? "Quota rules must be satisfied before the squad can be used safely." : "报名人数或本土培养名额不符合赛事规则。",
+        target: "squad",
+        actionLabel: en ? "Registration" : "处理报名",
+      });
+    }
+    addAction("tactics", "🧭", en ? "Match plan" : "比赛计划", ready ? (en ? "Matchday XI" : "确认比赛日首发") : (en ? `${daysLeft} day(s) to prepare` : `还有 ${daysLeft} 天准备`));
+    addAction("fixtures", "📅", en ? "Fixtures" : "赛程", en ? "Review the calendar" : "查看比赛日程");
+  }
+
+  const contracts = (club.players || []).filter((player) => !player.loan && needsContractAttention(player));
+  if (contracts.length) {
+    issues.push({
+      severity: "warning",
+      icon: "📝",
+      title: en ? `${contracts.length} contract(s) need attention` : `${contracts.length} 份合同需要处理`,
+      detail: en ? "Short or flagged contracts can reduce squad stability." : "短约或待续约合同可能影响阵容稳定。",
+      target: "transfer",
+      actionLabel: en ? "Contracts" : "处理合同",
+    });
+    addAction("transfer", "📝", en ? "Contracts" : "合同", en ? `${contracts.length} need attention` : `${contracts.length} 份待处理`);
+  }
+
+  ensureSquadRelations(club);
+  const atmosphere = clubAtmosphere(club);
+  if (atmosphere < 45) {
+    issues.push({
+      severity: atmosphere < 30 ? "critical" : "warning",
+      icon: "💬",
+      title: en ? "Dressing-room atmosphere is fragile" : "更衣室氛围不稳定",
+      detail: en ? `Current atmosphere is ${atmosphere}; review morale, promises and relationships.` : `当前氛围 ${atmosphere}，建议检查士气、承诺与球员关系。`,
+      target: "squad",
+      actionLabel: en ? "Squad" : "查看球队",
+    });
+    addAction("squad", "💬", en ? "Dressing room" : "更衣室", en ? `Atmosphere ${atmosphere}` : `当前氛围 ${atmosphere}`);
+  }
+
+  if (!actions.length) {
+    addAction("training", "🏋️", en ? "Training" : "训练", en ? "Prepare the squad" : "安排球队准备");
+    addAction("squad", "👥", en ? "Squad" : "球队阵容", en ? "Review availability" : "检查球员状态");
+  }
+  return { issues, actions, digest: dashboardAdvanceDigest };
+}
+
 function renderDashboard() {
   const club = getUserClub(world);
   const en = getLang() === "en";
   const next = getNextUserMatch(world);
+  ensureInbox(world);
+  syncPoachBidsToInbox(world);
+  syncDealNegotiationsToInbox(world);
+  syncTransferNegotiationsToInbox(world);
   const box = $("#next-match");
   const playBtn = $("#btn-play-match");
   const nextSeasonBtn = $("#btn-next-season");
@@ -3658,6 +3825,7 @@ function renderDashboard() {
 
   // 顶栏常驻推进键：复用上面算好的三种态，避免重复判断
   syncTopbarContinue({ seasonDone, matchReady: !seasonDone && !!next && next.day <= world.day });
+  renderManagerWorkbench(collectDashboardWorkbench(club, next));
 
   // 经理生涯摘要
   const careerBox = $("#manager-career-dash");
@@ -3752,8 +3920,6 @@ function renderDashboard() {
 
   // 概览信箱摘要
   ensureInbox(world);
-  syncPoachBidsToInbox(world);
-  syncDealNegotiationsToInbox(world);
   const dashIb = $("#dash-inbox");
   if (dashIb) {
     const en = getLang() === "en";
@@ -7532,6 +7698,143 @@ function rebuildGoalReplaysFromFixture(fixture) {
 }
 
 // ---------- Day / Match ----------
+function captureAdvanceSnapshot() {
+  const club = world ? getUserClub(world) : null;
+  const players = new Map();
+  for (const player of club?.players || []) {
+    players.set(player.id, {
+      name: player.name,
+      injured: Math.max(0, Number(player.injured) || 0),
+      suspended: Math.max(0, Number(player.suspendedMatches) || 0),
+      fitness: Math.round(Number(player.fitness) || 0),
+      morale: Math.round(Number(player.morale) || 0),
+    });
+  }
+  const values = [...players.values()];
+  const average = (key) => values.length
+    ? Math.round(values.reduce((sum, item) => sum + item[key], 0) / values.length)
+    : 0;
+  return {
+    day: Number(world?.day) || 0,
+    money: Number(club?.money) || 0,
+    inbox: world ? listInbox(world, { pendingOnly: true, limit: 500 }).length : 0,
+    averageFitness: average("fitness"),
+    averageMorale: average("morale"),
+    players,
+  };
+}
+
+function buildAdvanceDigest(before, events, days = 1) {
+  const after = captureAdvanceSnapshot();
+  const en = getLang() === "en";
+  const items = [];
+  const add = (item) => {
+    if (!item?.title || items.some((current) => current.title === item.title)) return;
+    items.push(item);
+  };
+  const names = (list) => list.slice(0, 3).map((item) => item.name).join(en ? ", " : "、");
+  const extra = (list) => list.length > 3 ? (en ? ` +${list.length - 3}` : ` 等 ${list.length} 人`) : "";
+
+  const newlyInjured = [];
+  const recovered = [];
+  const newlySuspended = [];
+  for (const [id, current] of after.players) {
+    const previous = before?.players?.get(id);
+    if (!previous) continue;
+    if (previous.injured <= 0 && current.injured > 0) newlyInjured.push(current);
+    if (previous.injured > 0 && current.injured <= 0) recovered.push(current);
+    if (current.suspended > previous.suspended) newlySuspended.push(current);
+  }
+  if (newlyInjured.length) {
+    add({
+      severity: "critical",
+      icon: "🚑",
+      title: en ? `${newlyInjured.length} new injury case(s)` : `新增 ${newlyInjured.length} 名伤员`,
+      detail: `${names(newlyInjured)}${extra(newlyInjured)}`,
+    });
+  }
+  if (newlySuspended.length) {
+    add({
+      severity: "warning",
+      icon: "🟥",
+      title: en ? `${newlySuspended.length} new suspension(s)` : `新增 ${newlySuspended.length} 人停赛`,
+      detail: `${names(newlySuspended)}${extra(newlySuspended)}`,
+    });
+  }
+  if (recovered.length) {
+    add({
+      severity: "info",
+      icon: "✅",
+      title: en ? `${recovered.length} player(s) returned from injury` : `${recovered.length} 名球员伤愈`,
+      detail: `${names(recovered)}${extra(recovered)}`,
+    });
+  }
+
+  const fitnessDelta = after.averageFitness - (before?.averageFitness || 0);
+  if (Math.abs(fitnessDelta) >= 2) {
+    add({
+      severity: fitnessDelta < 0 ? "warning" : "info",
+      icon: "💪",
+      title: en ? `Squad fitness ${fitnessDelta > 0 ? "+" : ""}${fitnessDelta}` : `全队平均体能 ${fitnessDelta > 0 ? "+" : ""}${fitnessDelta}`,
+      detail: en ? `Now ${after.averageFitness}% after training and recovery.` : `训练与恢复结算后，当前为 ${after.averageFitness}%。`,
+    });
+  }
+  const moraleDelta = after.averageMorale - (before?.averageMorale || 0);
+  if (Math.abs(moraleDelta) >= 2) {
+    add({
+      severity: moraleDelta < 0 ? "warning" : "info",
+      icon: "🙂",
+      title: en ? `Squad morale ${moraleDelta > 0 ? "+" : ""}${moraleDelta}` : `全队平均士气 ${moraleDelta > 0 ? "+" : ""}${moraleDelta}`,
+      detail: en ? `Now ${after.averageMorale}.` : `当前平均士气为 ${after.averageMorale}。`,
+    });
+  }
+
+  const moneyDelta = after.money - (before?.money || 0);
+  if (moneyDelta !== 0) {
+    add({
+      severity: moneyDelta < 0 ? "warning" : "info",
+      icon: "💶",
+      title: en ? `Cash ${moneyDelta > 0 ? "+" : ""}${formatMoney(moneyDelta)}` : `现金变化 ${moneyDelta > 0 ? "+" : ""}${formatMoney(moneyDelta)}`,
+      detail: en ? `Current balance ${formatMoney(after.money)}; see the ledger for the causes.` : `当前余额 ${formatMoney(after.money)}，具体原因可查看财政流水。`,
+    });
+  }
+
+  const inboxDelta = after.inbox - (before?.inbox || 0);
+  if (inboxDelta > 0) {
+    add({
+      severity: "warning",
+      icon: "✉️",
+      title: en ? `${inboxDelta} new decision(s)` : `新增 ${inboxDelta} 项待办`,
+      detail: en ? `${after.inbox} unresolved inbox item(s) in total.` : `信箱现有 ${after.inbox} 项未解决待办。`,
+    });
+  }
+
+  for (const line of advanceEventLines(events).sort((a, b) => b.priority - a.priority)) {
+    add({
+      severity: line.priority >= 4 ? "critical" : line.priority >= 3 ? "warning" : "info",
+      icon: line.icon,
+      title: line.text,
+      detail: `D${line.day}`,
+    });
+  }
+  if (!items.length) {
+    add({
+      severity: "info",
+      icon: "✓",
+      title: en ? "No major changes" : "没有重大变化",
+      detail: en ? "Routine training, recovery and club operations were completed." : "已完成常规训练、恢复与俱乐部日常运营。",
+    });
+  }
+  const rank = { critical: 3, warning: 2, info: 1 };
+  items.sort((a, b) => (rank[b.severity] || 0) - (rank[a.severity] || 0));
+  return {
+    startDay: before?.day ?? after.day,
+    endDay: after.day,
+    days: Math.max(1, Number(days) || after.day - (before?.day || after.day) || 1),
+    items: items.slice(0, 8),
+  };
+}
+
 /**
  * 把 advanceDay() 返回的事件转成可展示的行
  * @returns {Array<{day:number, icon:string, text:string, priority:number}>}
@@ -7739,7 +8042,9 @@ async function onAdvance() {
       ensureManagerJob(world);
     } catch (_) {}
     if (world.managerJob?.status === "unemployed") {
+      const advanceSnapshot = captureAdvanceSnapshot();
       const res = advanceDay(world);
+      dashboardAdvanceDigest = buildAdvanceDigest(advanceSnapshot, res.events, 1);
       autosave("unemployed-advance");
       const n = (res.offers || pendingJobOffers(world) || []).length;
       toast(
@@ -7783,8 +8088,10 @@ async function onAdvance() {
     }
   }
   world._inboxSkipGate = false;
+  const advanceSnapshot = captureAdvanceSnapshot();
   const res = await runCalendarAdvance(() => advanceDayAsync(world));
   if (!res) return;
+  dashboardAdvanceDigest = buildAdvanceDigest(advanceSnapshot, res.events, 1);
   if (handleSacked(res)) return;
   const { userMatches } = res;
   if (userMatches && userMatches.length) {
@@ -7836,8 +8143,10 @@ async function onAdvanceToMatchday() {
     toast(t("toast.seasonOver"));
     return;
   }
+  const advanceSnapshot = captureAdvanceSnapshot();
   const res = await runCalendarAdvance(() => advanceToNextMatchDayAsync(world));
   if (!res) return;
+  dashboardAdvanceDigest = buildAdvanceDigest(advanceSnapshot, res.events, res.days);
   if (world.sacked || res.sacked) {
     handleSacked(res.sackedResult || { sacked: true, msg: world.sackedReason });
     return;
@@ -7881,10 +8190,12 @@ async function onAdvanceToSeasonEnd() {
   ) {
     return;
   }
+  const advanceSnapshot = captureAdvanceSnapshot();
   const res = await runCalendarAdvance(() =>
     advanceToSeasonEndAsync(world, { stopOnUserMatch: true })
   );
   if (!res) return;
+  dashboardAdvanceDigest = buildAdvanceDigest(advanceSnapshot, res.events, res.days);
   if (world.sacked || res.sacked) {
     handleSacked(res.sackedResult || { sacked: true, msg: world.sackedReason });
     return;
@@ -10837,6 +11148,7 @@ function tryAutoResume() {
     const data = loadGame(slot);
     if (!data) return false;
     world = data;
+    dashboardAdvanceDigest = null;
     migrateWorld(world);
     enterMain();
     // 轻提示，避免误以为还在登录页

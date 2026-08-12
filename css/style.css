@@ -6857,6 +6857,7 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 1rem;
 }
+.dashboard-workbench-card { grid-column: 1 / -1; }
 .dashboard-match-card { grid-column: span 8; }
 .dashboard-pulse-card { grid-column: span 4; }
 .dashboard-operations-card { grid-column: span 8; }
@@ -6899,6 +6900,113 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
 }
 .dashboard-career-card .dash-badges { margin-top: 0.5rem; }
 .dashboard-news-card .news-list { max-height: 18rem; }
+.dashboard-workbench-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.8rem;
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.dashboard-workbench-status.ready { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, var(--border)); }
+.dashboard-workbench-status.warning { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 48%, var(--border)); }
+.dashboard-workbench-status.critical { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--border)); }
+.dashboard-priorities { display: grid; gap: 0.5rem; }
+.dashboard-priority-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: var(--bg2);
+}
+.dashboard-priority-item.critical { border-left-color: var(--bad); }
+.dashboard-priority-item.warning { border-left-color: var(--warn); }
+.dashboard-priority-item.info { border-left-color: var(--primary); }
+.dashboard-priority-icon { font-size: 1.05rem; }
+.dashboard-priority-copy { min-width: 0; }
+.dashboard-priority-title { display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem; }
+.dashboard-priority-title strong,
+.dashboard-priority-copy p { overflow-wrap: anywhere; }
+.dashboard-priority-copy p { margin: 0.24rem 0 0; color: var(--muted); font-size: 0.78rem; }
+.dashboard-severity {
+  display: inline-flex;
+  padding: 0.1rem 0.38rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 900;
+  line-height: 1.35;
+}
+.dashboard-severity.critical { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--card)); }
+.dashboard-severity.warning { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, var(--card)); }
+.dashboard-severity.info { color: var(--primary); background: color-mix(in srgb, var(--primary) 11%, var(--card)); }
+.dashboard-priority-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.9rem;
+  border: 1px dashed color-mix(in srgb, var(--good) 45%, var(--border));
+  border-radius: 10px;
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 7%, var(--card));
+}
+.dashboard-priority-empty span { color: var(--muted); font-size: 0.78rem; }
+.dashboard-workbench-foot {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 1rem;
+  margin-top: 0.9rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+.dashboard-workbench-foot h3 { margin: 0 0 0.5rem; }
+.dashboard-quick-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+.dashboard-quick-action {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  padding: 0.6rem 0.68rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--card);
+  text-align: left;
+  cursor: pointer;
+}
+.dashboard-quick-action:hover { border-color: color-mix(in srgb, var(--primary) 50%, var(--border)); background: color-mix(in srgb, var(--primary) 6%, var(--card)); }
+.dashboard-quick-action span:last-child { min-width: 0; }
+.dashboard-quick-action strong,
+.dashboard-quick-action small { display: block; overflow-wrap: anywhere; }
+.dashboard-quick-action small { margin-top: 0.1rem; color: var(--muted); font-size: 0.7rem; }
+.dashboard-quick-icon { font-size: 1rem; }
+.dashboard-advance-summary,
+.dashboard-advance-empty { min-height: 4.5rem; }
+.dashboard-advance-empty {
+  display: grid;
+  align-content: center;
+  padding: 0.7rem;
+  border-radius: 9px;
+  color: var(--muted);
+  background: var(--bg2);
+  font-size: 0.78rem;
+}
+.dashboard-advance-head { display: flex; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.4rem; }
+.dashboard-advance-head span { color: var(--muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+.dashboard-advance-items { display: grid; gap: 0.32rem; }
+.dashboard-advance-item { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.42rem; align-items: start; font-size: 0.76rem; }
+.dashboard-advance-item strong,
+.dashboard-advance-item small { display: block; overflow-wrap: anywhere; }
+.dashboard-advance-item small { margin-top: 0.08rem; color: var(--muted); font-size: 0.69rem; }
+.dashboard-advance-item.critical strong { color: var(--bad); }
+.dashboard-advance-item.warning strong { color: var(--warn); }
 
 #tab-finance { max-width: 1240px; margin-inline: auto; }
 .finance-layout {
@@ -7210,6 +7318,7 @@ summary:focus-visible {
   .topbar-more-menu { position: fixed; top: 4.25rem; right: 0.75rem; }
   .dashboard-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-layout > .card { grid-column: span 1; }
+  .dashboard-workbench-card,
   .dashboard-match-card,
   .dashboard-operations-card,
   .dashboard-news-card { grid-column: 1 / -1 !important; }
@@ -7243,6 +7352,10 @@ summary:focus-visible {
   .primary-tab { padding-inline: 0.72rem; font-size: 0.82rem; }
   .dashboard-layout { grid-template-columns: minmax(0, 1fr); }
   .dashboard-layout > .card { grid-column: 1 !important; }
+  .dashboard-workbench-foot,
+  .dashboard-quick-actions { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-priority-item { grid-template-columns: auto minmax(0, 1fr); }
+  .dashboard-issue-action { grid-column: 2; justify-self: start; }
   .dashboard-ops-grid { grid-template-columns: minmax(0, 1fr); }
   .dashboard-match-card .next-match { min-height: 7rem; }
   .finance-budget-controls label { grid-template-columns: minmax(6.8rem, auto) minmax(5rem, 1fr) minmax(4rem, auto); }

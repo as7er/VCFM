@@ -87,6 +87,14 @@ try {
   }
   await assertCrestLoaded(page.locator("#club-name .club-crest"), "topbar crest");
   await assertNoHorizontalOverflow(page, "desktop dashboard");
+  await page.waitForSelector("#dashboard-priorities > *");
+  assert.ok((await page.locator("#dashboard-priorities").innerText()).trim().length > 0, "manager workbench must render priorities or an explicit ready state");
+  assert.ok(await page.locator("#dashboard-quick-actions [data-dashboard-link]").count() > 0, "manager workbench must expose contextual actions");
+  const dashboardAction = page.locator("#dashboard-quick-actions [data-dashboard-link]").first();
+  const dashboardTarget = await dashboardAction.getAttribute("data-dashboard-link");
+  await dashboardAction.click();
+  await page.waitForSelector(`#tab-${dashboardTarget}.active`);
+  await openTab(page, "dashboard");
   const dateBeforeWorkerAdvance = await page.locator("#date-label").innerText();
   await page.locator("#btn-advance").click();
   await page.waitForFunction(
@@ -96,6 +104,8 @@ try {
   );
   assert.notEqual(await page.locator("#date-label").innerText(), dateBeforeWorkerAdvance);
   assert.equal(await page.locator("#btn-advance").isEnabled(), true);
+  assert.match(await page.locator("#dashboard-advance-summary").innerText(), /推进 1 天|Advanced 1 day/);
+  assert.ok((await page.locator("#dashboard-advance-summary").innerText()).trim().length > 0, "calendar advance must explain what changed");
 
   for (const tab of ["finance", "squad", "staff", "training", "tactics", "facilities", "media", "fixtures", "table", "career"]) {
     await openTab(page, tab);
