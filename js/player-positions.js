@@ -258,7 +258,16 @@ export function slotPositionCode(slot, index = 0, slots = []) {
   const pos = slot?.pos || "MID";
   if (pos === "GK") return "GK";
   const x = Number(slot?.x ?? 50);
-  if (pos === "DEF") return x <= 28 ? "LB" : x >= 72 ? "RB" : "CB";
+  if (pos === "DEF") {
+    const defenders = (slots || []).filter((item) => item?.pos === "DEF");
+    // 三后卫全部是中卫；五后卫只有最外侧两人才是边后卫/翼卫槽。
+    if (defenders.length === 3) return "CB";
+    const xs = defenders.map((item) => Number(item?.x ?? 50));
+    const minX = Math.min(...xs, x);
+    const maxX = Math.max(...xs, x);
+    if (defenders.length >= 5) return x === minX ? "LB" : x === maxX ? "RB" : "CB";
+    return x <= 28 ? "LB" : x >= 72 ? "RB" : "CB";
+  }
   if (pos === "MID") {
     if (x <= 28) return "LM";
     if (x >= 72) return "RM";

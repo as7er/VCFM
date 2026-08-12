@@ -4,7 +4,20 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v208**（球员个人踢球习惯）
+> 缓存：**vcfm-v209**（角色/职责与防守侧空间行为）
+
+## v209 角色、职责与防守侧空间行为(2026-08-12)
+
+- 战术板新增角色职责面板：球员脚下显示"角色·职责"标签，点击打开右侧角色面板，查看适配度、描述、可切换职责和习惯契合/冲突提示
+- 新增 `js/player-roles.js`：声明 24 种角色、3 种职责（defend/support/attack）及角色适用细分位置、属性侧重、习惯契合/冲突、行为倾向和教练标签；导出 `roleBehavior`、`roleSuitability`、`roleFitsPosition`、`rolesForDetailedPosition` 等工具
+- 空间引擎防守侧接入角色行为：抢球中场/压迫型前锋的高压迫倾向影响上抢者指派排序、拦截距离和站位贴进度；下脚倾向影响抢断范围和冷却；角色职责深度影响防线回收位置，量级克制，默认角色几乎不受影响
+- 中场角色/职责变更同步触发 `state._simNeedsResync`，确保下半场空间 agent 使用新角色/职责
+- `resyncSimAfterHalfTime` 补齐 `getSlotDuty` 与习惯同步
+- `save-schema.js` 新增 `tactics.roles[]`/`duties[]`/`coachRoleIdentityId`/`coachRoleIdentityVersion` 结构校验
+- 新增 `scripts/player-roles-audit.mjs` 并接入统一验证，覆盖角色细分位置合法性、职责合法性、教练理念差异、习惯冲突提示、防守因果
+- 浏览器 E2E 覆盖战术角色面板交互；三后卫 DEF 槽统一识别为 CB，五后卫只有最外侧槽为 LB/RB
+- 缓存 `vcfm-v209`
+- 已验证：`node scripts/verify.mjs`、标准档 24 场真实性审计（2.50 球/场、10.1% 转化、75.6% 传球成功率、0.29 点球/场、零停滞）、`node js/sim/_p5_integration.mjs`、`git diff --check`
 
 ## v208 球员个人踢球习惯（2026-08-12）
 
@@ -13,7 +26,7 @@
 - 旧球员按 ID、细分位置和真实属性稳定派生初始习惯；互斥习惯与位置资格统一校验，稳定态不会反复把存档标脏
 - 球员资料支持培养或纠正一项个人习惯，按现有教练能力、训练强度、年龄、伤病和决策属性逐周结算；培养委托给教练团队时玩家入口只读
 - 外队习惯随持久化球探观察逐步揭示，旧报告不会因球员后来改变习惯而自动刷新；存档结构同步校验习惯、训练进度和已观察事实
-- 新增 `js/player-habits.js` 与 `scripts/player-habits-audit.mjs`；缓存 `vcfm-v208`
+- 新增 `js/player-habits.js` 与 `scripts/player-habits-audit.mjs`；缓存 `vcfm-v209`
 - 已验证：`node scripts/verify.mjs`、标准与 background 档各 24 场真实性样本、`node js/sim/_p5_integration.mjs`、`npm run test:browser` 与 `git diff --check`；标准档 2.63 球/场、10.3% 转化、76.1% 传球成功率、零停滞，后台档 3.04 球/场、11.3% 转化、80.6% 传球成功率、零停滞
 
 ## v207 比赛传球节奏与真实性基准（2026-08-11）

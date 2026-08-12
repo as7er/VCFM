@@ -2,7 +2,14 @@
 
 import { DIVISIONS, FORMATIONS } from "./data.js";
 import { autoLineup, ensureLineupRoles, ensureTactics } from "./models.js";
-import { positionFitForSlot, positionGroup } from "./player-positions.js";
+import { positionFitForSlot, positionGroup, slotPositionCode } from "./player-positions.js";
+import {
+  roleDetail,
+  roleIdentityFit,
+  roleSuitability,
+  rolesForDetailedPosition,
+  normalizeDutyForRole,
+} from "./player-roles.js";
 import { generateBoardObjective } from "./board.js";
 
 export const COACH_IDENTITY_VERSION = 1;
@@ -19,6 +26,7 @@ const ARCHETYPES = Object.freeze({
     tempo: 2,
     width: 4,
     defensiveLine: 4,
+    roleTags: ["controlled", "build-up", "playmaker"],
   }),
   intense: Object.freeze({
     key: "intense",
@@ -30,6 +38,7 @@ const ARCHETYPES = Object.freeze({
     tempo: 4,
     width: 4,
     defensiveLine: 5,
+    roleTags: ["intense", "pressing", "runner", "attacking"],
   }),
   counter: Object.freeze({
     key: "counter",
@@ -41,6 +50,7 @@ const ARCHETYPES = Object.freeze({
     tempo: 4,
     width: 3,
     defensiveLine: 2,
+    roleTags: ["counter", "direct", "runner", "secure"],
   }),
   compact: Object.freeze({
     key: "compact",
@@ -52,6 +62,7 @@ const ARCHETYPES = Object.freeze({
     tempo: 2,
     width: 2,
     defensiveLine: 2,
+    roleTags: ["compact", "secure", "pressing"],
   }),
   direct: Object.freeze({
     key: "direct",
@@ -63,6 +74,7 @@ const ARCHETYPES = Object.freeze({
     tempo: 5,
     width: 4,
     defensiveLine: 3,
+    roleTags: ["direct", "wide", "attacking"],
   }),
   balanced: Object.freeze({
     key: "balanced",
@@ -74,6 +86,7 @@ const ARCHETYPES = Object.freeze({
     tempo: 3,
     width: 3,
     defensiveLine: 3,
+    roleTags: ["balanced", "secure", "build-up"],
   }),
 });
 
@@ -126,6 +139,9 @@ export function ensureCoachIdentity(coach) {
     tempo: clamp(existing.tempo ?? archetype.tempo, 1, 5),
     width: clamp(existing.width ?? archetype.width, 1, 5),
     defensiveLine: clamp(existing.defensiveLine ?? archetype.defensiveLine, 1, 5),
+    roleTags: Array.isArray(existing.roleTags)
+      ? [...new Set(existing.roleTags.filter((tag) => typeof tag === "string"))].slice(0, 8)
+      : [...archetype.roleTags],
     youthTrust: clamp(existing.youthTrust ?? stableLevel(seed, "youth"), 1, 5),
     rotation: clamp(existing.rotation ?? stableLevel(seed, "rotation"), 1, 5),
     adaptability: clamp(existing.adaptability ?? adaptability, 1, 5),
@@ -207,6 +223,69 @@ export function preferredCoachFormation(coach, club) {
     .sort((a, b) => b.score - a.score)[0]?.formation || identity.preferredFormations[0] || "4-3-3";
 }
 
+function dutyPreference(identity, roleId, dutyId) {
+  const style = identity?.style || identity?.archetype;
+  const role = roleDetail(roleId);
+  const preference = style === "defend" || identity?.archetype === "compact"
+    ? "defend"
+    : style === "counter"
+      ? (role.tags.includes("secure") ? "support" : "attack")
+      : style === "attack" || identity?.archetype === "intense" || identity?.archetype === "direct"
+        ? "attack"
+        : "support";
+  return dutyId === preference ? 1.7 : dutyId === "support" ? 0.55 : 0;
+}
+
+/** 按教练理念、球员属性和个人习惯给当前首发槽分配角色与职责。 */
+export function assignCoachLineupRoles(club, coach, { force = false } = {}) {
+  if (!club || !coach) return { ok: false, assignments: [] };
+  const identity = ensureCoachIdentity(coach);
+  ensureTactics(club);
+  ensureLineupRoles(club);
+  const formation = FORMATIONS[club.tactics.formation] || FORMATIONS["4-3-3"];
+  const assignments = [];
+  for (let index = 0; index < formation.slots.length; index++) {
+    const slot = formation.slots[index];
+    const playerId = club.tactics.lineup?.[index];
+    const player = club.players?.find((item) => item.id === playerId);
+    if (!player) continue;
+    const detailed = slotPositionCode(slot, index, formation.slots);
+    const candidateIds = rolesForDetailedPosition(detailed);
+    const candidates = [];
+    for (const roleId of candidateIds) {
+      const info = roleDetail(roleId);
+      for (const dutyId of info.duties) {
+        const fit = roleSuitability(player, roleId, dutyId, detailed);
+        const score =
+          fit.rating +
+          roleIdentityFit(roleId, identity) * 2.2 +
+          dutyPreference(identity, roleId, dutyId) +
+          (roleId === club.tactics.roles?.[index] && !force ? 0.4 : 0);
+        candidates.push({ roleId, dutyId, score, fit });
+      }
+    }
+    candidates.sort((left, right) =>
+      right.score - left.score || left.roleId.localeCompare(right.roleId) || left.dutyId.localeCompare(right.dutyId)
+    );
+    const chosen = candidates[0];
+    if (!chosen) continue;
+    club.tactics.roles[index] = chosen.roleId;
+    if (!Array.isArray(club.tactics.duties)) club.tactics.duties = [];
+    club.tactics.duties[index] = normalizeDutyForRole(chosen.roleId, chosen.dutyId);
+    assignments.push({
+      slot: index,
+      playerId,
+      detailedPosition: detailed,
+      roleId: chosen.roleId,
+      dutyId: club.tactics.duties[index],
+      fit: chosen.fit,
+    });
+  }
+  club.tactics.coachRoleIdentityId = coach.id;
+  club.tactics.coachRoleIdentityVersion = COACH_IDENTITY_VERSION;
+  return { ok: true, assignments, identity };
+}
+
 export function applyCoachTacticalIdentity(club, coach, options = {}) {
   const identity = ensureCoachIdentity(coach);
   if (!club || !identity) return { ok: false, msg: "missing coach identity" };
@@ -229,6 +308,7 @@ export function applyCoachTacticalIdentity(club, coach, options = {}) {
   club.tactics.coachIdentityVersion = COACH_IDENTITY_VERSION;
   ensureLineupRoles(club, { reset: true });
   if (options.rebuildLineup !== false) autoLineup(club);
+  assignCoachLineupRoles(club, coach, { force: true });
   return { ok: true, identity, formation };
 }
 

@@ -10,6 +10,7 @@ import {
 import { assistantTrainingPlan, setTraining } from "./training.js";
 import { setTrainingMode } from "./training-boost.js";
 import {
+  assignCoachLineupRoles,
   ensureCoachIdentity,
   preferredCoachFormation,
 } from "./manager-ecosystem.js";
@@ -269,6 +270,8 @@ export function buildDelegatedTactics(world, club, fixture = null) {
 export function applyDelegatedTactics(world, club, fixture = null, { force = false } = {}) {
   const delegation = ensureDelegation(world, club);
   if (!force && !isFullyDelegated(world, club, "tactics")) return { ok: false, skipped: "player" };
+  const coach = delegationStaff(club);
+  if (!coach) return { ok: false, msg: "尚未聘请主教练" };
   const plan = buildDelegatedTactics(world, club, fixture);
   if (!plan.ok) return plan;
   ensureTactics(club);
@@ -279,6 +282,7 @@ export function applyDelegatedTactics(world, club, fixture = null, { force = fal
   club.tactics.width = plan.width;
   club.tactics.defensiveLine = plan.defensiveLine;
   ensureLineupRoles(club, { reset: true });
+  assignCoachLineupRoles(club, coach, { force: true });
   delegation.lastAppliedDay.tactics = world.day;
   return plan;
 }
@@ -301,6 +305,7 @@ export function applyDelegatedLineup(world, club, options = {}) {
   const preferredCore = delegation.locks.corePlayerId;
   if (preferredCore && lineup.includes(preferredCore)) club.tactics.corePlayerId = preferredCore;
   else ensureCorePlayer(club, { force: true });
+  assignCoachLineupRoles(club, coach, { force: true });
   delegation.lastAppliedDay.lineup = world.day;
   const unavailableLocked = delegation.locks.playerIds.filter((id) => !lineup.includes(id));
   return { ok: true, lineup, unavailableLocked };

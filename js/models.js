@@ -12,8 +12,6 @@ import {
   START_DIVISIONS,
   generatePlayerName,
   PLAYER_ROLES,
-  ROLES_BY_POS,
-  DEFAULT_ROLE_BY_POS,
   defaultRoleForSlot,
 } from "./data.js";
 import { applyClubBranding } from "./branding.js";
@@ -24,8 +22,13 @@ import {
   positionCoverage,
   positionFitForSlot,
   positionGroup,
+  slotPositionCode,
 } from "./player-positions.js";
 import { ensurePlayerHabits } from "./player-habits.js";
+import {
+  normalizeDutyForRole,
+  roleFitsPosition,
+} from "./player-roles.js";
 import {
   APPEARANCE_HAIR_COLORS as SHARED_APPEARANCE_HAIR_COLORS,
   APPEARANCE_HAIR_STYLE_IDS as SHARED_APPEARANCE_HAIR_STYLE_IDS,
@@ -1326,6 +1329,8 @@ export function defaultTactics() {
     lineup: [],
     /** 与 lineup 等长：每槽角色 id（见 data.PLAYER_ROLES） */
     roles: [],
+    /** 与 roles 等长：每槽职责 defend / support / attack */
+    duties: [],
     /**
      * 核心球员 id（梅西/C罗/内马尔式「进攻绝对权」）
      * 须在首发中；null 表示未指定
@@ -1632,24 +1637,31 @@ export function ensureLineupRoles(club, { reset = false } = {}) {
   const slots = formation.slots || [];
   const need = slots.length;
   if (!Array.isArray(t.roles)) t.roles = [];
+  if (!Array.isArray(t.duties)) t.duties = [];
   if (reset || t.roles.length !== need) {
     const next = [];
+    const nextDuties = [];
     for (let i = 0; i < need; i++) {
       const prev = !reset && t.roles[i];
-      if (prev && PLAYER_ROLES[prev] && PLAYER_ROLES[prev].pos === slots[i].pos) {
+      const target = slotPositionCode(slots[i], i, slots);
+      if (prev && PLAYER_ROLES[prev] && roleFitsPosition(prev, target)) {
         next.push(prev);
       } else {
         next.push(defaultRoleForSlot(slots[i], i, slots));
       }
+      nextDuties.push(normalizeDutyForRole(next[i], !reset ? t.duties[i] : null));
     }
     t.roles = next;
+    t.duties = nextDuties;
   } else {
     for (let i = 0; i < need; i++) {
       const rid = t.roles[i];
       const slot = slots[i];
-      if (!PLAYER_ROLES[rid] || PLAYER_ROLES[rid].pos !== slot.pos) {
+      const target = slotPositionCode(slot, i, slots);
+      if (!PLAYER_ROLES[rid] || !roleFitsPosition(rid, target)) {
         t.roles[i] = defaultRoleForSlot(slot, i, slots);
       }
+      t.duties[i] = normalizeDutyForRole(t.roles[i], t.duties[i]);
     }
   }
   return t.roles;
@@ -1671,6 +1683,7 @@ export function ensureTactics(club) {
     if (t.defensiveLine == null) t.defensiveLine = d.defensiveLine;
     if (!Array.isArray(t.lineup)) t.lineup = [];
     if (!Array.isArray(t.roles)) t.roles = [];
+    if (!Array.isArray(t.duties)) t.duties = [];
     if (t.corePlayerId === undefined) t.corePlayerId = null;
     if (t.captainId === undefined) t.captainId = null;
     normalizeSetPieces(t);
@@ -1704,11 +1717,27 @@ export function setSlotRole(club, slotIndex, roleId) {
   }
   ensureLineupRoles(club);
   const role = PLAYER_ROLES[roleId];
-  if (!role || role.pos !== slots[idx].pos) {
+  const target = slotPositionCode(slots[idx], idx, slots);
+  if (!role || !roleFitsPosition(roleId, target)) {
     return { ok: false, msg: "角色与位置不匹配" };
   }
   club.tactics.roles[idx] = roleId;
+  club.tactics.duties[idx] = normalizeDutyForRole(roleId, club.tactics.duties?.[idx]);
   return { ok: true, roleId };
+}
+
+/** 设置某槽职责；职责必须属于当前角色。 */
+export function setSlotDuty(club, slotIndex, dutyId) {
+  ensureTactics(club);
+  const idx = +slotIndex;
+  if (!Number.isFinite(idx) || idx < 0 || idx >= (club.tactics.roles || []).length) {
+    return { ok: false, msg: "无效槽位" };
+  }
+  const roleId = getSlotRole(club, idx);
+  const duty = normalizeDutyForRole(roleId, dutyId);
+  if (duty !== dutyId) return { ok: false, msg: "职责与角色不匹配" };
+  club.tactics.duties[idx] = duty;
+  return { ok: true, dutyId: duty, roleId };
 }
 
 /** 取槽位角色 id */
@@ -1720,6 +1749,13 @@ export function getSlotRole(club, slotIndex) {
     club.tactics.roles?.[slotIndex] ||
     defaultRoleForSlot(formation.slots[slotIndex], slotIndex, formation.slots)
   );
+}
+
+export function getSlotDuty(club, slotIndex) {
+  ensureTactics(club);
+  ensureLineupRoles(club);
+  const roleId = getSlotRole(club, slotIndex);
+  return normalizeDutyForRole(roleId, club.tactics.duties?.[slotIndex]);
 }
 
 /**

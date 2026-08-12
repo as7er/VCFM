@@ -14,6 +14,7 @@ import {
   assignPlayersToFormationSlots,
   getCorePlayerId,
   getSlotRole,
+  getSlotDuty,
 } from "../models.js";
 import { FORMATIONS } from "../data.js";
 import { positionCoverage } from "../player-positions.js";
@@ -117,6 +118,12 @@ export function resyncSimAfterHalfTime(state) {
       } catch {
         a.roleId = a.roleId || null;
       }
+      try {
+        a.dutyId = getSlotDuty(club, i) || null;
+      } catch {
+        a.dutyId = a.dutyId || null;
+      }
+      a.habits = new Set(p?.playingHabits || []);
       a.fitness = priorFitness.has(p.id) ? priorFitness.get(p.id) : p.fitness ?? 100;
       const attrs = p.attrs || {};
       const n = (v) => {

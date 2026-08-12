@@ -923,8 +923,8 @@ html[data-theme="light"] .inbox-body { color: #64748b; }
     var(--pitch);
   border: 2px solid var(--pitch-line);
   border-radius: 8px;
-  aspect-ratio: 3 / 4;
-  max-width: 360px;
+  aspect-ratio: 4 / 5;
+  max-width: 430px;
   width: 100%;
   position: relative;
   margin-inline: auto;
@@ -935,7 +935,7 @@ html[data-theme="light"] .inbox-body { color: #64748b; }
 .player-dot {
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 72px;
+  width: 86px;
   text-align: center;
   z-index: 2;
   pointer-events: none;
@@ -960,6 +960,9 @@ html[data-theme="light"] .inbox-body { color: #64748b; }
 }
 .player-dot.tac-slot.selected .circle {
   box-shadow: 0 0 0 3px #e6b450, 0 0 10px rgba(230, 180, 80, 0.45);
+}
+.player-dot.tac-slot.role-editing .circle {
+  box-shadow: 0 0 0 3px var(--primary), 0 0 12px rgba(61, 139, 253, 0.42);
 }
 .player-dot.tac-slot.out-of-pos .circle {
   outline: 2px dashed rgba(251, 113, 133, 0.85);
@@ -1041,6 +1044,37 @@ html[data-theme="light"] .tac-role-sel {
   color: #1a2438;
   border-color: rgba(26, 36, 56, 0.2);
 }
+.tac-role-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.18rem;
+  max-width: 84px;
+  margin: 3px auto 0;
+  padding: 2px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.86);
+  color: #f8fafc;
+  font-size: 0.58rem;
+  font-weight: 700;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.tac-role-badge:hover,
+.tac-role-badge:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(61, 139, 253, 0.22);
+}
+html[data-theme="light"] .tac-role-badge {
+  background: rgba(255, 255, 255, 0.96);
+  color: #1a2438;
+  border-color: rgba(26, 36, 56, 0.18);
+}
 .player-dot .name {
   font-size: 0.68rem;
   font-weight: 600;
@@ -1110,6 +1144,111 @@ html[data-theme="light"] .pitch {
 }
 .tac-summary strong {
   color: var(--text);
+}
+.tactics-workspace {
+  grid-template-columns: minmax(27rem, 1.15fr) minmax(20rem, 0.85fr);
+  align-items: start;
+}
+.tactics-pitch-card,
+.tactics-controls-card { min-width: 0; }
+.tac-role-panel {
+  margin: 0 0 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg2, rgba(15, 23, 42, 0.35));
+  overflow: hidden;
+}
+.tac-role-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.72rem 0.78rem;
+  border-bottom: 1px solid var(--border);
+}
+.tac-role-panel-head .avatar { flex: 0 0 auto; }
+.tac-role-panel-player {
+  min-width: 0;
+  display: grid;
+  gap: 0.08rem;
+}
+.tac-role-panel-player strong,
+.tac-role-panel-player span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tac-role-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.42rem;
+  padding: 0.68rem;
+}
+.tac-role-card {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+  padding: 0.52rem 0.58rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.tac-role-card:hover { border-color: var(--primary); }
+.tac-role-card.active {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--card));
+}
+.tac-role-card strong { font-size: 0.78rem; }
+.tac-role-card span { color: var(--muted); font-size: 0.68rem; }
+.tac-role-fit { font-variant-numeric: tabular-nums; }
+.tac-role-detail {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0 0.72rem 0.72rem;
+}
+.tac-duty-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.tac-duty-btn {
+  flex: 1 1 5rem;
+  padding: 0.38rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+}
+.tac-duty-btn.active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, var(--card));
+  font-weight: 700;
+}
+.tac-role-habit-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.tac-role-habit-facts span {
+  padding: 0.18rem 0.38rem;
+  border-radius: 999px;
+  background: var(--bg3, rgba(148, 163, 184, 0.12));
+  font-size: 0.68rem;
+}
+.tac-role-habit-facts .conflict { color: var(--bad); }
+@media (max-width: 1040px) {
+  .tactics-workspace { grid-template-columns: 1fr; }
+  .pitch { max-width: 460px; }
+}
+@media (max-width: 560px) {
+  .pitch { max-width: 360px; }
+  .player-dot { width: 72px; }
+  .tac-role-list { grid-template-columns: 1fr; }
+  .tac-role-badge { max-width: 70px; font-size: 0.54rem; }
 }
 .match-live-tac {
   flex-wrap: wrap;

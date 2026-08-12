@@ -33,6 +33,8 @@ import {
   teamTalkLabel,
   roleLabel,
 } from "./data.js";
+import { slotPositionCode } from "./player-positions.js";
+import { normalizeDutyForRole, roleFitsPosition } from "./player-roles.js";
 import {
   coachMatchMod,
   doctorInjuryMod,
@@ -2139,7 +2141,7 @@ async function runLiveCoachReview(state, minute, opts = {}) {
 
 /**
  * 用户中场指令
- * orders: { style?, pressing?, tempo?, width?, defensiveLine?, formation?, roles?: string[], subs?, teamTalk? }
+ * orders: { style?, pressing?, tempo?, width?, defensiveLine?, formation?, roles?: string[], duties?: string[], subs?, teamTalk? }
  */
 export function applyUserHalfTime(state, orders = {}) {
   const club = state.userClub;
@@ -2176,10 +2178,21 @@ export function applyUserHalfTime(state, orders = {}) {
     const slots = (FORMATIONS[t.formation] || FORMATIONS["4-3-3"]).slots || [];
     for (let i = 0; i < Math.min(orders.roles.length, slots.length); i++) {
       const rid = orders.roles[i];
-      if (rid && PLAYER_ROLES[rid] && PLAYER_ROLES[rid].pos === slots[i].pos) {
+      const detailed = slotPositionCode(slots[i], i, slots);
+      if (rid && PLAYER_ROLES[rid] && roleFitsPosition(rid, detailed)) {
         t.roles[i] = rid;
+        t.duties[i] = normalizeDutyForRole(rid, orders.duties?.[i] || t.duties?.[i]);
       }
     }
+  }
+  // 角色/职责变更会改变空间 agent 的 roleId/dutyId（可能只有职责被改），必须标记重同步，
+  // 否则下半场已创建的 agent 继续沿用上半场的旧角色/职责。
+  if (
+    state.simEng &&
+    ((Array.isArray(orders.roles) && orders.roles.length) ||
+      (Array.isArray(orders.duties) && orders.duties.length))
+  ) {
+    state._simNeedsResync = true;
   }
 
   const msgs = [];
@@ -2190,7 +2203,8 @@ export function applyUserHalfTime(state, orders = {}) {
     orders.width != null ||
     orders.defensiveLine != null ||
     orders.formation ||
-    (orders.roles && orders.roles.length);
+    (orders.roles && orders.roles.length) ||
+    (orders.duties && orders.duties.length);
   if (tacTouched) {
     const roleBits = summarizeRolesShort(club);
     pushEv(
@@ -2209,6 +2223,7 @@ export function applyUserHalfTime(state, orders = {}) {
         defensiveLine: t.defensiveLine,
         formation: t.formation,
         roles: [...(t.roles || [])],
+        duties: [...(t.duties || [])],
         formationChanged: formChanged,
       }
     );

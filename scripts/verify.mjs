@@ -16,6 +16,7 @@ const checks = [
   "scripts/player-traits-set-pieces-audit.mjs",
   "scripts/player-habits-audit.mjs",
   "scripts/player-positions-audit.mjs",
+  "scripts/player-roles-audit.mjs",
   "scripts/lazy-load-audit.mjs",
   "scripts/player-pathway-audit.mjs",
   "scripts/development-football-audit.mjs",

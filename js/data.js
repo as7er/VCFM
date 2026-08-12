@@ -810,10 +810,10 @@ export const PLAYER_ROLES = {
   cb_stop: {
     id: "cb_stop",
     pos: "DEF",
-    label: "盯人中卫",
-    labelEn: "No-Nonsense CB",
-    short: "盯人",
-    shortEn: "Stop",
+    label: "清球中卫",
+    labelEn: "No-Nonsense Centre-Back",
+    short: "清球",
+    shortEn: "NCB",
     score: 0.4,
     assist: 0.3,
     tackle: 2.2,
@@ -844,10 +844,10 @@ export const PLAYER_ROLES = {
   fb_def: {
     id: "fb_def",
     pos: "DEF",
-    label: "防守边卫",
-    labelEn: "Defensive FB",
-    short: "防边",
-    shortEn: "FB-D",
+    label: "边后卫",
+    labelEn: "Full-Back",
+    short: "边卫",
+    shortEn: "FB",
     score: 0.5,
     assist: 0.8,
     tackle: 1.8,
@@ -861,9 +861,9 @@ export const PLAYER_ROLES = {
   fb_wb: {
     id: "fb_wb",
     pos: "DEF",
-    label: "进攻套边",
+    label: "翼卫",
     labelEn: "Wing-Back",
-    short: "套边",
+    short: "翼卫",
     shortEn: "WB",
     score: 1.2,
     assist: 2.4,
@@ -878,9 +878,9 @@ export const PLAYER_ROLES = {
   dm_hold: {
     id: "dm_hold",
     pos: "MID",
-    label: "后腰屏障",
-    labelEn: "Holding DM",
-    short: "后腰",
+    label: "防守型中场",
+    labelEn: "Defensive Midfielder",
+    short: "防守中场",
     shortEn: "DM",
     score: 0.8,
     assist: 1.0,
@@ -895,9 +895,9 @@ export const PLAYER_ROLES = {
   cm_box: {
     id: "cm_box",
     pos: "MID",
-    label: "工兵中场",
-    labelEn: "Box-to-Box",
-    short: "工兵",
+    label: "全能中场",
+    labelEn: "Box-to-Box Midfielder",
+    short: "全能",
     shortEn: "B2B",
     score: 1.6,
     assist: 1.8,
@@ -912,9 +912,9 @@ export const PLAYER_ROLES = {
   am_play: {
     id: "am_play",
     pos: "MID",
-    label: "组织前腰",
-    labelEn: "Playmaker",
-    short: "前腰",
+    label: "前场组织核心",
+    labelEn: "Advanced Playmaker",
+    short: "前场组织",
     shortEn: "AP",
     score: 1.8,
     assist: 3.2,
@@ -929,9 +929,9 @@ export const PLAYER_ROLES = {
   winger: {
     id: "winger",
     pos: "MID",
-    label: "边路爆破",
+    label: "边锋",
     labelEn: "Winger",
-    short: "边路",
+    short: "边锋",
     shortEn: "W",
     score: 2.0,
     assist: 2.6,
@@ -946,7 +946,7 @@ export const PLAYER_ROLES = {
   st_poach: {
     id: "st_poach",
     pos: "ATT",
-    label: "抢点前锋",
+    label: "抢点型前锋",
     labelEn: "Poacher",
     short: "抢点",
     shortEn: "P",
@@ -963,7 +963,7 @@ export const PLAYER_ROLES = {
   st_target: {
     id: "st_target",
     pos: "ATT",
-    label: "支点中锋",
+    label: "支点前锋",
     labelEn: "Target Forward",
     short: "支点",
     shortEn: "TF",
@@ -994,22 +994,97 @@ export const PLAYER_ROLES = {
     chance: 0.04,
     fit: 0.03,
   },
+  gk_sweeper: {
+    id: "gk_sweeper", pos: "GK", label: "出击门将", labelEn: "Sweeper Keeper",
+    short: "出击", shortEn: "SK", score: 0, assist: 0.5, tackle: 0.5,
+    atk: 0.01, def: 0.02, poss: 0.04, foul: 0, chance: 0, fit: 0.02,
+  },
+  cb_central: {
+    id: "cb_central", pos: "DEF", label: "中后卫", labelEn: "Central Defender",
+    short: "中卫", shortEn: "CD", score: 0.5, assist: 0.5, tackle: 1.8,
+    atk: 0, def: 0.04, poss: 0, foul: 0.01, chance: 0, fit: 0.01,
+  },
+  fb_inverted: {
+    id: "fb_inverted", pos: "DEF", label: "内收边后卫", labelEn: "Inverted Full-Back",
+    short: "内收", shortEn: "IFB", score: 0.8, assist: 1.5, tackle: 1.3,
+    atk: 0.02, def: 0.02, poss: 0.04, foul: 0, chance: 0.01, fit: 0.03,
+  },
+  wm_wingback: {
+    id: "wm_wingback", pos: "MID", label: "翼卫", labelEn: "Wing-Back",
+    short: "翼卫", shortEn: "WB", score: 1.3, assist: 2.4, tackle: 1.0,
+    atk: 0.04, def: -0.01, poss: 0.01, foul: 0.01, chance: 0.03, fit: 0.05,
+  },
+  dm_playmaker: {
+    id: "dm_playmaker", pos: "MID", label: "拖后组织核心", labelEn: "Deep-Lying Playmaker",
+    short: "拖后组织", shortEn: "DLP", score: 0.8, assist: 2.5, tackle: 1.0,
+    atk: 0.01, def: 0.02, poss: 0.06, foul: -0.02, chance: 0.02, fit: 0.01,
+  },
+  dm_halfback: {
+    id: "dm_halfback", pos: "MID", label: "半后卫", labelEn: "Half-Back",
+    short: "半后卫", shortEn: "HB", score: 0.5, assist: 1.0, tackle: 1.8,
+    atk: -0.02, def: 0.06, poss: 0.03, foul: 0.01, chance: -0.01, fit: 0.02,
+  },
+  cm_central: {
+    id: "cm_central", pos: "MID", label: "中央中场", labelEn: "Central Midfielder",
+    short: "中场", shortEn: "CM", score: 1.2, assist: 1.5, tackle: 1.1,
+    atk: 0.01, def: 0.01, poss: 0.02, foul: 0, chance: 0.01, fit: 0.02,
+  },
+  cm_ballwinner: {
+    id: "cm_ballwinner", pos: "MID", label: "抢球中场", labelEn: "Ball-Winning Midfielder",
+    short: "抢球", shortEn: "BWM", score: 0.8, assist: 1.0, tackle: 2.4,
+    atk: -0.01, def: 0.05, poss: -0.01, foul: 0.04, chance: -0.01, fit: 0.04,
+  },
+  cm_playmaker: {
+    id: "cm_playmaker", pos: "MID", label: "组织核心", labelEn: "Advanced Playmaker",
+    short: "组织", shortEn: "AP", score: 1.3, assist: 3.0, tackle: 0.7,
+    atk: 0.03, def: -0.01, poss: 0.06, foul: -0.02, chance: 0.03, fit: 0.01,
+  },
+  am_shadow: {
+    id: "am_shadow", pos: "MID", label: "影子前锋", labelEn: "Shadow Striker",
+    short: "影锋", shortEn: "SS", score: 2.8, assist: 1.5, tackle: 0.6,
+    atk: 0.05, def: -0.03, poss: 0, foul: 0, chance: 0.05, fit: 0.03,
+  },
+  wide_playmaker: {
+    id: "wide_playmaker", pos: "MID", label: "边路组织核心", labelEn: "Wide Playmaker",
+    short: "边路组织", shortEn: "WP", score: 1.5, assist: 3.0, tackle: 0.6,
+    atk: 0.03, def: -0.02, poss: 0.05, foul: -0.01, chance: 0.03, fit: 0.02,
+  },
+  st_winger: {
+    id: "st_winger", pos: "ATT", label: "边锋", labelEn: "Winger",
+    short: "边锋", shortEn: "W", score: 2.0, assist: 2.8, tackle: 0.5,
+    atk: 0.04, def: -0.02, poss: 0.01, foul: 0, chance: 0.04, fit: 0.04,
+  },
+  st_advanced: {
+    id: "st_advanced", pos: "ATT", label: "突前前锋", labelEn: "Advanced Forward",
+    short: "突前", shortEn: "AF", score: 3.1, assist: 1.4, tackle: 0.3,
+    atk: 0.05, def: -0.03, poss: -0.01, foul: 0, chance: 0.05, fit: 0.03,
+  },
+  st_pressing: {
+    id: "st_pressing", pos: "ATT", label: "压迫型前锋", labelEn: "Pressing Forward",
+    short: "压迫", shortEn: "PF", score: 2.4, assist: 1.5, tackle: 1.1,
+    atk: 0.03, def: 0.01, poss: 0, foul: 0.03, chance: 0.03, fit: 0.06,
+  },
+  st_false9: {
+    id: "st_false9", pos: "ATT", label: "伪九号", labelEn: "False Nine",
+    short: "伪九", shortEn: "F9", score: 2.0, assist: 2.8, tackle: 0.3,
+    atk: 0.03, def: -0.02, poss: 0.05, foul: -0.01, chance: 0.03, fit: 0.02,
+  },
 };
 
 /** 各位置可选角色 */
 export const ROLES_BY_POS = {
-  GK: ["gk_std"],
-  DEF: ["cb_stop", "cb_ball", "fb_def", "fb_wb"],
-  MID: ["dm_hold", "cm_box", "am_play", "winger"],
-  ATT: ["st_poach", "st_target", "st_inside"],
+  GK: ["gk_std", "gk_sweeper"],
+  DEF: ["cb_central", "cb_ball", "cb_stop", "fb_def", "fb_wb", "fb_inverted"],
+  MID: ["dm_hold", "dm_playmaker", "dm_halfback", "cm_central", "cm_box", "cm_ballwinner", "cm_playmaker", "am_play", "am_shadow", "winger", "wide_playmaker", "wm_wingback"],
+  ATT: ["st_winger", "st_inside", "st_advanced", "st_poach", "st_target", "st_pressing", "st_false9"],
 };
 
 /** 默认角色（按位置大类） */
 export const DEFAULT_ROLE_BY_POS = {
   GK: "gk_std",
-  DEF: "cb_stop",
-  MID: "cm_box",
-  ATT: "st_poach",
+  DEF: "cb_central",
+  MID: "cm_central",
+  ATT: "st_advanced",
 };
 
 /**
@@ -1032,24 +1107,23 @@ export function defaultRoleForSlot(slot, index = 0, slots = []) {
 
   if (pos === "DEF") {
     if (wide) return "fb_wb";
-    // 中卫：略靠前的给一点出球（三中卫中的边中卫仍 cb）
-    return x > 42 && x < 58 ? "cb_ball" : "cb_stop";
+    return x > 42 && x < 58 ? "cb_ball" : "cb_central";
   }
   if (pos === "MID") {
     if (wide) return "winger";
     // 同列中最靠后的 ≈ 后腰；最靠前 ≈ 前腰
     if (y >= maxY - 4 && maxY - minY > 6) return "dm_hold";
     if (y <= minY + 4 && maxY - minY > 6) return "am_play";
-    return "cm_box";
+    return "cm_central";
   }
   if (pos === "ATT") {
-    if (wide) return "st_inside";
-    // 单箭头偏抢点；双箭头略支点
+    if (wide) return "st_winger";
+    // 双箭头以支点和突前搭配；单箭头默认突前前锋。
     const attCount = samePos.length;
     if (attCount >= 2 && index % 2 === 0) return "st_target";
-    return "st_poach";
+    return "st_advanced";
   }
-  return DEFAULT_ROLE_BY_POS[pos] || "cm_box";
+  return DEFAULT_ROLE_BY_POS[pos] || "cm_central";
 }
 
 export function roleLabel(roleId, lang = "zh") {

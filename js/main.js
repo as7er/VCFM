@@ -18,10 +18,8 @@ import {
   tacticsSliderLabel,
   STYLE_MOD,
   PLAYER_ROLES,
-  ROLES_BY_POS,
   roleLabel,
   roleShort,
-  defaultRoleForSlot,
   TEAM_TALKS,
   TEAM_TALK_IDS,
   teamTalkLabel,
@@ -39,7 +37,17 @@ import {
   positionSummary,
   positionCoverage,
   positionLabel as detailedPositionLabel,
+  slotPositionCode,
 } from "./player-positions.js";
+import {
+  PLAYER_DUTIES,
+  dutyLabel,
+  dutyShort,
+  roleDescription,
+  roleDetail,
+  roleSuitability,
+  rolesForDetailedPosition,
+} from "./player-roles.js";
 import {
   availableHabitTraining,
   cancelHabitTraining,
@@ -145,6 +153,8 @@ import {
   ensureMatchLineup,
   setSlotRole,
   getSlotRole,
+  setSlotDuty,
+  getSlotDuty,
   teamRoleMods,
 } from "./models.js";
 import {
@@ -5411,6 +5421,7 @@ const tacPick = {
   playerId: null,
   dragging: false,
 };
+let tacRoleSlot = 0;
 
 function clearTacPick() {
   tacPick.mode = null;
@@ -5795,17 +5806,17 @@ function renderTactics() {
         : "background:rgba(148,163,184,0.25);border-color:rgba(255,255,255,0.35)";
       const av = p ? playerAvatarHtml(p, club, 40) : "";
       const roleId = getSlotRole(club, i);
-      const roleOpts = (ROLES_BY_POS[slot.pos] || []).map((rid) => {
-        const r = PLAYER_ROLES[rid];
-        const lab = en ? r?.labelEn : r?.label;
-        return `<option value="${rid}"${rid === roleId ? " selected" : ""}>${escapeHtml(lab || rid)}</option>`;
-      });
-      const roleSel = `<select class="tac-role-sel" data-slot-role="${i}" title="${escapeHtml(
-        en ? "Player role" : "角色指令"
-      )}" aria-label="${escapeHtml(en ? "Role" : "角色")}">${roleOpts.join("")}</select>`;
+      const dutyId = getSlotDuty(club, i);
+      const roleBadge = p
+        ? `<button type="button" class="tac-role-badge" data-role-edit="${i}" draggable="false" title="${escapeHtml(
+            en ? "Edit role and duty" : "设置角色与职责"
+          )}">${escapeHtml(roleShort(roleId, en ? "en" : "zh"))} · ${escapeHtml(
+            dutyShort(dutyId, en ? "en" : "zh")
+          )}</button>`
+        : "";
       const isCore = p && p.id === coreId;
       const full = p
-        ? `${shirtNo != null ? `#${shirtNo} ` : ""}${p.name} · ${detailedPositionLabel(coverage?.target, en ? "en" : "zh")} ${coverage?.rating ?? 0}/20 · ${roleLabel(roleId, en ? "en" : "zh")}${isCore ? (en ? " · CORE" : " · 核心") : ""}${competitionEligible ? "" : (en ? " · NOT REGISTERED" : " · 未报名")}`
+        ? `${shirtNo != null ? `#${shirtNo} ` : ""}${p.name} · ${detailedPositionLabel(coverage?.target, en ? "en" : "zh")} ${coverage?.rating ?? 0}/20 · ${roleLabel(roleId, en ? "en" : "zh")}（${dutyLabel(dutyId, en ? "en" : "zh")}）${isCore ? (en ? " · CORE" : " · 核心") : ""}${competitionEligible ? "" : (en ? " · NOT REGISTERED" : " · 未报名")}`
         : positionLabel(slot.pos);
       const badge =
         shirtNo != null
@@ -5824,7 +5835,8 @@ function renderTactics() {
       const empty = !p ? " empty" : "";
       const coreCls = isCore ? " is-core" : "";
       const registrationCls = competitionEligible ? "" : " unavailable";
-      return `<div class="player-dot tac-slot${p ? " clickable-player" : ""}${oop}${empty}${coreCls}${registrationCls}"
+      const roleEditing = i === tacRoleSlot ? " role-editing" : "";
+      return `<div class="player-dot tac-slot${p ? " clickable-player" : ""}${oop}${empty}${coreCls}${registrationCls}${roleEditing}"
         style="left:${slot.x}%;top:${slot.y}%"
         title="${escapeHtml(full)}"
         draggable="${p ? "true" : "false"}"
@@ -5835,7 +5847,7 @@ function renderTactics() {
         <div class="circle kit-dot" style="${style}">${av || fallback}${badge}${isCore ? '<span class="pitch-core-star">⭐</span>' : ""}</div>
         <div class="name">${nameHtml}</div>
         ${coreBtn}
-        ${roleSel}
+        ${roleBadge}
       </div>`;
     })
     .join("");
@@ -5890,7 +5902,8 @@ function renderTactics() {
   }
 
   bindTacticsDragDrop();
-  bindTacticsRoleSelects();
+  renderTacticsRolePanel(club, { coachControlled });
+  bindTacticsRoleEditor();
   bindTacticsCoreButtons();
   const autoXiButton = $("#btn-auto-xi");
   if (autoXiButton) autoXiButton.disabled = coachControlled;
@@ -5931,31 +5944,122 @@ function bindTacticsCoreButtons() {
   });
 }
 
-/** 槽位角色下拉（每次 render 后重绑） */
-function bindTacticsRoleSelects() {
+function renderTacticsRolePanel(club, { coachControlled = false } = {}) {
+  const panel = $("#tac-role-panel");
+  if (!panel || !club) return;
+  ensureTactics(club);
+  const formation = FORMATIONS[club.tactics.formation] || FORMATIONS["4-3-3"];
+  const slots = formation.slots || [];
+  const players = getLineupPlayers(club);
+  if (!players.length) {
+    panel.innerHTML = `<p class="muted" style="margin:0;padding:0.75rem">${escapeHtml(
+      getLang() === "en" ? "Set a starting XI to edit roles." : "请先排出首发，再设置角色。"
+    )}</p>`;
+    return;
+  }
+  if (tacRoleSlot < 0 || tacRoleSlot >= slots.length || !players[tacRoleSlot]) {
+    tacRoleSlot = players.findIndex(Boolean);
+    if (tacRoleSlot < 0) tacRoleSlot = 0;
+  }
+  const slot = slots[tacRoleSlot];
+  const player = players[tacRoleSlot];
+  const detailed = slotPositionCode(slot, tacRoleSlot, slots);
+  const roleId = getSlotRole(club, tacRoleSlot);
+  const dutyId = getSlotDuty(club, tacRoleSlot);
+  const en = getLang() === "en";
+  const candidates = rolesForDetailedPosition(detailed);
+  const candidateCards = candidates
+    .map((candidateId) => {
+      const info = roleDetail(candidateId);
+      const fit = roleSuitability(player, candidateId, info.defaultDuty, detailed);
+      const active = candidateId === roleId ? " active" : "";
+      return `<button type="button" class="tac-role-card${active}" data-role-choice="${escapeHtml(candidateId)}" ${coachControlled ? "disabled" : ""}>
+        <strong>${escapeHtml(roleLabel(candidateId, en ? "en" : "zh"))}</strong>
+        <span class="tac-role-fit">${escapeHtml(en ? `Fit ${fit.rating}/20` : `适配 ${fit.rating}/20`)}</span>
+        <span>${escapeHtml(en ? info.descriptionEn : info.description)}</span>
+      </button>`;
+    })
+    .join("");
+  const currentInfo = roleDetail(roleId);
+  const currentFit = roleSuitability(player, roleId, dutyId, detailed);
+  const matched = currentFit.matched
+    .map((habitId) => `<span>${escapeHtml(en ? `Natural: ${habitLabel(habitId, "en")}` : `契合：${habitLabel(habitId)}`)}</span>`)
+    .join("");
+  const conflicts = currentFit.conflicts
+    .map((habitId) => `<span class="conflict">${escapeHtml(en ? `Conflict: ${habitLabel(habitId, "en")}` : `冲突：${habitLabel(habitId)}`)}</span>`)
+    .join("");
+  const dutyButtons = currentInfo.duties
+    .map((id) => `<button type="button" class="tac-duty-btn${id === dutyId ? " active" : ""}" data-duty-choice="${escapeHtml(id)}" ${coachControlled ? "disabled" : ""}>
+      ${escapeHtml(dutyLabel(id, en ? "en" : "zh"))} <small>${escapeHtml(dutyShort(id, en ? "en" : "zh"))}</small>
+    </button>`)
+    .join("");
+  const avatar = playerAvatarHtml(player, club, 42);
+  panel.innerHTML = `
+    <div class="tac-role-panel-head">
+      ${avatar ? `<div class="avatar">${avatar}</div>` : ""}
+      <div class="tac-role-panel-player">
+        <strong>${escapeHtml(`#${player.number ?? "·"} ${player.name}`)}</strong>
+        <span class="muted">${escapeHtml(detailedPositionLabel(detailed, en ? "en" : "zh"))} · ${escapeHtml(roleLabel(roleId, en ? "en" : "zh"))} · ${escapeHtml(dutyLabel(dutyId, en ? "en" : "zh"))}</span>
+      </div>
+      <span class="muted" style="margin-left:auto">${escapeHtml(`${tacRoleSlot + 1}/${slots.length}`)}</span>
+    </div>
+    <div class="tac-role-list">${candidateCards}</div>
+    <div class="tac-role-detail">
+      <div class="muted">${escapeHtml(roleDescription(roleId, en ? "en" : "zh"))}</div>
+      <div class="tac-duty-list">${dutyButtons}</div>
+      <div class="tac-role-habit-facts">${matched || conflicts ? `${matched}${conflicts}` : `<span>${escapeHtml(en ? "No direct habit fit or conflict recorded." : "暂无直接习惯契合或冲突记录。")}</span>`}</div>
+      <span class="hint">${escapeHtml(
+        coachControlled
+          ? (en ? "The coaching staff controls role selection for this team." : "当前由教练团队负责角色安排。")
+          : (en ? "Role fit reads position, attributes and playing habits; it does not change ability." : "角色适配读取位置、属性和个人习惯，不会改变球员能力。")
+      )}</span>
+    </div>`;
+}
+
+function bindTacticsRoleEditor() {
   const pitch = $("#pitch");
-  if (!pitch) return;
-  pitch.querySelectorAll("[data-slot-role]").forEach((sel) => {
-    sel.disabled = isFullyDelegated(world, getUserClub(world), "tactics");
-    sel.addEventListener("mousedown", (e) => e.stopPropagation());
-    sel.addEventListener("click", (e) => e.stopPropagation());
-    sel.addEventListener("change", (e) => {
-      e.stopPropagation();
-      if (!world) return;
+  const panel = $("#tac-role-panel");
+  if (!pitch || !panel) return;
+  pitch.querySelectorAll("[data-role-edit]").forEach((button) => {
+    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+    button.addEventListener("mousedown", (event) => event.stopPropagation());
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      tacRoleSlot = Number(button.dataset.roleEdit) || 0;
+      pitch.querySelectorAll(".role-editing").forEach((el) => el.classList.remove("role-editing"));
+      button.closest(".tac-slot")?.classList.add("role-editing");
+      renderTacticsRolePanel(getUserClub(world), {
+        coachControlled: isFullyDelegated(world, getUserClub(world), "tactics"),
+      });
+      bindTacticsRoleChoices();
+    });
+  });
+  bindTacticsRoleChoices();
+}
+
+function bindTacticsRoleChoices() {
+  const panel = $("#tac-role-panel");
+  if (!panel) return;
+  panel.querySelectorAll("[data-role-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
       const club = getUserClub(world);
-      const slot = +sel.getAttribute("data-slot-role");
-      const res = setSlotRole(club, slot, sel.value);
-      if (!res.ok) {
-        toast(res.msg || t("tac.roleFail"));
-        return;
-      }
+      if (!club || isFullyDelegated(world, club, "tactics")) return;
+      const result = setSlotRole(club, tacRoleSlot, button.dataset.roleChoice);
+      if (!result.ok) return toast(result.msg || t("tac.roleFail"));
       saveGame(world);
-      renderTacticsSummary();
-      toast(
-        t("tac.roleSet", {
-          role: roleLabel(sel.value, getLang() === "en" ? "en" : "zh"),
-        })
-      );
+      renderTactics();
+      toast(t("tac.roleSet", { role: roleLabel(result.roleId, getLang() === "en" ? "en" : "zh") }));
+    });
+  });
+  panel.querySelectorAll("[data-duty-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const club = getUserClub(world);
+      if (!club || isFullyDelegated(world, club, "tactics")) return;
+      const result = setSlotDuty(club, tacRoleSlot, button.dataset.dutyChoice);
+      if (!result.ok) return toast(result.msg || "职责设置失败");
+      saveGame(world);
+      renderTactics();
     });
   });
 }
@@ -9162,12 +9266,15 @@ function renderHtRoleEditors() {
   const slots = formation.slots || [];
   const lineup = club.tactics.lineup || [];
   const roles = club.tactics.roles || [];
+  const duties = club.tactics.duties || [];
   const rows = slots
     .map((slot, i) => {
       const pid = lineup[i];
       const p = club.players.find((x) => x.id === pid);
-      const rid = roles[i] || defaultRoleForSlot(slot, i, slots);
-      const opts = (ROLES_BY_POS[slot.pos] || [])
+      const detailed = slotPositionCode(slot, i, slots);
+      const rid = roles[i] || getSlotRole(club, i);
+      const dutyId = duties[i] || getSlotDuty(club, i);
+      const opts = rolesForDetailedPosition(detailed)
         .map((id) => {
           const r = PLAYER_ROLES[id];
           if (!r) return "";
@@ -9175,11 +9282,15 @@ function renderHtRoleEditors() {
           return `<option value="${id}" ${id === rid ? "selected" : ""}>${escapeHtml(lab)}</option>`;
         })
         .join("");
+      const dutyOpts = roleDetail(rid).duties
+        .map((id) => `<option value="${id}" ${id === dutyId ? "selected" : ""}>${escapeHtml(dutyLabel(id, en ? "en" : "zh"))}</option>`)
+        .join("");
       const name = p ? escapeHtml(playerDisplaySurname(p.name, p.nationality) || p.name) : "—";
       return `<label class="ht-role-edit">
-        <span class="ht-role-edit-pos">${escapeHtml(positionLabel(slot.pos))}</span>
+        <span class="ht-role-edit-pos">${escapeHtml(detailedPositionLabel(detailed, en ? "en" : "zh"))}</span>
         <span class="ht-role-edit-name">${name}</span>
         <select data-ht-role-slot="${i}">${opts}</select>
+        <select data-ht-duty-slot="${i}">${dutyOpts}</select>
       </label>`;
     })
     .join("");
@@ -9190,6 +9301,17 @@ function renderHtRoleEditors() {
     </div>
     <div class="ht-role-edit-grid">${rows}</div>
   `;
+  box.querySelectorAll("select[data-ht-role-slot]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const dutySelect = box.querySelector(`select[data-ht-duty-slot="${select.dataset.htRoleSlot}"]`);
+      if (!dutySelect) return;
+      const info = roleDetail(select.value);
+      dutySelect.innerHTML = info.duties
+        .map((id) => `<option value="${id}">${escapeHtml(dutyLabel(id, en ? "en" : "zh"))}</option>`)
+        .join("");
+      dutySelect.value = info.defaultDuty;
+    });
+  });
 }
 
 function collectHtRoles() {
@@ -9202,6 +9324,18 @@ function collectHtRoles() {
     roles[+sel.dataset.htRoleSlot] = sel.value;
   });
   return roles;
+}
+
+function collectHtDuties() {
+  const box = $("#match-ht-roles");
+  if (!box) return null;
+  const sels = box.querySelectorAll("select[data-ht-duty-slot]");
+  if (!sels.length) return null;
+  const duties = [];
+  sels.forEach((sel) => {
+    duties[+sel.dataset.htDutySlot] = sel.value;
+  });
+  return duties;
 }
 
 /** 中场队内讲话选项（按比分推荐默认） */
@@ -9631,6 +9765,7 @@ async function finishHalfTime(applyOrders) {
 
   const htTalk = coachRunsMatch ? null : getSelectedTeamTalk($("#match-ht-talk"), "ht-team-talk");
   const htRoles = coachRunsMatch ? null : collectHtRoles();
+  const htDuties = coachRunsMatch ? null : collectHtDuties();
   const orders = coachRunsMatch
     ? {}
     : applyOrders
@@ -9642,6 +9777,7 @@ async function finishHalfTime(applyOrders) {
         width: +($("#ht-width")?.value || 3),
         defensiveLine: +($("#ht-def-line")?.value || 3),
         roles: htRoles || undefined,
+        duties: htDuties || undefined,
         subs: pendingSubs.map((s) => ({ outId: s.outId, inId: s.inId })),
         teamTalk: htTalk,
       }

@@ -101,6 +101,33 @@ try {
     await openTab(page, tab);
     await page.waitForTimeout(100);
     await assertNoHorizontalOverflow(page, `desktop ${tab}`);
+    if (tab === "tactics") {
+      // v209 角色/职责面板：每个首发槽都有角色徽章，点击可打开角色面板并切换角色/职责
+      await page.waitForSelector("#pitch .tac-slot");
+      assert.equal(await page.locator("#pitch .tac-slot").count(), 11);
+      const roleBadges = page.locator("#pitch .tac-role-badge");
+      assert.ok((await roleBadges.count()) >= 11, "every on-pitch slot must show a role badge");
+      await roleBadges.first().click();
+      await page.waitForSelector("#tac-role-panel .tac-role-card");
+      const cards = page.locator("#tac-role-panel .tac-role-card");
+      assert.ok((await cards.count()) >= 2, "role panel must offer multiple candidate roles");
+      assert.ok((await page.locator("#tac-role-panel .tac-duty-btn").count()) >= 1, "role panel must show duty options");
+      const beforeRole = await page.locator("#tac-role-panel .tac-role-card.active").innerText();
+      await cards.nth(1).click();
+      await page.waitForFunction(
+        (prev) => document.querySelector("#tac-role-panel .tac-role-card.active")?.textContent !== prev,
+        beforeRole
+      );
+      await page.waitForSelector("#tac-role-panel .tac-duty-btn");
+      const dutyButtons = page.locator("#tac-role-panel .tac-duty-btn");
+      if ((await dutyButtons.count()) > 1) {
+        await dutyButtons.nth(1).click();
+        await page.waitForTimeout(80);
+      }
+      assert.equal(await page.locator("#tac-role-panel .tac-role-card.active").count(), 1, "exactly one role must stay active");
+      assert.ok((await page.locator("#tac-role-panel .tac-role-habit-facts").innerText()).trim().length > 0,
+        "role panel must explain habit fit or conflict");
+    }
     if (tab === "finance") {
       await page.waitForSelector("#finance-sponsorship .sponsor-offer");
       assert.equal(await page.locator("#finance-sponsorship .sponsor-offer").count(), 3);
@@ -190,6 +217,11 @@ try {
   await assertNoHorizontalOverflow(page, "mobile finance");
   await openTab(page, "squad");
   await assertNoHorizontalOverflow(page, "mobile squad planning");
+  await openTab(page, "tactics");
+  await page.waitForSelector("#pitch .tac-slot");
+  await page.locator("#pitch .tac-role-badge").first().click();
+  await page.waitForSelector("#tac-role-panel .tac-role-card");
+  await assertNoHorizontalOverflow(page, "mobile tactics role panel");
   await openTab(page, "dashboard");
   await assertNoHorizontalOverflow(page, "mobile dashboard");
   await openTab(page, "clubs");

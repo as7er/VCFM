@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=208" />
+  <link rel="stylesheet" href="css/style.css?v=209" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -609,8 +609,8 @@
 
         <!-- 战术 -->
         <div id="tab-tactics" class="tab-panel">
-          <div class="grid-2">
-            <div class="card">
+          <div class="grid-2 tactics-workspace">
+            <div class="card tactics-pitch-card">
               <h2 data-i18n="tac.formation">阵型</h2>
               <select id="formation-select"></select>
               <p class="hint" id="formation-desc" style="margin:0.35rem 0 0.6rem"></p>
@@ -622,9 +622,9 @@
                 </div>
                 <div id="tac-bench" class="tac-bench" role="list"></div>
               </div>
-              <p class="hint" data-i18n="tac.pitchHint" style="margin-top:0.6rem">拖拽换人；每人下方可选角色指令。点名牌可查看资料。首发会尽量保留到开球。</p>
+              <p class="hint" data-i18n="tac.pitchHint" style="margin-top:0.6rem">拖拽或点选换人；点击球员下方的角色标签，在右侧设置角色与职责。点名牌可查看资料。</p>
             </div>
-            <div class="card">
+            <div class="card tactics-controls-card">
               <h2 data-i18n="tac.style">战术倾向</h2>
               <div class="tac-presets" id="tac-presets" role="group" aria-label="presets"></div>
               <label><span data-i18n="tac.styleLabel">风格</span>
@@ -653,6 +653,7 @@
                 <span id="defensive-line-val" class="tac-slider-val">3 · 标准</span>
               </label>
               <div id="tac-summary" class="tac-summary" aria-live="polite"></div>
+              <div id="tac-role-panel" class="tac-role-panel" aria-live="polite"></div>
               <div class="tac-core-block">
                 <h3 class="tac-core-title" data-i18n="tac.core">核心球员</h3>
                 <p class="hint" data-i18n="tac.coreHint" style="margin:0.2rem 0 0.45rem">
@@ -1421,12 +1422,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=208"></script>
+  <script type="module" src="js/main.js?v=209"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v208";
+        var CURRENT_CACHE = "vcfm-v209";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1437,7 +1438,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=208").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=209").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});

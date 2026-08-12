@@ -171,6 +171,35 @@ export function validateSaveStructure(world, options = {}) {
         lineupIds.add(playerId);
       }
     }
+    // 战术角色与职责：结构与 lineup 同长、每项为非空字符串；合法角色/职责 id
+    // 由 ensureTactics / ensureLineupRoles 在读取时兜底，这里只做可解释的结构校验。
+    if (club.tactics?.roles != null || club.tactics?.duties != null) {
+      if (!Array.isArray(club.tactics.roles) || !Array.isArray(club.tactics.duties)) {
+        throw new Error(`invalid save: club ${club.id} tactics roles/duties are invalid`);
+      }
+      for (const [index, roleId] of club.tactics.roles.entries()) {
+        if (typeof roleId !== "string" || !roleId.trim()) {
+          throw new Error(`invalid save: club ${club.id} tactics role ${index} is invalid`);
+        }
+      }
+      for (const [index, dutyId] of club.tactics.duties.entries()) {
+        if (typeof dutyId !== "string" || !dutyId.trim()) {
+          throw new Error(`invalid save: club ${club.id} tactics duty ${index} is invalid`);
+        }
+      }
+    }
+    if (
+      club.tactics?.coachRoleIdentityId != null &&
+      typeof club.tactics.coachRoleIdentityId !== "string"
+    ) {
+      throw new Error(`invalid save: club ${club.id} coach role identity is invalid`);
+    }
+    if (
+      club.tactics?.coachRoleIdentityVersion != null &&
+      !Number.isFinite(Number(club.tactics.coachRoleIdentityVersion))
+    ) {
+      throw new Error(`invalid save: club ${club.id} coach role identity version is invalid`);
+    }
     clubIds.add(club.id);
   }
   if (typeof world.userClubId !== "string" || !clubIds.has(world.userClubId)) {
