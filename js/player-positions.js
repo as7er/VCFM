@@ -192,8 +192,8 @@ export function derivePositionRatings(player) {
 
 export function ensurePlayerPositionProfile(player) {
   if (!player) return false;
-  if (validatedProfiles.has(player)) return false;
   const current = player.positionProfile;
+  if (validatedProfiles.has(player) && current && Number(current.version || 0) >= PLAYER_POSITION_VERSION) return false;
   if (!current || typeof current !== "object" || Number(current.version || 0) < PLAYER_POSITION_VERSION) {
     const ratings = derivePositionRatings(player);
     const codes = GROUP_CODES[player.pos] || GROUP_CODES.MID;

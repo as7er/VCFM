@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v211";
+const CACHE = "vcfm-v212";
 const ASSETS = [
   "./",
   "./index.html",
@@ -36,6 +36,7 @@ const ASSETS = [
   "./js/models.js",
   "./js/world-invariants.js",
   "./js/player-positions.js",
+  "./js/player-attributes.js",
   "./js/player-roles.js",
   "./js/player-habits.js",
   "./js/appearance.js",

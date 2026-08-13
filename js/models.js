@@ -26,6 +26,13 @@ import {
 } from "./player-positions.js";
 import { ensurePlayerHabits } from "./player-habits.js";
 import {
+  ensurePlayerAttributeProfile,
+  generatePlayerAttributes,
+  normalizePlayerAttributeCoherence,
+  weightedDevelopmentAttributes,
+} from "./player-attributes.js";
+export { ensurePlayerAttributeProfile } from "./player-attributes.js";
+import {
   normalizeDutyForRole,
   roleFitsPosition,
 } from "./player-roles.js";
@@ -59,14 +66,6 @@ function clamp(v, a = 1, b = 20) {
 
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function gauss(mean, spread) {
-  // ponytail: Box-Muller 简化，足够生成属性分布
-  const u = 1 - Math.random();
-  const v = Math.random();
-  const z = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-  return mean + z * spread;
 }
 
 const TALENT_MODEL_VERSION = 1;
@@ -362,6 +361,7 @@ function setPlayerOverall(p, target) {
     current = playerOverall(p);
   }
   p.ovr = current;
+  normalizePlayerAttributeCoherence(p);
   return current;
 }
 
@@ -482,8 +482,8 @@ export function retireChance(age) {
 
 const AGEING_ATTRS = {
   physical: ["pace", "stamina", "physical", "strength", "reflexes"],
-  technical: ["shooting", "passing", "dribbling", "finishing", "tackling", "handling", "kicking"],
-  mental: ["vision", "marking", "positioning"],
+  technical: ["shooting", "passing", "dribbling", "finishing", "tackling", "handling", "kicking", "heading", "crossing"],
+  mental: ["vision", "marking", "positioning", "decisions"],
 };
 
 const PHYSICAL_DECLINE_AGE = { GK: 34, DEF: 32, MID: 31, ATT: 30 };
@@ -547,7 +547,7 @@ export function agePlayerOneYear(p, context = {}) {
   }
   if (!declined && p.age <= 24 && p.potential != null && p.ovr < p.potential && Math.random() < 0.35) {
     // 年轻球员赛季末小幅成长
-    const keys = Object.keys(p.attrs || {}).filter((k) => (p.attrs[k] || 0) < 20);
+    const keys = weightedDevelopmentAttributes(p, Object.keys(p.attrs || {}));
     if (keys.length) {
       const k = keys[Math.floor(Math.random() * keys.length)];
       p.attrs[k] = Math.min(20, p.attrs[k] + 1);
@@ -870,50 +870,6 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     ? NATIONALITIES.find((item) => item.code === opts.nationality) || pickPlayerNation(opts.homeNation, isYouth, power)
     : pickPlayerNation(opts.homeNation, isYouth, power);
   const mean = power / 5 + nationalTalentOffset(nation.code); // 俱乐部档位为主，国籍层级只作有限修正
-  const spread = isYouth ? 1.8 : 2.2;
-  const g = () => clamp(gauss(mean, spread));
-
-  const attrs = {
-    pace: g(),
-    shooting: g(),
-    passing: g(),
-    dribbling: g(),
-    defending: g(),
-    physical: g(),
-    // 细分
-    finishing: g(),
-    tackling: g(),
-    marking: g(),
-    strength: g(),
-    stamina: g(),
-    vision: g(),
-    reflexes: g(),
-    handling: g(),
-    positioning: g(),
-    kicking: g(),
-  };
-
-  // 位置偏向
-  if (pos === "GK") {
-    attrs.reflexes = clamp(attrs.reflexes + 3);
-    attrs.handling = clamp(attrs.handling + 3);
-    attrs.positioning = clamp(attrs.positioning + 2);
-    attrs.shooting = clamp(attrs.shooting - 4);
-  } else if (pos === "DEF") {
-    attrs.tackling = clamp(attrs.tackling + 3);
-    attrs.marking = clamp(attrs.marking + 2);
-    attrs.strength = clamp(attrs.strength + 1);
-  } else if (pos === "MID") {
-    attrs.passing = clamp(attrs.passing + 2);
-    attrs.vision = clamp(attrs.vision + 2);
-    attrs.stamina = clamp(attrs.stamina + 1);
-  } else {
-    attrs.shooting = clamp(attrs.shooting + 2);
-    attrs.finishing = clamp(attrs.finishing + 3);
-    attrs.dribbling = clamp(attrs.dribbling + 1);
-    attrs.pace = clamp(attrs.pace + 1);
-  }
-
   const age = isYouth ? rand(15, 18) : rand(17, 34);
   const p = {
     id: uid(isYouth ? "yt" : "pl"),
@@ -924,7 +880,7 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     nationName: nation.name,
     nationNameEn: nation.nameEn,
     nationFlag: nation.flag,
-    attrs,
+    attrs: {},
     fitness: rand(85, 100),
     morale: rand(55, 85),
     clubId,
@@ -949,6 +905,7 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     number: null,
     talentModelVersion: TALENT_MODEL_VERSION,
   };
+  generatePlayerAttributes(p, mean);
   // appearance identity persisted at create time
   {
     const look = generatePlayerAppearance(p);

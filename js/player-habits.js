@@ -1,5 +1,7 @@
 /** 球员个人踢球习惯：持久化的行为倾向，只改变动作选择，不改属性或成功率。 */
 
+import { preferredHabitsForAttributeArchetype } from "./player-attributes.js";
+
 export const PLAYER_HABITS_VERSION = 1;
 
 export const PLAYER_HABITS = Object.freeze({
@@ -215,7 +217,8 @@ function habitScore(player, definition) {
     ? attributes.reduce((sum, key) => sum + attr(player, key), 0) / attributes.length
     : Number(player?.ovr) || 10;
   const positionFit = player?.pos === "GK" ? 1.5 : definition.positions[0] === player?.pos ? 0.45 : 0;
-  return ability + positionFit + stableUnit(`${player?.id}:${definition.id}:habit`) * 4.2;
+  const archetypeFit = preferredHabitsForAttributeArchetype(player).includes(definition.id) ? 2.4 : 0;
+  return ability + positionFit + archetypeFit + stableUnit(`${player?.id}:${definition.id}:habit`) * 4.2;
 }
 
 function deriveInitialHabits(player) {

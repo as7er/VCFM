@@ -16,6 +16,7 @@ import {
   recordPlayerDevelopment,
 } from "./player-pathway.js";
 import { ensurePlayerPositionProfile } from "./player-positions.js";
+import { weightedDevelopmentAttributes } from "./player-attributes.js";
 import {
   habitLabel,
   processHabitTrainingWeek,
@@ -266,7 +267,7 @@ function growFirstTeamPlayer(player, growthRate, focusCfg, context = {}) {
   const rate = growthRate * ageGrowthFactor(player.age);
   if (!chance(rate)) return false;
 
-  const keys = pickAttrKeys(player, focusCfg).filter((k) => (player.attrs?.[k] || 0) < 20);
+  const keys = weightedDevelopmentAttributes(player, pickAttrKeys(player, focusCfg));
   if (!keys.length) return false;
 
   const k = keys[Math.floor(rng() * keys.length)];

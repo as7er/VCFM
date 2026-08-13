@@ -4,7 +4,16 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v211**（比赛日并行空间模拟）
+> 缓存：**vcfm-v212**（位置角色属性原型）
+
+## v212 位置角色属性原型（2026-08-13）
+
+- 球员不再逐项独立随机属性；按门将、中卫、边后卫、防守中场、组织核心、全能中场、边路中场、边锋、内锋、突前、支点、压迫前锋和伪九号等公开原型分配 1–20 能力
+- 总体能力与既有世界稀缺标尺保持一致，原型只重分配关键、辅助和弱项属性，不向比赛写入隐藏胜率或角色加成
+- 旧档按球员既有细分位置与属性专长选择最近原型，一次性温和重塑并保留 OVR、潜力、年龄、历史和训练形成的个体差异
+- 青训、赛季成长和一线队训练按原型关键属性加权但仍可改善弱项；个人习惯优先匹配属性原型，继续只改变动作选择而不提高成功率
+- 新增 `js/player-attributes.js` 与 `scripts/player-attributes-audit.mjs`；缓存 `vcfm-v212`
+- 已验证：`node scripts/verify.mjs`、8 场标准档真实性样本、`node js/sim/_p5_integration.mjs`、`node scripts/background-spatial-worker-audit.mjs`、`npm run test:browser` 与 `git diff --check`；标准档 2.13 球/场、8.5% 转化、75.3% 传球成功率、零停滞，强队 1.69 分/场且总比分 33–21
 
 ## v211 比赛日并行空间模拟（2026-08-13）
 

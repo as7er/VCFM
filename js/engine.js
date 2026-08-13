@@ -31,6 +31,7 @@ import {
 import { STYLE_MOD, FORMATIONS, POS_LABEL } from "./data.js";
 import { assertWorldInvariantsWhenEnabled } from "./world-invariants.js";
 import { positionGroup, positionRating } from "./player-positions.js";
+import { weightedDevelopmentAttributes } from "./player-attributes.js";
 import { processInjuryRecoveryDay } from "./injuries.js";
 import {
   archiveDevelopmentSeason,
@@ -509,7 +510,7 @@ function clubById(world, id) {
 const ATTR_KEYS = [
   "pace", "shooting", "passing", "dribbling", "defending", "physical",
   "finishing", "tackling", "marking", "strength", "stamina", "vision",
-  "reflexes", "handling", "positioning", "kicking",
+  "reflexes", "handling", "positioning", "kicking", "heading", "crossing", "decisions",
 ];
 
 function staffRatingSafe(club, role) {
@@ -523,7 +524,7 @@ function growYouthPlayer(player, growthRate, context = {}) {
   let grew = false;
   // 每周有机会涨 1 点某项属性
   if (chance(growthRate)) {
-    const keys = ATTR_KEYS.filter((k) => (player.attrs[k] || 0) < 20);
+    const keys = weightedDevelopmentAttributes(player, ATTR_KEYS);
     if (keys.length) {
       const k = keys[Math.floor(rng() * keys.length)];
       // 未达潜力时才涨

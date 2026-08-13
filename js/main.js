@@ -55,8 +55,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=211";
-import { clubCrestHtml } from "./club-crest.js?v=211";
+import { nationFlagHtml } from "./flags.js?v=212";
+import { clubCrestHtml } from "./club-crest.js?v=212";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -123,6 +123,7 @@ import {
   fillYouthSquad,
   ensurePlayerHistory,
   ensureRealisticPlayerTalent,
+  ensurePlayerAttributeProfile,
   ensureFootballProfile,
   calibrateWorldAbilityDistribution,
   ABILITY_DISTRIBUTION_VERSION,
@@ -314,7 +315,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=211";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=212";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -380,7 +381,8 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=211";
+} from "./avatar.js?v=212";
+import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -472,7 +474,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=211").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=212").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1156,6 +1158,7 @@ function repairWorldFields(w) {
     for (const p of c.players || []) {
       if (p.potential == null) p.potential = Math.min(20, (p.ovr || 10) + 1);
       ensureRealisticPlayerTalent(p);
+      ensurePlayerAttributeProfile(p);
       ensureFootballProfile(p);
       ensurePlayerHistory(p);
       ensureIntl(p);
@@ -1166,6 +1169,7 @@ function repairWorldFields(w) {
     for (const p of c.youth.players || []) {
       if (p.potential == null) p.potential = Math.min(20, (p.ovr || 10) + 1);
       ensureRealisticPlayerTalent(p);
+      ensurePlayerAttributeProfile(p);
       ensureFootballProfile(p);
       ensurePlayerHistory(p);
       ensureIntl(p);
@@ -1178,11 +1182,13 @@ function repairWorldFields(w) {
   }
   for (const p of w.freeAgents || []) {
     ensureRealisticPlayerTalent(p);
+    ensurePlayerAttributeProfile(p);
     ensureFootballProfile(p);
     ensurePlayerInjury(p);
   }
   for (const p of w.retiredPlayers || []) {
     ensureRealisticPlayerTalent(p);
+    ensurePlayerAttributeProfile(p);
     ensureFootballProfile(p);
     ensurePlayerInjury(p);
   }
@@ -4595,6 +4601,7 @@ function showPlayerModal(playerId, context = {}) {
     <p class="muted">
        <span class="badge ${player.pos}">${en ? player.pos : POS_LABEL[player.pos]}</span>
        · ${en ? "Natural / compatible" : "主位 / 兼容位置"} ${escapeHtml(detailedPosition)}
+       ${!isOther || (playerScout?.level || 0) >= 68 ? ` · ${en ? "Profile" : "属性类型"} ${escapeHtml(attributeArchetypeLabel(player, en ? "en" : "zh"))}` : ""}
        · ${nationLabel(player)}
        · ${en ? `Age ${player.age}` : `${player.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${isOther ? "" : ovrClass(player.ovr)}">${escapeHtml(ovrShow)}</strong>
        · ${en ? "Potential" : "潜力"} <strong>${escapeHtml(String(pot))}</strong>

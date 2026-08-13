@@ -1899,6 +1899,10 @@ export function applySubstitution(state, club, outId, inId, minute, silent = fal
   const idx = lineup.indexOf(outId);
   if (idx < 0) return { ok: false, msg: "下场球员不在首发" };
   if (lineup.includes(inId)) return { ok: false, msg: "上场球员已在场上" };
+  const alreadyRemoved = state.events.some(
+    (event) => event.type === "sub" && event.teamId === club.id && event.outId === inId
+  );
+  if (alreadyRemoved) return { ok: false, msg: "该球员本场已被换下，不能再次上场" };
   const inn = club.players.find((p) => p.id === inId);
   const outP = club.players.find((p) => p.id === outId);
   if (!inn || !outP) return { ok: false, msg: "球员无效" };

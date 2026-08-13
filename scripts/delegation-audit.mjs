@@ -14,6 +14,7 @@ import {
   applyManagedTeamTalk,
   applyTeamTalk,
   applyUserHalfTime,
+  applySubstitution,
   createMatchSession,
   playFirstHalf,
   playSecondHalf,
@@ -68,6 +69,20 @@ function assertNoSubstituteReentry(events, clubId) {
     assert.ok(!removed.has(substitution.inId), "a substituted player must not return to the same match");
     removed.add(substitution.outId);
   }
+}
+
+{
+  const { world, club } = testWorld();
+  autoLineup(club);
+  const state = createMatchSession(world, fixture());
+  state.eligiblePlayerIds.home = new Set(club.players.map((player) => player.id));
+  const original = club.tactics.lineup[1];
+  const firstBench = club.players.find((candidate) => !club.tactics.lineup.includes(candidate.id));
+  assert.equal(applySubstitution(state, club, original, firstBench.id, 60).ok, true);
+  const secondBench = club.players.find((candidate) => !club.tactics.lineup.includes(candidate.id) && candidate.id !== original);
+  assert.equal(applySubstitution(state, club, firstBench.id, secondBench.id, 70).ok, true);
+  assert.equal(applySubstitution(state, club, secondBench.id, firstBench.id, 80).ok, false,
+    "a substituted player must never re-enter, regardless of the random match path");
 }
 
 {
