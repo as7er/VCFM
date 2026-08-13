@@ -713,8 +713,7 @@ export function releaseYouth(world, clubId, playerId) {
 
 // 青训升级：走 facilities 工期系统（re-export 见文件底部 import）
 
-/** 推进一天：训练恢复、AI 比赛、工资 */
-export function advanceDay(world, options = {}) {
+function beginAdvanceDay(world) {
   // 待业：日历仍推进（生成工作邀请），但不能经营旧队比赛
   if (world.sacked) {
     world.day += 1;
@@ -724,11 +723,14 @@ export function advanceDay(world, options = {}) {
     ensureManagerJob(world);
     processManagerJobsDay(world);
     return {
-      userMatches: [],
-      sacked: true,
-      unemployed: world.managerJob?.status === "unemployed",
-      events: [],
-      offers: pendingJobOffers(world),
+      finished: true,
+      result: {
+        userMatches: [],
+        sacked: true,
+        unemployed: world.managerJob?.status === "unemployed",
+        events: [],
+        offers: pendingJobOffers(world),
+      },
     };
   }
 
@@ -804,26 +806,35 @@ export function advanceDay(world, options = {}) {
   const todayCompetitions = competitionFixturesOnDay(world, world.day);
   const today = [...todayLeague, ...todayCompetitions];
   const userMatches = [];
-  const aiMatchResults = [];
+  const aiFixtures = [];
+  const keyMatchIds = [];
   for (const f of today) {
     const isUser = f.home === world.userClubId || f.away === world.userClubId;
     if (isUser) {
       userMatches.push(f);
     } else {
-      const result = simulateMatch(world, f, {
-        engineMode: options.aiEngineMode,
-        simulationProfile: options.aiSimulationProfile,
-      });
-      // 记录关键AI比赛（德比、争冠、保级）
+      aiFixtures.push(f);
       if (f.derby || isTopTableClash(world, f) || isRelegationClash(world, f)) {
-        aiMatchResults.push({
-          home: clubById(world, f.home)?.short || clubById(world, f.home)?.name,
-          away: clubById(world, f.away)?.short || clubById(world, f.away)?.name,
-          homeGoals: result?.homeGoals || f.homeGoals,
-          awayGoals: result?.awayGoals || f.awayGoals,
-          derby: f.derby,
-        });
+        keyMatchIds.push(f.id);
       }
+    }
+  }
+  return { finished: false, events, userClub, userMatches, aiFixtures, keyMatchIds };
+}
+
+function finishAdvanceDay(world, context) {
+  const { events, userClub, userMatches, aiFixtures, keyMatchIds = [] } = context;
+  const aiMatchResults = [];
+  for (const f of aiFixtures) {
+    // 记录关键AI比赛（德比、争冠、保级）
+    if (keyMatchIds.includes(f.id)) {
+      aiMatchResults.push({
+        home: clubById(world, f.home)?.short || clubById(world, f.home)?.name,
+        away: clubById(world, f.away)?.short || clubById(world, f.away)?.name,
+        homeGoals: f.homeGoals,
+        awayGoals: f.awayGoals,
+        derby: f.derby,
+      });
     }
   }
   if (aiMatchResults.length > 0) {
@@ -936,6 +947,32 @@ export function advanceDay(world, options = {}) {
       (world.sacked ? { sacked: true, msg: world.sackedReason } : null),
     events, // 返回事件列表供界面展示
   };
+}
+
+/** 推进一天：训练恢复、AI 比赛、工资 */
+export function advanceDay(world, options = {}) {
+  const context = beginAdvanceDay(world);
+  if (context.finished) return context.result;
+  for (const fixture of context.aiFixtures) {
+    simulateMatch(world, fixture, {
+      engineMode: options.aiEngineMode,
+      simulationProfile: options.aiSimulationProfile,
+    });
+  }
+  return finishAdvanceDay(world, context);
+}
+
+/** Calendar worker path: expensive match clocks may run in a dedicated pool. */
+export async function advanceDayWithMatchRunner(world, options = {}, matchRunner) {
+  const context = beginAdvanceDay(world);
+  if (context.finished) return context.result;
+  if (context.aiFixtures.length) {
+    await matchRunner(world, context.aiFixtures, {
+      engineMode: options.aiEngineMode,
+      simulationProfile: options.aiSimulationProfile,
+    });
+  }
+  return finishAdvanceDay(world, context);
 }
 
 // 辅助函数：检查各种关键事件
@@ -1639,6 +1676,90 @@ export function advanceToNextMatchDay(world, maxDays = 60, options = {}) {
   };
 }
 
+export async function advanceToNextMatchDayWithMatchRunner(
+  world,
+  maxDays = 60,
+  options = {},
+  matchRunner
+) {
+  if (world.sacked) {
+    return { ok: false, msg: "你已被解雇", days: 0, userMatches: [], sacked: true, events: [] };
+  }
+  if (world.seasonOver) {
+    return { ok: false, msg: "赛季已结束", days: 0, userMatches: [], events: [] };
+  }
+  const ready = getNextPlayableMatch(world);
+  if (ready && ready.day <= world.day && !ready.played) {
+    return {
+      ok: false,
+      msg: "今天有比赛，请先进入比赛！",
+      days: 0,
+      userMatches: [ready],
+      pendingMatch: ready,
+      events: [],
+    };
+  }
+
+  let days = 0;
+  let last = { userMatches: [], events: [] };
+  const allEvents = [];
+  while (days < maxDays && !world.seasonOver && !world.sacked) {
+    const target = nextUserMatchDay(world);
+    if (target != null && world.day >= target) {
+      const match = getNextPlayableMatch(world) || getNextUserMatch(world);
+      return {
+        ok: true,
+        days,
+        userMatches: match ? [match] : [],
+        pendingMatch: match,
+        msg: match ? `比赛日到了（推进 ${days} 天）` : `已推进 ${days} 天`,
+        events: allEvents,
+      };
+    }
+    last = await advanceDayWithMatchRunner(world, options, matchRunner);
+    if (last.events?.length) allEvents.push(...last.events);
+    days += 1;
+    if (last.sacked || world.sacked) {
+      return {
+        ok: false,
+        days,
+        userMatches: [],
+        sacked: true,
+        sackedResult: last.sackedResult,
+        msg: last.sackedResult?.msg || "你已被解雇",
+        events: allEvents,
+      };
+    }
+    if (last.userMatches?.length) {
+      return {
+        ok: true,
+        days,
+        userMatches: last.userMatches,
+        pendingMatch: last.userMatches[0],
+        msg: `推进 ${days} 天，比赛日到了`,
+        events: allEvents,
+      };
+    }
+    if (world.seasonOver) {
+      return {
+        ok: true,
+        days,
+        userMatches: [],
+        msg: `推进 ${days} 天，赛季结束`,
+        sacked: !!world.sacked,
+        events: allEvents,
+      };
+    }
+  }
+  return {
+    ok: true,
+    days,
+    userMatches: last.userMatches || [],
+    msg: `已推进 ${days} 天`,
+    events: allEvents,
+  };
+}
+
 /**
  * 推进到赛季末：自动连推，遇到我方比赛日则停下。
  * stopOnUserMatch=true（默认）适合通勤。
@@ -1717,6 +1838,88 @@ export function advanceToSeasonEnd(
     days,
     userMatches: last.userMatches || [],
     stoppedForMatch: !!(last.userMatches && last.userMatches.length),
+    msg: `已推进 ${days} 天（未到赛季末）`,
+    events: allEvents,
+  };
+}
+
+export async function advanceToSeasonEndWithMatchRunner(
+  world,
+  {
+    maxDays = 400,
+    stopOnUserMatch = true,
+    aiEngineMode,
+    aiSimulationProfile,
+  } = {},
+  matchRunner
+) {
+  if (world.sacked) {
+    return { ok: false, msg: "你已被解雇", days: 0, userMatches: [], sacked: true };
+  }
+  if (world.seasonOver) {
+    return { ok: false, msg: "赛季已结束", days: 0, userMatches: [] };
+  }
+  const ready = getNextPlayableMatch(world);
+  if (ready && ready.day <= world.day && !ready.played) {
+    return {
+      ok: false,
+      msg: "今天有比赛，请先进入比赛！",
+      days: 0,
+      userMatches: [ready],
+      pendingMatch: ready,
+    };
+  }
+
+  let days = 0;
+  let last = { userMatches: [] };
+  const allEvents = [];
+  while (days < maxDays && !world.seasonOver && !world.sacked) {
+    last = await advanceDayWithMatchRunner(
+      world,
+      { aiEngineMode, aiSimulationProfile },
+      matchRunner
+    );
+    if (last.events?.length) allEvents.push(...last.events);
+    days += 1;
+    if (last.sacked || world.sacked) {
+      return {
+        ok: false,
+        days,
+        userMatches: [],
+        sacked: true,
+        sackedResult: last.sackedResult,
+        msg: last.sackedResult?.msg || "你已被解雇",
+        events: allEvents,
+      };
+    }
+    if (stopOnUserMatch && last.userMatches?.length) {
+      return {
+        ok: true,
+        days,
+        userMatches: last.userMatches,
+        pendingMatch: last.userMatches[0],
+        stoppedForMatch: true,
+        msg: `推进 ${days} 天，遇到我方比赛，已停下`,
+        events: allEvents,
+      };
+    }
+    if (world.seasonOver) {
+      return {
+        ok: true,
+        days,
+        userMatches: [],
+        stoppedForMatch: false,
+        msg: `推进 ${days} 天，赛季结束`,
+        sacked: !!world.sacked,
+        events: allEvents,
+      };
+    }
+  }
+  return {
+    ok: true,
+    days,
+    userMatches: last.userMatches || [],
+    stoppedForMatch: !!last.userMatches?.length,
     msg: `已推进 ${days} 天（未到赛季末）`,
     events: allEvents,
   };

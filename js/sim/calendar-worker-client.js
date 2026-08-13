@@ -7,6 +7,8 @@
  */
 
 let requestSeq = 0;
+let calendarWorker = null;
+const pendingRequests = new Map();
 
 function replaceWorldState(target, source) {
   for (const key of Object.keys(target)) {
@@ -20,40 +22,59 @@ export function calendarWorkerSupported() {
   return typeof Worker === "function" && typeof URL === "function";
 }
 
+function stopCalendarWorker(error = null) {
+  const worker = calendarWorker;
+  calendarWorker = null;
+  try {
+    worker?.terminate();
+  } catch (_) {
+    /* already stopped */
+  }
+  if (error) {
+    for (const pending of pendingRequests.values()) pending.reject(error);
+    pendingRequests.clear();
+  }
+}
+
+function ensureCalendarWorker() {
+  if (calendarWorker) return calendarWorker;
+  calendarWorker = new Worker(new URL("./calendar-worker.js", import.meta.url), {
+    type: "module",
+    name: "vcfm-calendar",
+  });
+  calendarWorker.onmessage = (event) => {
+    const message = event.data || {};
+    const pending = pendingRequests.get(message.requestId);
+    if (!pending) return;
+    pendingRequests.delete(message.requestId);
+    if (!message.ok) {
+      pending.reject(new Error(message.error || "calendar worker failed"));
+      return;
+    }
+    replaceWorldState(pending.world, message.world);
+    pending.resolve(message.result || {});
+  };
+  calendarWorker.onerror = (event) => {
+    stopCalendarWorker(event.error || new Error(event.message || "calendar worker crashed"));
+  };
+  calendarWorker.onmessageerror = () => {
+    stopCalendarWorker(new Error("calendar worker returned an unreadable world snapshot"));
+  };
+  return calendarWorker;
+}
+
 export function runCalendarWorker(world, action, payload = {}) {
   if (!calendarWorkerSupported()) {
     return Promise.reject(new Error("calendar worker unavailable"));
   }
   const requestId = `calendar-${Date.now()}-${++requestSeq}`;
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./calendar-worker.js", import.meta.url), {
-      type: "module",
-      name: "vcfm-calendar",
-    });
-    const finish = () => worker.terminate();
-    worker.onmessage = (event) => {
-      const message = event.data || {};
-      if (message.requestId !== requestId) return;
-      finish();
-      if (!message.ok) {
-        reject(new Error(message.error || "calendar worker failed"));
-        return;
-      }
-      replaceWorldState(world, message.world);
-      resolve(message.result || {});
-    };
-    worker.onerror = (event) => {
-      finish();
-      reject(event.error || new Error(event.message || "calendar worker crashed"));
-    };
-    worker.onmessageerror = () => {
-      finish();
-      reject(new Error("calendar worker returned an unreadable world snapshot"));
-    };
+    pendingRequests.set(requestId, { world, resolve, reject });
     try {
-      worker.postMessage({ requestId, action, world, payload });
+      ensureCalendarWorker().postMessage({ requestId, action, world, payload });
     } catch (error) {
-      finish();
+      pendingRequests.delete(requestId);
+      stopCalendarWorker(error);
       reject(error);
     }
   });

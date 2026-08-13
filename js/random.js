@@ -17,12 +17,14 @@ export function hashSeed(...parts) {
 /** Mulberry32: compact, deterministic and adequate for simulation rolls. */
 export function createSeededRandom(seed) {
   let state = Number(seed) >>> 0;
-  return () => {
+  const random = () => {
     state = (state + 0x6d2b79f5) >>> 0;
     let value = Math.imul(state ^ (state >>> 15), 1 | state);
     value ^= value + Math.imul(value ^ (value >>> 7), 61 | value);
     return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
   };
+  random.getState = () => state >>> 0;
+  return random;
 }
 
 export function ensureMatchSeed(world, fixture) {
@@ -41,6 +43,8 @@ export function ensureMatchSeed(world, fixture) {
   return fixture.matchSeed;
 }
 
-export function matchRandom(world, fixture) {
-  return createSeededRandom(ensureMatchSeed(world, fixture));
+export function matchRandom(world, fixture, resumeState = null) {
+  return createSeededRandom(
+    resumeState == null ? ensureMatchSeed(world, fixture) : Number(resumeState) >>> 0
+  );
 }

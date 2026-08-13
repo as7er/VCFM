@@ -40,7 +40,7 @@ export const SIMULATION_PROFILES = Object.freeze({
   background: Object.freeze({
     key: "background",
     // 无画面比赛仍逐步运行同一空间决策、球物理和裁判规则；仅降低时间分辨率。
-    timeStep: 0.2,
+    timeStep: 0.3,
     separationPasses: 4,
   }),
 });

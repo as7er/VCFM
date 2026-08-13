@@ -2657,14 +2657,18 @@ function buildMatchNarrative(state) {
   return lines.slice(0, 6);
 }
 
-function buildReport(state) {
+function buildReport(state, { compactAnalysis = false } = {}) {
   const poss = possessionPct(state);
   const hs = state.stats.home;
   const as = state.stats.away;
   // 评分应在 finalize 里先算；若提前 buildReport 则 narrative 不含 MOTM
   const narrative = buildMatchNarrative(state);
   const analysis = state.simEng
-    ? deriveMatchAnalysis(state.simEng.events, { home: state.home, away: state.away })
+    ? state.preparedAnalysis || deriveMatchAnalysis(state.simEng.events, {
+        home: state.home,
+        away: state.away,
+        compact: compactAnalysis,
+      })
     : null;
   return {
     matchSeed: state.matchSeed,
@@ -3113,7 +3117,14 @@ export function finalizeMatch(state) {
     }
   }
 
-  const report = buildReport(state);
+  const backgroundAiMatch =
+    state.simulationProfile === "background" &&
+    fixture.home !== world.userClubId &&
+    fixture.away !== world.userClubId;
+  const report = backgroundAiMatch
+    ? compactBackgroundReport(buildReport(state, { compactAnalysis: true }))
+    : buildReport(state);
+  if (backgroundAiMatch) fixture.events = compactBackgroundEvents(events);
   fixture.matchReport = report;
   state.report = report;
   state.finished = true;
@@ -3294,9 +3305,55 @@ function runMinutesSync(state, fromMin, toMin) {
   }
 }
 
-/** 同步完整模拟（AI 场次 / 快速无暂停） */
-export function simulateMatchSync(world, fixture, opts = {}) {
-  const state = createMatchSession(world, fixture, opts);
+const PREPARED_MATCH_STATE_FIELDS = Object.freeze([
+  "isCup",
+  "isLeague",
+  "isKnockout",
+  "competitionType",
+  "weather",
+  "matchSeed",
+  "derby",
+  "bigMatch",
+  "events",
+  "stats",
+  "hg",
+  "ag",
+  "phase",
+  "yellowCount",
+  "sentOff",
+  "injuredOut",
+  "subsUsed",
+  "maxSubs",
+  "eligiblePlayerIds",
+  "userSide",
+  "engineMode",
+  "simulationProfile",
+  "teamTalkMods",
+  "teamTalks",
+  "startingLineups",
+  "minute",
+  "preMatchStrength",
+  "homeAtk",
+  "homeDef",
+  "awayAtk",
+  "awayDef",
+  "homeXG",
+  "awayXG",
+  "pace",
+  "simModifiers",
+  "simEngineMeta",
+  "_roleMods",
+  "_matchPrep",
+  "_possW",
+  "_foulW",
+  "_chanceW",
+  "_fitW",
+  "_weatherImpact",
+  "_simNeedsResync",
+  "_simPendingSubs",
+]);
+
+function beginMatchSimulation(state, opts = {}) {
   const { home, away, weather, derby, bigMatch, isCup } = state;
   const staffManaged = state.userClub && shouldStaffHandleMatchday(state.world, state.userClub);
   if (staffManaged) {
@@ -3309,6 +3366,11 @@ export function simulateMatchSync(world, fixture, opts = {}) {
   if (derby) bits.push("🔥 德比大战");
   if (bigMatch) bits.push(isCup ? "🏆 焦点杯赛" : "⭐ 焦点战");
   pushEv(state, 0, "context", `情境：${bits.join(" · ")}`);
+}
+
+function runMatchSimulationSync(state, opts = {}) {
+  const { home, away } = state;
+  const staffManaged = state.userClub && shouldStaffHandleMatchday(state.world, state.userClub);
   // 引擎由比赛请求显式决定；直播、快速和后台不再各自暗选足球规律。
   if (shouldUseSim(state)) {
     pushEv(
@@ -3348,6 +3410,171 @@ export function simulateMatchSync(world, fixture, opts = {}) {
     runMinutesSync(state, 76, 90);
   }
   pushEv(state, 90, "ft", `全场结束 ${home.name} ${state.hg} - ${state.ag} ${away.name}`);
+  return state;
+}
+
+function serializePreparedMatch(state, { completed = false } = {}) {
+  const fields = {};
+  for (const key of PREPARED_MATCH_STATE_FIELDS) {
+    if (state[key] !== undefined) fields[key] = state[key];
+  }
+  const compactAnalysis =
+    completed && state.simulationProfile === "background" && state.simEng?.events
+      ? deriveMatchAnalysis(state.simEng.events, {
+          home: state.home,
+          away: state.away,
+          compact: true,
+        })
+      : null;
+  return {
+    version: 1,
+    fixtureId: state.fixture.id,
+    worldContext: {
+      day: state.world.day,
+      season: state.world.season,
+      userClubId: state.world.userClubId,
+      managementMode: state.world.managementMode,
+    },
+    fixture: state.fixture,
+    home: state.home,
+    away: state.away,
+    fields,
+    randomState: state.random?.getState?.() ?? state.matchSeed,
+    simEvents: compactAnalysis ? null : state.simEng?.events || null,
+    analysis: compactAnalysis,
+  };
+}
+
+function compactBackgroundAnalysis(analysis) {
+  if (!analysis) return null;
+  const compactSide = (side) => ({
+    xg: side?.xg || 0,
+    openPlayXg: side?.openPlayXg || 0,
+    shots: side?.shots || [],
+    progression: side?.progression || null,
+    pressing: side?.pressing || null,
+    shape: side?.shape || null,
+  });
+  return {
+    version: analysis.version || 1,
+    source: analysis.source || "sim-events",
+    compact: true,
+    home: compactSide(analysis.home),
+    away: compactSide(analysis.away),
+  };
+}
+
+function compactBackgroundReport(report) {
+  if (!report) return report;
+  report.analysis = compactBackgroundAnalysis(report.analysis);
+  if (report.ratings) {
+    report.ratings = { motm: report.ratings.motm || null, compact: true };
+  }
+  return report;
+}
+
+function compactBackgroundEvents(events) {
+  const keep = new Set([
+    "kickoff", "goal", "penalty", "pen_miss", "woodwork", "card", "red",
+    "injury", "sub", "ht", "ft",
+  ]);
+  return (events || []).filter((event) => keep.has(event.type));
+}
+
+function restorePreparedMatch(prepared, world, fixture, home, away) {
+  const random = matchRandom(world, fixture, prepared.randomState);
+  const state = {
+    ...prepared.fields,
+    world,
+    fixture,
+    home,
+    away,
+    userClub:
+      home.id === world.userClubId ? home : away.id === world.userClubId ? away : null,
+    random,
+    previousRandom: activeRandom,
+    finished: false,
+    report: null,
+  };
+  if (prepared.simEvents || prepared.analysis) {
+    state.simEng = { events: prepared.simEvents || [] };
+    state.preparedAnalysis = prepared.analysis || null;
+  }
+  activeRandom = random;
+  return state;
+}
+
+function replaceObjectState(target, source) {
+  for (const key of Object.keys(target)) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) delete target[key];
+  }
+  for (const [key, value] of Object.entries(source)) target[key] = value;
+  return target;
+}
+
+function mergeSimulatedClubState(target, source) {
+  target.players = source.players;
+  target.tactics = source.tactics;
+  if (source.trainingBoost) target.trainingBoost = source.trainingBoost;
+  return target;
+}
+
+/** Prepare deterministic match context without running the expensive spatial clock. */
+export function prepareMatchSimulation(world, fixture, opts = {}) {
+  const previousRandom = activeRandom;
+  try {
+    const state = createMatchSession(world, fixture, opts);
+    beginMatchSimulation(state, opts);
+    return serializePreparedMatch(state);
+  } finally {
+    activeRandom = previousRandom;
+  }
+}
+
+/** Run only the match clock. The returned payload contains no functions or world snapshot. */
+export function runPreparedMatchSimulation(prepared, opts = {}) {
+  const previousRandom = activeRandom;
+  try {
+    const world = {
+      ...prepared.worldContext,
+      clubs: [prepared.home, prepared.away],
+    };
+    const state = restorePreparedMatch(
+      prepared,
+      world,
+      prepared.fixture,
+      prepared.home,
+      prepared.away
+    );
+    runMatchSimulationSync(state, opts);
+    return serializePreparedMatch(state, { completed: true });
+  } finally {
+    activeRandom = previousRandom;
+  }
+}
+
+/** Commit a prepared spatial result through the existing authoritative finalizer. */
+export function commitPreparedMatch(world, fixture, prepared) {
+  const home = clubById(world, prepared.home.id);
+  const away = clubById(world, prepared.away.id);
+  if (!home || !away || fixture.id !== prepared.fixtureId) {
+    throw new Error(`prepared match no longer matches fixture ${prepared.fixtureId}`);
+  }
+  // Only the match clock owns these fields. Full-club replacement could erase
+  // a third-party transfer installment or competition payment committed while
+  // another independent fixture in the same batch was finishing.
+  mergeSimulatedClubState(home, prepared.home);
+  mergeSimulatedClubState(away, prepared.away);
+  replaceObjectState(fixture, prepared.fixture);
+  const state = restorePreparedMatch(prepared, world, fixture, home, away);
+  return finalizeMatch(state);
+}
+
+/** 同步完整模拟（AI 场次 / 快速无暂停） */
+export function simulateMatchSync(world, fixture, opts = {}) {
+  const state = createMatchSession(world, fixture, opts);
+  beginMatchSimulation(state, opts);
+  runMatchSimulationSync(state, opts);
   return finalizeMatch(state);
 }
 

@@ -1,33 +1,43 @@
 import {
-  advanceDay,
-  advanceToNextMatchDay,
-  advanceToSeasonEnd,
+  advanceDayWithMatchRunner,
+  advanceToNextMatchDayWithMatchRunner,
+  advanceToSeasonEndWithMatchRunner,
 } from "../engine.js";
+import { runFixtureBatch } from "./match-worker-pool.js";
 
 const AI_SIMULATION_OPTIONS = Object.freeze({
   aiEngineMode: "spatial",
   aiSimulationProfile: "background",
 });
 
-self.onmessage = (event) => {
+self.onmessage = async (event) => {
   const { requestId, action, world, payload = {} } = event.data || {};
   if (!requestId || !world) return;
   try {
     let result;
     if (action === "day") {
-      result = advanceDay(world, AI_SIMULATION_OPTIONS);
+      result = await advanceDayWithMatchRunner(
+        world,
+        AI_SIMULATION_OPTIONS,
+        runFixtureBatch
+      );
     } else if (action === "to-matchday") {
-      result = advanceToNextMatchDay(
+      result = await advanceToNextMatchDayWithMatchRunner(
         world,
         Number(payload.maxDays) || 60,
-        AI_SIMULATION_OPTIONS
+        AI_SIMULATION_OPTIONS,
+        runFixtureBatch
       );
     } else if (action === "to-season-end") {
-      result = advanceToSeasonEnd(world, {
-        maxDays: Number(payload.maxDays) || 400,
-        stopOnUserMatch: payload.stopOnUserMatch !== false,
-        ...AI_SIMULATION_OPTIONS,
-      });
+      result = await advanceToSeasonEndWithMatchRunner(
+        world,
+        {
+          maxDays: Number(payload.maxDays) || 400,
+          stopOnUserMatch: payload.stopOnUserMatch !== false,
+          ...AI_SIMULATION_OPTIONS,
+        },
+        runFixtureBatch
+      );
     } else {
       throw new Error(`unknown calendar action: ${action}`);
     }

@@ -163,6 +163,7 @@ export class SimEngine {
     this.agents = [];
     this._spawnTeam(this.home, true);
     this._spawnTeam(this.away, false);
+    this._agentIndex = new Map(this.agents.map((agent) => [agent.id, agent]));
     // 球先置于中圈，无归属
     this.ball = {
       x: 50,
@@ -496,7 +497,13 @@ export class SimEngine {
   }
 
   agentById(id) {
-    return this.agents.find((a) => a.id === id) || null;
+    if (!id) return null;
+    const cached = this._agentIndex?.get(id);
+    if (cached?.id === id) return cached;
+    if (cached) this._agentIndex.delete(id);
+    const agent = this.agents.find((item) => item.id === id) || null;
+    if (agent) this._agentIndex?.set(id, agent);
+    return agent;
   }
 
   _clubForTeam(team) {
@@ -555,7 +562,15 @@ export class SimEngine {
 
   _roleBehavior(agent, key) {
     if (!agent?.roleId) return 0;
-    return Number(roleBehavior(agent.roleId, agent.dutyId)?.[key]) || 0;
+    if (
+      agent._roleBehaviorRole !== agent.roleId ||
+      agent._roleBehaviorDuty !== agent.dutyId
+    ) {
+      agent._roleBehaviorRole = agent.roleId;
+      agent._roleBehaviorDuty = agent.dutyId;
+      agent._roleBehaviorData = roleBehavior(agent.roleId, agent.dutyId);
+    }
+    return Number(agent._roleBehaviorData?.[key]) || 0;
   }
 
   _nextControlDecision(a) {
@@ -2664,6 +2679,14 @@ export class SimEngine {
           if (b.sentOff) continue;
           let dx = b.x - a.x;
           let dy = b.y - a.y;
+          // 后台无画面档先做保守轴向排除；直播标准档保持原始逐对距离路径，
+          // 因而不会改变已经发布的标准精度固定种子结果。
+          if (
+            this.simulationProfile === "background" &&
+            (Math.abs(dx) >= 3.35 || Math.abs(dy) >= 3.35)
+          ) {
+            continue;
+          }
           let d = Math.hypot(dx, dy);
           // 完全同坐标也要给稳定法向，否则两个圆点会永久粘住。
           if (d < 1e-6) {
@@ -3505,10 +3528,12 @@ export class SimEngine {
   substituteAgent(outId, player) {
     const a = this.agents.find((x) => x.id === outId);
     if (!a || !player) return false;
+    this._agentIndex?.delete(outId);
     const wasCaptain = a.isCaptain;
     ensureFootballProfile(player);
     const attrs = player.attrs || {};
     a.id = player.id;
+    this._agentIndex?.set(a.id, a);
     a.player = player;
     a.num = player.number ?? a.num;
     a.attr = {

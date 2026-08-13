@@ -138,7 +138,7 @@ function successfulPressure(events, index, event) {
   return false;
 }
 
-function finalizeSide(side, team, options, nodeBag, edgeBag, actionZones) {
+function finalizeSide(side, team, options, nodeBag, edgeBag, actionZones, compact) {
   const progression = side.progression;
   progression.passCompletionPct = progression.passesAttempted
     ? round((progression.passesCompleted / progression.passesAttempted) * 100)
@@ -159,6 +159,11 @@ function finalizeSide(side, team, options, nodeBag, edgeBag, actionZones) {
 
   side.xg = round(side.xg, 2);
   side.openPlayXg = round(side.openPlayXg, 2);
+  if (compact) {
+    delete side.heatmap;
+    delete side.network;
+    return;
+  }
   side.heatmap.cells = side.heatmap.cells.map((value) => round(value, 1));
   side.heatmap.max = Math.max(0, ...side.heatmap.cells);
 
@@ -190,6 +195,7 @@ function finalizeSide(side, team, options, nodeBag, edgeBag, actionZones) {
  * @param {{home?: object, away?: object}} options clubs used only for player names
  */
 export function deriveMatchAnalysis(rawEvents, options = {}) {
+  const compact = options.compact === true;
   const events = (Array.isArray(rawEvents) ? rawEvents : [])
     .map((event, index) => ({ ...event, _index: index }))
     .sort((a, b) => finite(a.t, 0) - finite(b.t, 0) || a._index - b._index);
@@ -205,7 +211,9 @@ export function deriveMatchAnalysis(rawEvents, options = {}) {
 
   const noteAction = (team, x, y, playerId, weight = 1) => {
     if (!TEAMS.includes(team)) return null;
-    const pos = addHeat(result[team], team, x, y, playerId, nodeBags[team], weight);
+    const pos = compact
+      ? attackCoordinates(team, x, y)
+      : addHeat(result[team], team, x, y, playerId, nodeBags[team], weight);
     const zone = pos.x < 34 ? "left" : pos.x > 66 ? "right" : "center";
     actionZones[team][zone] += weight;
     actionZones[team].height += pos.y * weight;
@@ -254,7 +262,7 @@ export function deriveMatchAnalysis(rawEvents, options = {}) {
 
       const fromId = match.event.agentId;
       const toId = event.agentId;
-      if (fromId && toId && fromId !== toId) {
+      if (!compact && fromId && toId && fromId !== toId) {
         const fromNode = nodeBags[team].get(fromId);
         const toNode = nodeBags[team].get(toId);
         if (fromNode) fromNode.passes++;
@@ -307,8 +315,17 @@ export function deriveMatchAnalysis(rawEvents, options = {}) {
   }
 
   for (const team of TEAMS) {
-    finalizeSide(result[team], team, options, nodeBags[team], edgeBags[team], actionZones[team]);
+    finalizeSide(
+      result[team],
+      team,
+      options,
+      nodeBags[team],
+      edgeBags[team],
+      actionZones[team],
+      compact
+    );
   }
+  if (compact) result.compact = true;
   return result;
 }
 

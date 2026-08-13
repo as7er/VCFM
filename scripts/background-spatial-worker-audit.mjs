@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { CLUB_TEMPLATES } from "../js/data.js";
-import { simulateMatchSync } from "../js/match.js";
+import {
+  commitPreparedMatch,
+  prepareMatchSimulation,
+  runPreparedMatchSimulation,
+  simulateMatchSync,
+} from "../js/match.js";
 import { createWorld } from "../js/models.js";
 import { ensureWorldStaff } from "../js/staff.js";
 
@@ -44,11 +49,41 @@ function run() {
 const first = run();
 const second = run();
 
+const splitWorld = clone(source);
+const splitFixture = splitWorld.fixtures.find((item) => item.id === sourceFixture.id);
+const prepared = prepareMatchSimulation(splitWorld, splitFixture, {
+  engineMode: "spatial",
+  simulationProfile: "background",
+});
+const completed = runPreparedMatchSimulation(prepared, {
+  engineMode: "spatial",
+  simulationProfile: "background",
+});
+assert.equal(completed.simEvents, null, "background worker must not return raw spatial events");
+assert.equal(completed.analysis?.compact, true, "background worker must return compact analysis");
+commitPreparedMatch(splitWorld, splitFixture, completed);
+
+const committedState = (world, fixtureId) => {
+  const fixture = world.fixtures.find((item) => item.id === fixtureId);
+  return {
+    fixture,
+    home: world.clubs.find((club) => club.id === fixture.home),
+    away: world.clubs.find((club) => club.id === fixture.away),
+    table: world.table,
+    financeObligations: world.financeObligations,
+  };
+};
+assert.deepEqual(
+  committedState(splitWorld, sourceFixture.id),
+  committedState(first.world, sourceFixture.id),
+  "prepared worker clock and ordered commit must equal the synchronous result"
+);
+
 assert.equal(first.fixture.matchEngine, "spatial-v2");
 assert.equal(first.fixture.simulationProfile, "background");
 assert.equal(first.result.report.engine, "spatial-v2");
 assert.equal(first.result.report.simulationProfile, "background");
-assert.equal(first.result.report.simulationMeta?.timeStep, 0.2);
+assert.equal(first.result.report.simulationMeta?.timeStep, 0.3);
 assert.equal(first.result.report.simulationMeta?.separationPasses, 4);
 assert.ok(first.result.report.analysis, "AI spatial match must persist match analysis");
 assert.ok(
@@ -73,6 +108,14 @@ const clientSource = readFileSync(
   new URL("../js/sim/calendar-worker-client.js", import.meta.url),
   "utf8"
 );
+const matchWorkerSource = readFileSync(
+  new URL("../js/sim/match-worker.js", import.meta.url),
+  "utf8"
+);
+const matchPoolSource = readFileSync(
+  new URL("../js/sim/match-worker-pool.js", import.meta.url),
+  "utf8"
+);
 const mainSource = readFileSync(new URL("../js/main.js", import.meta.url), "utf8");
 assert.match(workerSource, /aiEngineMode:\s*"spatial"/);
 assert.match(workerSource, /aiSimulationProfile:\s*"background"/);
@@ -80,6 +123,10 @@ assert.match(workerSource, /advanceToNextMatchDay/);
 assert.match(workerSource, /advanceToSeasonEnd/);
 assert.match(clientSource, /type:\s*"module"/);
 assert.match(clientSource, /replaceWorldState/);
+assert.match(matchWorkerSource, /runPreparedMatchSimulation/);
+assert.match(matchPoolSource, /prepareMatchSimulation/);
+assert.match(matchPoolSource, /commitPreparedMatch/);
+assert.match(matchPoolSource, /new Worker\(/);
 assert.match(mainSource, /advanceDayAsync\(world\)/);
 assert.match(mainSource, /advanceToNextMatchDayAsync\(world\)/);
 assert.match(mainSource, /advanceToSeasonEndAsync\(world/);
@@ -94,6 +141,7 @@ console.log(
       engine: first.fixture.matchEngine,
       profile: first.fixture.simulationProfile,
       reportBytes: JSON.stringify(first.result.report).length,
+      workerTransferBytes: JSON.stringify(completed).length,
       analysisEvents: first.result.report.analysis?.summary?.events || null,
     },
     null,

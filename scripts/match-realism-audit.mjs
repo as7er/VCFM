@@ -6,7 +6,7 @@ const matches = Math.max(8, Number(process.argv[2]) || 24);
 const equalOnly = process.argv[4] === "equal-only";
 const strongMatches = equalOnly ? 0 : Math.max(16, matches);
 const simulationProfile = process.argv[3] === "background" ? "background" : "standard";
-const timeStep = simulationProfile === "background" ? 0.2 : SIM.DT;
+const timeStep = simulationProfile === "background" ? 0.3 : SIM.DT;
 const separationPasses = simulationProfile === "background" ? 4 : 8;
 
 function seededRandom(seed) {
