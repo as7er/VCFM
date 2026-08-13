@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  interpolateSimBall,
   nextDisplayedMinute,
   simMinuteOf,
   PENALTY_SETUP_SEC,
@@ -11,6 +12,77 @@ import { SimEngine, SIM } from "../js/sim/engine.js";
 assert.equal(nextDisplayedMinute(39, 38), 39, "late events must not move the match clock backwards");
 assert.equal(nextDisplayedMinute(39, 40), 40, "newer timeline frames must advance the clock");
 assert.equal(nextDisplayedMinute(90, 0, { reset: true }), 0, "a new match must explicitly reset the clock");
+
+// —— 传球插值不能在出脚/接球帧中途把球吸回球员脚下 ——
+const kickedBall = interpolateSimBall(
+  { x: 10, y: 20, z: 0, owner: "passer", state: "held" },
+  { x: 20, y: 30, z: 0.2, owner: null, state: "pass" },
+  0.25
+);
+assert.deepEqual(
+  { x: kickedBall.x, y: kickedBall.y, owner: kickedBall.owner, state: kickedBall.state },
+  { x: 12.5, y: 22.5, owner: null, state: "pass" },
+  "a kicked ball must follow the physical line instead of staying attached to the passer"
+);
+const arrivingBall = interpolateSimBall(
+  { x: 40, y: 50, z: 0, owner: null, state: "pass" },
+  { x: 50, y: 60, z: 0, owner: "receiver", state: "held" },
+  0.75
+);
+assert.deepEqual(
+  { x: arrivingBall.x, y: arrivingBall.y, owner: arrivingBall.owner, state: arrivingBall.state },
+  { x: 47.5, y: 57.5, owner: null, state: "pass" },
+  "a pass must reach its receiving frame before the display attaches it to the receiver"
+);
+assert.equal(
+  interpolateSimBall(
+    { x: 40, y: 50, owner: null, state: "pass" },
+    { x: 50, y: 60, owner: "receiver", state: "held" },
+    1
+  ).owner,
+  "receiver",
+  "the receiver must own the ball at the recorded receiving frame"
+);
+
+// 引擎无遮挡地滚球只允许沿同一方向受摩擦减速；表现层修复不能掩盖真实物理折向。
+const passEngine = new SimEngine(makeClub("pass-home"), makeClub("pass-away"), {
+  random: () => 0.5,
+});
+const passer = passEngine.agents.find((player) => player.team === "home" && player.role !== "GK");
+const receiver = passEngine.agents.find(
+  (player) => player.team === "home" && player.role !== "GK" && player.id !== passer.id
+);
+passer.x = 20;
+passer.y = 45;
+receiver.x = 36;
+receiver.y = 55;
+for (const opponent of passEngine.agents.filter((player) => player.team === "away")) {
+  opponent.x = 85;
+  opponent.y = 85;
+}
+passEngine.ball.x = passer.x;
+passEngine.ball.y = passer.y;
+passEngine.ball.owner = passer.id;
+passEngine.ball.state = "held";
+passEngine._pass(passer, { agent: receiver, tx: receiver.x, ty: receiver.y });
+const passOrigin = { x: passEngine.ball.x, y: passEngine.ball.y };
+const passDirection = {
+  x: passEngine.ball.vx,
+  y: passEngine.ball.vy,
+};
+const passDirectionLength = Math.hypot(passDirection.x, passDirection.y);
+for (let step = 0; step < 6 && passEngine.ball.state === "pass"; step++) {
+  passEngine._stepBall(SIM.DT);
+  const traveled = {
+    x: passEngine.ball.x - passOrigin.x,
+    y: passEngine.ball.y - passOrigin.y,
+  };
+  const cross = traveled.x * passDirection.y - traveled.y * passDirection.x;
+  assert.ok(
+    Math.abs(cross) / passDirectionLength < 1e-9,
+    "an unobstructed pass must remain collinear while friction slows it"
+  );
+}
 
 const mainSource = readFileSync(new URL("../js/main.js", import.meta.url), "utf8");
 assert.ok(
@@ -60,6 +132,14 @@ assert.ok(
 assert.ok(
   viewSource.includes("simMinuteOf(sp.simT)"),
   "the playback clock must use the shared conversion"
+);
+assert.ok(
+  viewSource.includes("const ball = interpolateSimBall(fa.ball, fb.ball, t)"),
+  "the match view must use causal ball interpolation"
+);
+assert.ok(
+  viewSource.includes("trailPhase !== this._simBallTrailPhase"),
+  "ball trails must reset between possession and flight phases"
 );
 
 // —— 事件文案必须持续到下一个因果事件，不能在球还没踢出时就被顶掉 ——

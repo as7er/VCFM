@@ -12,6 +12,7 @@ const checks = [
   "scripts/save-schema-audit.mjs",
   "scripts/replay-ui-audit.mjs",
   "scripts/match-presentation-audit.mjs",
+  "scripts/pass-speed-audit.mjs",
   "scripts/set-piece-presentation-audit.mjs",
   "scripts/player-traits-set-pieces-audit.mjs",
   "scripts/player-attributes-audit.mjs",

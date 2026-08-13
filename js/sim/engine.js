@@ -46,6 +46,10 @@ export const SIM = {
   DT: 0.1, // 固定步长（秒），10Hz
   FIELD_W: 100,
   FIELD_H: 100,
+  // 标准职业球场约 68m × 105m。空间坐标仍保持 0..100，但涉及球速和
+  // 传球距离时必须先换算成米，否则同样 20m 横传和纵传会得到不同速度。
+  PITCH_W_METRES: 68,
+  PITCH_H_METRES: 105,
   // 球门：主队球门在 y≈100 一侧，客队球门在 y≈0 一侧；门宽以 x 计
   GOAL_X0: 44,
   GOAL_X1: 56,
@@ -70,6 +74,133 @@ function clamp(n, a, b) {
 }
 function dist(ax, ay, bx, by) {
   return Math.hypot(ax - bx, ay - by);
+}
+function pitchVectorMetres(dx, dy) {
+  return {
+    x: dx * (SIM.PITCH_W_METRES / SIM.FIELD_W),
+    y: dy * (SIM.PITCH_H_METRES / SIM.FIELD_H),
+  };
+}
+function pitchDistanceMetres(dx, dy) {
+  const metres = pitchVectorMetres(dx, dy);
+  return Math.hypot(metres.x, metres.y);
+}
+function pitchSpeedMps(vx, vy) {
+  return pitchDistanceMetres(vx, vy);
+}
+function pitchVelocityForMps(dx, dy, metresPerSecond) {
+  const metres = pitchVectorMetres(dx, dy);
+  const length = Math.hypot(metres.x, metres.y) || 1;
+  return {
+    vx: (metres.x / length) * metresPerSecond * (SIM.FIELD_W / SIM.PITCH_W_METRES),
+    vy: (metres.y / length) * metresPerSecond * (SIM.FIELD_H / SIM.PITCH_H_METRES),
+  };
+}
+function applyFreeBallForces(ball, dt) {
+  const airborne = (ball.z || 0) > 0 || (ball.vz || 0) > 0;
+  if (airborne) {
+    const gravity = 18;
+    const startZ = Math.max(0, ball.z || 0);
+    const startVz = ball.vz || 0;
+    ball.z = startZ + startVz * dt - 0.5 * gravity * dt * dt;
+    ball.vz = startVz - gravity * dt;
+    if (ball.z > 10) {
+      ball.z = 10;
+      if ((ball.vz || 0) > 0) ball.vz *= 0.4;
+    }
+    if (ball.z <= 0) {
+      const hitTime = clamp(
+        (startVz + Math.sqrt(Math.max(0, startVz * startVz + 2 * gravity * startZ))) /
+          gravity,
+        0,
+        dt
+      );
+      const impact = Math.abs(startVz - gravity * hitTime);
+      const rebound = impact * (impact > 4 ? 0.38 : 0.26);
+      const remaining = dt - hitTime;
+      const reboundZ = rebound * remaining - 0.5 * gravity * remaining * remaining;
+      if (rebound < 1.05 || reboundZ <= 0) {
+        ball.z = 0;
+        ball.vz = 0;
+      } else {
+        ball.z = reboundZ;
+        ball.vz = rebound - gravity * remaining;
+      }
+      ball.vx *= 0.86;
+      ball.vy *= 0.86;
+    }
+  } else {
+    ball.z = 0;
+    ball.vz = 0;
+  }
+  const groundFriction = Math.pow(SIM.BALL_FRICTION, dt / SIM.DT);
+  const horizontalFriction = ball.z > 0.4 ? 0.992 : groundFriction;
+  ball.vx *= horizontalFriction;
+  ball.vy *= horizontalFriction;
+}
+function applyShotForces(ball, dt) {
+  ball.z = (ball.z || 0) + (ball.vz || 0) * dt;
+  ball.vz = (ball.vz || 0) - 18 * dt;
+  if (ball.z > 10) {
+    ball.z = 10;
+    if ((ball.vz || 0) > 0) ball.vz *= 0.4;
+  }
+  if (ball.z <= 0) {
+    ball.z = 0;
+    if ((ball.vz || 0) < 0) {
+      const impact = Math.abs(ball.vz);
+      ball.vz = impact * (impact > 4 ? 0.38 : 0.26);
+      if (ball.vz < 1.05) ball.vz = 0;
+      else ball.z = 0.05;
+      ball.vx *= 0.86;
+      ball.vy *= 0.86;
+    }
+  }
+  const groundFriction = Math.pow(SIM.BALL_FRICTION, dt / SIM.DT);
+  const horizontalFriction = ball.z > 0.4 ? 0.992 : groundFriction;
+  ball.vx *= horizontalFriction;
+  ball.vy *= horizontalFriction;
+}
+function estimateBallArrivalSeconds(distanceMetres, speedMps, z, vz) {
+  const motion = { vx: speedMps, vy: 0, z, vz };
+  let travelled = 0;
+  let elapsed = 0;
+  for (let step = 0; step < 60 && motion.vx > 0.05; step++) {
+    const nextTravelled = travelled + motion.vx * SIM.DT;
+    if (nextTravelled >= distanceMetres) {
+      return elapsed + (distanceMetres - travelled) / motion.vx;
+    }
+    travelled = nextTravelled;
+    elapsed += SIM.DT;
+    applyFreeBallForces(motion, SIM.DT);
+  }
+  return elapsed;
+}
+function estimateBallHeightAtDistance(distanceMetres, speedMps, z, vz) {
+  const motion = { vx: speedMps, vy: 0, z, vz };
+  let travelled = 0;
+  for (let step = 0; step < 60 && motion.vx > 0.05; step++) {
+    const nextTravelled = travelled + motion.vx * SIM.DT;
+    const startZ = motion.z || 0;
+    applyFreeBallForces(motion, SIM.DT);
+    if (nextTravelled >= distanceMetres) {
+      const alpha = clamp((distanceMetres - travelled) / Math.max(1e-9, nextTravelled - travelled), 0, 1);
+      return startZ + ((motion.z || 0) - startZ) * alpha;
+    }
+    travelled = nextTravelled;
+  }
+  return motion.z || 0;
+}
+function loftForTargetHeight(distanceMetres, speedMps, targetHeight) {
+  let low = 0;
+  let high = 16;
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const middle = (low + high) / 2;
+    const height = estimateBallHeightAtDistance(distanceMetres, speedMps, 0.2, middle);
+    if (height < targetHeight) low = middle;
+    else high = middle;
+  }
+  return (low + high) / 2;
 }
 /** 属性 1..20 → 0..1 归一 */
 function norm(v) {
@@ -1002,27 +1133,31 @@ export class SimEngine {
 
     const dx = targetX - b.x;
     const dy = targetY - b.y;
-    const d = Math.hypot(dx, dy) || 1;
+    const distanceM = pitchDistanceMetres(dx, dy);
     const kick = a.attr.kicking || 0.5;
-    // 力量按「飞到落点附近即衰减」估算：比场员长传更克制，避免落地残速滚出界
-    // d≈40 → ~19–22；上限 26，远低于旧大脚 30–44
-    const power = clamp(d * 0.46 + 2, 15, 26) * (0.92 + 0.1 * kick);
-    const err = (1 - kick) * 2.8;
-    const nx = (this.random() - 0.5) * err;
-    const ny = (this.random() - 0.5) * err;
+    // 门将大脚同样按米制距离给力，避免斜向或横向落点改变实际速度。
+    const powerMps = clamp(13 + distanceM * 0.25, 18, 27) * (0.92 + 0.1 * kick);
+    const kickVelocity = pitchVelocityForMps(dx, dy, powerMps);
+    const errMps = (1 - kick) * 2.4;
+    const nx = (this.random() - 0.5) * errMps * (SIM.FIELD_W / SIM.PITCH_W_METRES);
+    const ny = (this.random() - 0.5) * errMps * (SIM.FIELD_H / SIM.PITCH_H_METRES);
 
     // 先清旧传球/越位快照，再写入本脚大脚落点（门将开球依法不受越位限制）
     this._clearBallTarget();
     b.owner = null;
-    b.vx = (dx / d) * power + nx;
-    b.vy = (dy / d) * power + ny;
+    b.vx = kickVelocity.vx + nx;
+    b.vy = kickVelocity.vy + ny;
     b.z = 0.35;
     // 吊高越过第一波逼抢；峰值受控，落地残速不会像旧大脚那样滚出边线
-    b.vz = clamp(7.5 + d * 0.08 + kick * 2, 8.5, 13.5);
+    b.vz = clamp(7.5 + distanceM * 0.08 + kick * 2, 8.5, 13.5);
     b.receiverId = receiver?.id || null;
     b.targetX = targetX;
     b.targetY = targetY;
-    b.expectedAt = this.t + clamp(d / Math.max(1, power) * 1.15, 0.4, 2.2);
+    b.expectedAt = this.t + clamp(
+      estimateBallArrivalSeconds(distanceM, pitchSpeedMps(b.vx, b.vy), b.z, b.vz),
+      0.4,
+      3.4
+    );
     b.lastKicker = a.id;
     b.kickTeam = a.team;
     b.kickX = b.x;
@@ -1836,41 +1971,46 @@ export class SimEngine {
     const ty = passTo.ty;
     const dx = tx - b.x;
     const dy = ty - b.y;
-    const d = Math.hypot(dx, dy) || 1;
+    const distanceM = pitchDistanceMetres(dx, dy);
     const isCross = !!passTo.cross;
     const isThrough = !!passTo.through;
     const technique = isCross
       ? clamp((a.attr.crossing || a.attr.passing || 0.55) * 0.68 + (a.attr.passing || 0.55) * 0.18 + (a.attr.kicking || 0.55) * 0.14, 0.3, 0.95)
       : a.attr.passing || 0.55;
-    // 传球速度：距离越远越快，受 passing 影响精度（加噪声）
-    const passSpeed = clamp(18 + d * 0.7, 18, 42) * (0.85 + 0.15 * technique);
+    // 传球速度统一使用米/秒：短传留给队友处理，中长传逐步加力。
+    // passing 主要控制落点误差；同样距离不因方向或属性产生离谱的速度差。
+    const passSpeedMps = clamp(10.5 + distanceM * 0.38, 11.5, 27) * (0.94 + 0.06 * technique);
+    const passVelocity = pitchVelocityForMps(dx, dy, passSpeedMps);
     // 精度噪声：passing 越低越偏
     // 普通职业球员的基础脚法不应让近中距离传球像随机解围；压力与线路风险
     // 已由决策/拦截系统体现，这里只保留随 passing 变化的温和落点误差。
-    const err = (1 - technique) * (isCross ? 4.5 : 3.8);
-    const nx = (this.random() - 0.5) * err;
-    const ny = (this.random() - 0.5) * err;
+    const errMps = (1 - technique) * (isCross ? 3.8 : 3.2);
+    const nx = (this.random() - 0.5) * errMps * (SIM.FIELD_W / SIM.PITCH_W_METRES);
+    const ny = (this.random() - 0.5) * errMps * (SIM.FIELD_H / SIM.PITCH_H_METRES);
     b.owner = null;
-    b.vx = (dx / d) * passSpeed + nx;
-    b.vy = (dy / d) * passSpeed + ny;
+    b.vx = passVelocity.vx + nx;
+    b.vy = passVelocity.vy + ny;
     b.receiverId = passTo.agent?.id || null;
     b.targetX = tx;
     b.targetY = ty;
-    b.expectedAt = this.t + clamp(d / Math.max(1, passSpeed) * 1.12, 0.2, 1.8);
-    // 空中弧线（vz 对 g=18：peak≈vz²/36；传中 ~5–7，长传 ~3，短传贴地）
+    // 空中弧线（vz 对 g=18：peak≈vz²/36；传中按目标处可争顶高度反推，短传贴地）
     let loft = 0;
     if (isCross && fromCorner) {
-      // 角球到落点时应已降到可争顶高度；固定 14–18 的旧 loft 会让球越过落点后
-      // 仍在所有人头顶，继续飘出另一侧底线。
-      const flightTime = clamp(d / Math.max(1, passSpeed), 0.35, 1.8);
-      const targetZ = 1.65 + this.random() * 0.45;
-      loft = clamp((targetZ - 0.2 + 9 * flightTime * flightTime) / flightTime, 8, 13.5);
+      // 角球到落点时应已降到可争顶高度；复用实际积分反推初速，避免表现、
+      // 接球跑位和球物理分别使用不同的飞行时间。
+      const targetZ = (fromCorner ? 1.65 : isThrough ? 1.15 : 1.4) + this.random() * 0.45;
+      loft = loftForTargetHeight(distanceM, pitchSpeedMps(b.vx, b.vy), targetZ);
     } else if (isCross) loft = 14 + this.random() * 4;
     else if (isThrough) loft = 6 + this.random() * 3;
-    else if (d > 28) loft = 9 + (d - 28) * 0.12;
-    else if (d > 18) loft = 3.5 + this.random() * 2.5;
-    b.z = 0.2;
+    else if (distanceM >= 30 - 1e-6) loft = 9 + Math.max(0, distanceM - 30) * 0.1;
+    else if (distanceM >= 20 - 1e-6) loft = 3.5 + this.random() * 2.5;
+    b.z = loft > 0 ? 0.2 : 0;
     b.vz = loft;
+    b.expectedAt = this.t + clamp(
+      estimateBallArrivalSeconds(distanceM, pitchSpeedMps(b.vx, b.vy), b.z, b.vz),
+      0.2,
+      3.4
+    );
     b.lastKicker = a.id;
     b.kickTeam = a.team;      // 传球方队伍（对手在飞行早段不可截）
     b.kickX = b.x;            // 踢球原点，用于"飞离一段后才可被对手截"
@@ -2825,34 +2965,24 @@ export class SimEngine {
     b._prevZ = b.z || 0;
     b._prevVz = b.vz || 0;
     b._stepDt = dt;
-    // 自由球：滚动 + 摩擦（不夹 x/y，出界由 _resolveBounds 判定）
-    b.x += b.vx * dt;
-    b.y += b.vy * dt;
-    // 高度：重力 + 落地弹跳（供直播空中球 / 落点标记）
-    b.z = (b.z || 0) + (b.vz || 0) * dt;
-    b.vz = (b.vz || 0) - 18 * dt; // 重力（单位与 pitch% 同量级即可）
-    if (b.z > 10) {
-      b.z = 10;
-      if ((b.vz || 0) > 0) b.vz *= 0.4;
-    }
-    if (b.z <= 0) {
-      b.z = 0;
-      if ((b.vz || 0) < 0) {
-        // 落地弹跳：再明显一点（画面落点涟漪可读）
-        const impact = Math.abs(b.vz);
-        b.vz = impact * (impact > 4 ? 0.38 : 0.26);
-        if (b.vz < 1.05) b.vz = 0;
-        else b.z = 0.05; // 微离地一帧，方便 compact 帧看出弹
-        // 落地略减速
-        b.vx *= 0.86;
-        b.vy *= 0.86;
+    // 传球物理固定以 0.1s 子步推进。后台档的球员决策仍是 0.3s，但球不能
+    // 先滑完整个粗步长再一次性吃掉三步摩擦，否则同一脚球会因 profile 变快。
+    if (b.state === "pass") {
+      let remaining = dt;
+      while (remaining > 1e-9) {
+        const stepDt = Math.min(SIM.DT, remaining);
+        b.x += b.vx * stepDt;
+        b.y += b.vy * stepDt;
+        applyFreeBallForces(b, stepDt);
+        remaining -= stepDt;
       }
+    } else {
+      // 自由球：滚动 + 摩擦（不夹 x/y，出界由 _resolveBounds 判定）
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      if (b.state === "shot") applyShotForces(b, dt);
+      else applyFreeBallForces(b, dt);
     }
-    const f = Math.pow(SIM.BALL_FRICTION, dt / SIM.DT);
-    // 空中摩擦更小，贴地更黏
-    const airMul = b.z > 0.4 ? 0.992 : f;
-    b.vx *= airMul;
-    b.vy *= airMul;
     if (Math.hypot(b.vx, b.vy) < 0.05 && b.z <= 0) {
       b.vx = 0;
       b.vy = 0;
@@ -3015,6 +3145,8 @@ export class SimEngine {
    */
   _resolvePossession(dt) {
     const b = this.ball;
+    // 抢断、扑救与控球半径仍在既有 0..100 空间标尺上校准。传球的真实
+    // 米制速度只负责生成 vx/vy，不在本次修正中重标定这些独立规则。
     const speed = Math.hypot(b.vx, b.vy);
 
     // —— 门将扑救（合理化）——

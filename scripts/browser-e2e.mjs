@@ -46,6 +46,171 @@ async function assertCrestLoaded(locator, label) {
   assert.ok(image.source.startsWith("data:image/svg+xml"), `${label} must use an offline SVG data URI`);
 }
 
+async function assertStraightPassRendering(page) {
+  const result = await page.evaluate(async () => {
+    const { MatchView } = await import("./js/matchview.js?v=213");
+    const positions = ["GK", "DEF", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT", "ATT"];
+    const makeClub = (id, color) => {
+      const players = positions.map((pos, index) => ({
+        id: `${id}-${index}`,
+        name: `${id} ${index}`,
+        pos,
+        number: index + 1,
+        age: 25,
+        ovr: 12,
+        potential: 12,
+        fitness: 100,
+        morale: 70,
+        injured: 0,
+        suspended: 0,
+        attrs: {
+          pace: 12,
+          strength: 12,
+          passing: 12,
+          vision: 12,
+          shooting: 12,
+          finishing: 12,
+          dribbling: 12,
+          tackling: 12,
+          marking: 12,
+          stamina: 12,
+          positioning: 12,
+          reflexes: 12,
+          handling: 12,
+          kicking: 12,
+          heading: 12,
+          crossing: 12,
+          decisions: 12,
+        },
+      }));
+      return {
+        id,
+        name: id,
+        short: id,
+        color,
+        players,
+        tactics: {
+          formation: "4-3-3",
+          lineup: players.map((player) => player.id),
+          style: "balanced",
+          pressing: 3,
+          tempo: 3,
+          width: 3,
+          defensiveLine: 3,
+          roles: [],
+          duties: [],
+        },
+      };
+    };
+
+    const root = document.createElement("div");
+    root.style.cssText = "position:fixed;left:0;top:0;width:420px;height:650px;z-index:99999";
+    document.body.appendChild(root);
+    const view = new MatchView(root);
+    const home = makeClub("trail-home", "#2563eb");
+    const away = makeClub("trail-away", "#dc2626");
+    view.mount(home, away);
+    view.stopLoop();
+    view.setSimDrive(true);
+    view.refreshLayout();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    const playerFrames = view.players.map((player) => ({
+      id: player.id,
+      team: player.team,
+      role: player.pos,
+      num: player.num,
+      x: player.x,
+      y: player.y,
+      heading: player.heading || 0,
+    }));
+    const passerId = home.players[6].id;
+    const receiverId = home.players[7].id;
+    const withActors = (passer, receiver) => playerFrames.map((player) => {
+      if (player.id === passerId) return { ...player, x: passer.x, y: passer.y };
+      if (player.id === receiverId) return { ...player, x: receiver.x, y: receiver.y };
+      return player;
+    });
+    const frames = [
+      {
+        t: 0,
+        ball: { x: 20, y: 40, z: 0, owner: passerId, state: "held" },
+        players: withActors({ x: 20, y: 40 }, { x: 50, y: 55 }),
+      },
+      {
+        t: 0.1,
+        ball: { x: 30, y: 45, z: 0.1, owner: null, state: "pass" },
+        players: withActors({ x: 20, y: 40 }, { x: 50, y: 55 }),
+      },
+      {
+        t: 0.2,
+        ball: { x: 40, y: 50, z: 0.05, owner: null, state: "pass" },
+        players: withActors({ x: 20, y: 40 }, { x: 50, y: 55 }),
+      },
+      {
+        t: 0.3,
+        ball: { x: 50, y: 55, z: 0, owner: receiverId, state: "held" },
+        players: withActors({ x: 20, y: 40 }, { x: 50, y: 55 }),
+      },
+    ];
+
+    const samples = [];
+    view.applySimSnapshot(frames[0], { soft: false });
+    for (let frameIndex = 0; frameIndex < frames.length - 1; frameIndex++) {
+      for (const alpha of [0.2, 0.4, 0.6, 0.8]) {
+        view.applySimSnapshotLerped(frames[frameIndex], frames[frameIndex + 1], alpha);
+        samples.push({
+          frameIndex,
+          alpha,
+          x: view.ball.x,
+          y: view.ball.y,
+          carrierId: view.carrier?.id || null,
+        });
+      }
+      view.applySimSnapshot(frames[frameIndex + 1], { soft: false });
+    }
+    view._drawCanvas();
+
+    const crossErrors = samples.map((sample) => Math.abs(
+      (sample.x - 20) * 15 - (sample.y - 40) * 30
+    ));
+    const kickSamples = samples.filter((sample) => sample.frameIndex === 0);
+    const receiveSamples = samples.filter((sample) => sample.frameIndex === 2);
+    const flightTrail = view._ballTrail.slice();
+    const recordedFinalCarrierId = view.carrier?.id || null;
+    const context = view.canvas.getContext("2d");
+    const pixels = context.getImageData(0, 0, view.canvas.width, view.canvas.height).data;
+    let nonBlankPixels = 0;
+    for (let index = 3; index < pixels.length; index += 4) {
+      if (pixels[index] > 0) nonBlankPixels++;
+    }
+    const canvas = {
+      width: view.canvas.width,
+      height: view.canvas.height,
+      nonBlankPixels,
+    };
+    view.destroy();
+    root.remove();
+    return {
+      maxCrossError: Math.max(...crossErrors),
+      kickCarriers: kickSamples.map((sample) => sample.carrierId),
+      receiveCarriers: receiveSamples.map((sample) => sample.carrierId),
+      finalCarrierId: recordedFinalCarrierId,
+      flightTrail,
+      canvas,
+      receiverId,
+    };
+  });
+
+  assert.ok(result.maxCrossError < 1e-7, `rendered pass bent off line: ${result.maxCrossError}`);
+  assert.deepEqual(result.kickCarriers, [null, null, null, null], "the kicked ball reattached to the passer");
+  assert.deepEqual(result.receiveCarriers, [null, null, null, null], "the arriving ball attached before its receiving frame");
+  assert.equal(result.finalCarrierId, result.receiverId, "the receiver did not own the ball at the recorded frame");
+  assert.equal(result.flightTrail.length, 1, "the completed pass trail leaked into the receiving phase");
+  assert.ok(result.canvas.width > 0 && result.canvas.height > 0, "match canvas has no stable dimensions");
+  assert.ok(result.canvas.nonBlankPixels > 1000, "match canvas rendered no meaningful pixels");
+}
+
 const navGroupByTab = {
   dashboard: "overview",
   finance: "overview",
@@ -75,6 +240,7 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await assertStraightPassRendering(page);
   await assertCrestLoaded(page.locator("#start-club-preview .club-crest"), "career setup crest");
   await assertNoHorizontalOverflow(page, "desktop start screen");
   await page.fill("#input-manager", "Browser Audit");
@@ -244,7 +410,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: straight-pass rendering, nonblank match canvas, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

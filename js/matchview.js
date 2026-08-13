@@ -14,7 +14,7 @@
 
 import { FORMATIONS, playerDisplaySurname } from "./data.js";
 import { MatchViewFSM } from "./matchview-fsm.js";
-import { simMinuteOf } from "./match-presentation.js";
+import { interpolateSimBall, simMinuteOf } from "./match-presentation.js";
 import { coordSystem } from "./matchview-coords.js";
 import { GOAL_NARRATIVE, DirectorScript } from "./matchview-director.js";
 import {
@@ -106,6 +106,7 @@ export class MatchView {
     this.ball = { x: 50, y: 50, tx: 50, ty: 50, z: 0, el: null };
     /** 球轨迹（FM 空中/传球丝带） */
     this._ballTrail = [];
+    this._simBallTrailPhase = null;
     this.fxLayer = null;
     this.trailSvg = null;
     this.fieldEl = null;
@@ -260,6 +261,7 @@ export class MatchView {
       this.attackPhase = null;
       this.camMode = "follow";
       this._ballTrail = [];
+      this._simBallTrailPhase = null;
       // 清轨迹/传球网，避免和 Canvas 球员叠成重影
       this.trails = [];
       if (this.trailSvg) this.trailSvg.innerHTML = "";
@@ -341,6 +343,11 @@ export class MatchView {
       this._applyPlayer(pl);
     }
 
+    const previousBall = {
+      x: this.ball.x,
+      y: this.ball.y,
+      z: this.ball.z || 0,
+    };
     if (sim.ball) {
       const bx = clamp(sim.ball.x, 0, 100);
       const by = clamp(sim.ball.y, 0, 100);
@@ -417,6 +424,17 @@ export class MatchView {
             ? "flight"
             : "free";
     }
+    const trailPhase = ownerId
+      ? `held:${ownerId}`
+      : ballState === "pass" || ballState === "shot"
+        ? ballState
+        : ballState || "free";
+    if (this._simBallTrailPhase && trailPhase !== this._simBallTrailPhase) {
+      const startsFlight = trailPhase === "pass" || trailPhase === "shot";
+      const leftPossession = this._simBallTrailPhase.startsWith("held:");
+      this._ballTrail = startsFlight && leftPossession ? [previousBall] : [];
+    }
+    this._simBallTrailPhase = trailPhase;
     this._pushBallTrail();
     this._applyBall();
     // 直播用 soft follow（见 update）；非时间轴时默认 follow
@@ -453,22 +471,9 @@ export class MatchView {
         hasBall: false, // 下面按 ball.owner 统一赋值
       };
     });
-    // 球 owner 跟插值后半帧，避免前半还亮旧持球人
-    const za = Number(fa.ball?.z) || 0;
-    const zb = Number(fb.ball?.z) || 0;
-    const owner = t < 0.45 ? fa.ball?.owner : fb.ball?.owner;
-    const st = t < 0.45 ? fa.ball?.state : fb.ball?.state;
-    const ball = {
-      x: (fa.ball?.x ?? 50) + ((fb.ball?.x ?? 50) - (fa.ball?.x ?? 50)) * t,
-      y: (fa.ball?.y ?? 50) + ((fb.ball?.y ?? 50) - (fa.ball?.y ?? 50)) * t,
-      z: za + (zb - za) * t,
-      state: st || null,
-      // 只认后半帧的脉冲，避免插值区间内重复 netHit
-      netHit: t >= 0.5 ? !!fb.ball?.netHit : !!fa.ball?.netHit,
-      owner: owner ?? null,
-    };
-    if (owner) {
-      for (const p of players) p.hasBall = p.id === owner;
+    const ball = interpolateSimBall(fa.ball, fb.ball, t);
+    if (ball.owner) {
+      for (const p of players) p.hasBall = p.id === ball.owner;
     }
     // 插值本身已是 60fps 平滑，不再二次 soft（双重平滑会发糊/发飘）
     return this.applySimSnapshot(

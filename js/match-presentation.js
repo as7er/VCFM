@@ -34,6 +34,51 @@ export function simMinuteOf(tSec) {
   return Math.max(1, Math.min(90, Math.floor(t / 60) + 1));
 }
 
+const FREE_BALL_STATES = new Set(["pass", "shot", "loose", "dead"]);
+
+/**
+ * Interpolate the recorded ball without assigning it to a player before the
+ * physical transition has reached that frame. Discrete owner/state switching
+ * at the middle of a frame used to pull the rendered ball back to a player's
+ * feet, creating false bends in otherwise straight passes.
+ */
+export function interpolateSimBall(from = {}, to = {}, alpha = 0) {
+  const t = Math.max(0, Math.min(1, Number(alpha) || 0));
+  const fromX = Number.isFinite(Number(from.x)) ? Number(from.x) : 50;
+  const fromY = Number.isFinite(Number(from.y)) ? Number(from.y) : 50;
+  const fromZ = Number.isFinite(Number(from.z)) ? Number(from.z) : 0;
+  const toX = Number.isFinite(Number(to.x)) ? Number(to.x) : fromX;
+  const toY = Number.isFinite(Number(to.y)) ? Number(to.y) : fromY;
+  const toZ = Number.isFinite(Number(to.z)) ? Number(to.z) : fromZ;
+  const fromOwner = from.owner ?? null;
+  const toOwner = to.owner ?? null;
+  const fromState = from.state || null;
+  const toState = to.state || null;
+
+  let owner = t < 0.45 ? fromOwner : toOwner;
+  let state = t < 0.45 ? fromState : toState;
+  if (t > 0 && t < 1) {
+    const kicked = !!fromOwner && !toOwner && FREE_BALL_STATES.has(toState);
+    const received = !fromOwner && !!toOwner && FREE_BALL_STATES.has(fromState);
+    if (kicked) {
+      owner = null;
+      state = toState;
+    } else if (received) {
+      owner = null;
+      state = fromState;
+    }
+  }
+
+  return {
+    x: fromX + (toX - fromX) * t,
+    y: fromY + (toY - fromY) * t,
+    z: fromZ + (toZ - fromZ) * t,
+    state,
+    owner,
+    netHit: t >= 0.5 ? !!to.netHit : !!from.netHit,
+  };
+}
+
 /**
  * 点球从判罚到出脚的模拟秒数。判罚提示的显示时长和镜头停顿都读这个值，
  * 界面才不会在球还没踢出时就把"判罚点球"换成射门或扑救文案。
