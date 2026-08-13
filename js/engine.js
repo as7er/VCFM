@@ -29,6 +29,7 @@ import {
   ensureWorldClubTemplates,
 } from "./models.js";
 import { STYLE_MOD, FORMATIONS, POS_LABEL } from "./data.js";
+import { assertWorldInvariantsWhenEnabled } from "./world-invariants.js";
 import { positionGroup, positionRating } from "./player-positions.js";
 import { processInjuryRecoveryDay } from "./injuries.js";
 import {
@@ -938,6 +939,8 @@ function finishAdvanceDay(world, context) {
   for (const ev of events) {
     if (ev.day == null) ev.day = world.day;
   }
+  // 开发期一致性检查：默认关闭，由 VCFM_DEV_INVARIANTS=1 启用
+  assertWorldInvariantsWhenEnabled(world, "advance-day");
   return {
     userMatches,
     sacked,

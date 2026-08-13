@@ -60,6 +60,7 @@ const checks = [
   "scripts/long-term-reality-audit.mjs",
   "scripts/ui-layout-audit.mjs",
   "scripts/ecosystem-audit.mjs",
+  "scripts/world-invariants-audit.mjs",
 ];
 const fullChecks = [["scripts/match-realism-audit.mjs", "24"]];
 

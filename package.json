@@ -5,7 +5,12 @@
   "scripts": {
     "test": "node scripts/verify.mjs",
     "test:full": "node scripts/verify.mjs --full",
-    "test:browser": "node scripts/browser-e2e.mjs"
+    "test:browser": "node scripts/browser-e2e.mjs",
+    "benchmark": "node scripts/performance-benchmark.mjs",
+    "benchmark:spatial": "node scripts/performance-benchmark.mjs --spatial"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "devDependencies": {
     "playwright": "^1.55.0"
