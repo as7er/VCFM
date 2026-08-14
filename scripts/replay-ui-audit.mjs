@@ -83,4 +83,18 @@ assert.ok(
   "post-match replay must reveal and focus the pitch"
 );
 
+const driveEventStart = mainSource.indexOf("async function driveMatchEvent");
+const driveEventEnd = mainSource.indexOf("function buildBriefingForFixture", driveEventStart);
+const driveEventSource = mainSource.slice(driveEventStart, driveEventEnd);
+assert.ok(
+  driveEventSource.includes("if (simDrive)") &&
+    driveEventSource.includes("matchView.playGoalHighlight") &&
+    driveEventSource.includes("rewatch: true"),
+  "spatial live goals must enter an explicitly labelled automatic replay"
+);
+assert.ok(
+  highlightSource.includes("this.simDrive") && highlightSource.includes("liveSim"),
+  "spatial replay must restore the SIM_DRIVEN state after playback"
+);
+
 console.log(JSON.stringify({ safeText: replayText.textContent, clickId: playedId }, null, 2));

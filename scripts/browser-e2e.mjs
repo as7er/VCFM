@@ -48,7 +48,7 @@ async function assertCrestLoaded(locator, label) {
 
 async function assertStraightPassRendering(page) {
   const result = await page.evaluate(async () => {
-    const { MatchView } = await import("./js/matchview.js?v=213");
+    const { MatchView } = await import("./js/matchview.js?v=215");
     const positions = ["GK", "DEF", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT", "ATT"];
     const makeClub = (id, color) => {
       const players = positions.map((pos, index) => ({
@@ -189,6 +189,47 @@ async function assertStraightPassRendering(page) {
       height: view.canvas.height,
       nonBlankPixels,
     };
+    const replayScene = view.captureSceneSnapshot();
+    let replayBadgeVisible = false;
+    let replayGoalSequenceVisible = false;
+    let replayNonBlankPixels = 0;
+    const replayPlayed = await view.playGoalHighlight(
+      {
+        type: "goal",
+        minute: 12,
+        teamId: home.id,
+        playerId: receiverId,
+        text: "Goal replay browser audit",
+      },
+      { homeGoals: 1, awayGoals: 0, minute: 12 },
+      { home: home.id, away: away.id },
+      {
+        speed: 1,
+        lang: "en",
+        rewatch: true,
+        scene: replayScene,
+        sleepFn: async () => {
+          view._drawCanvas();
+          replayBadgeVisible ||= !view.replayBadgeEl?.classList.contains("hidden");
+          replayGoalSequenceVisible ||= view.fsm.current() === "GOAL_SEQUENCE";
+          const replayPixels = view.canvas
+            .getContext("2d")
+            .getImageData(0, 0, view.canvas.width, view.canvas.height)
+            .data;
+          let nonBlank = 0;
+          for (let index = 3; index < replayPixels.length; index += 4) {
+            if (replayPixels[index] > 0) nonBlank++;
+          }
+          replayNonBlankPixels = Math.max(replayNonBlankPixels, nonBlank);
+          await Promise.resolve();
+        },
+      }
+    );
+    const replayReturn = {
+      state: view.fsm.current(),
+      subState: view.fsm.subState,
+      simDrive: view.simDrive,
+    };
     view.destroy();
     root.remove();
     return {
@@ -199,6 +240,11 @@ async function assertStraightPassRendering(page) {
       flightTrail,
       canvas,
       receiverId,
+      replayPlayed,
+      replayBadgeVisible,
+      replayGoalSequenceVisible,
+      replayNonBlankPixels,
+      replayReturn,
     };
   });
 
@@ -209,6 +255,15 @@ async function assertStraightPassRendering(page) {
   assert.equal(result.flightTrail.length, 1, "the completed pass trail leaked into the receiving phase");
   assert.ok(result.canvas.width > 0 && result.canvas.height > 0, "match canvas has no stable dimensions");
   assert.ok(result.canvas.nonBlankPixels > 1000, "match canvas rendered no meaningful pixels");
+  assert.equal(result.replayPlayed, true, "spatial goal replay did not start");
+  assert.equal(result.replayBadgeVisible, true, "spatial goal replay never displayed replay chrome");
+  assert.equal(result.replayGoalSequenceVisible, true, "spatial goal replay never entered GOAL_SEQUENCE");
+  assert.ok(result.replayNonBlankPixels > 1000, "spatial goal replay canvas was blank");
+  assert.deepEqual(
+    result.replayReturn,
+    { state: "PLAYING", subState: "SIM_DRIVEN", simDrive: true },
+    "spatial goal replay did not restore SIM_DRIVEN playback"
+  );
 }
 
 const navGroupByTab = {
@@ -410,7 +465,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: straight-pass rendering, nonblank match canvas, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: spatial goal replay, straight-pass rendering, nonblank match canvas, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

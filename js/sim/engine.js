@@ -2583,14 +2583,20 @@ export class SimEngine {
     const danger = owner ? this._mostDangerousReceiver(owner.team) : null;
     if (rest[0]) jobs.set(rest[0].id, { type: "screen", markId: danger?.id || null });
     let interceptN = 0;
-    const maxInterceptors = pressing >= 5 ? 3 : pressing >= 3 ? 2 : 1;
+    // 一人贴身、次近者盯接球点，通道拦截者只封线不再同时扑向球。
+    // 标准压迫最多一名通道拦截者，极高压迫才允许第二人封另一侧。
+    const maxInterceptors = pressing >= 5 ? 2 : 1;
     const interceptRange = 16 + pressing * 2;
+    const usedSides = new Set();
     for (const a of rest.slice(1)) {
       if (interceptN >= maxInterceptors) break;
       if (a.role === "DEF") continue;
       const reach = interceptRange + Math.max(0, this._roleBehavior(a, "press")) * 6;
       if (dist(a.x, a.y, this.ball.x, this.ball.y) > reach) continue;
-      jobs.set(a.id, { type: "intercept" });
+      let side = (a.baseX ?? a.x) <= this.ball.x ? -1 : 1;
+      if (usedSides.has(side)) side *= -1;
+      usedSides.add(side);
+      jobs.set(a.id, { type: "intercept", side, order: interceptN });
       interceptN++;
     }
 
@@ -2604,6 +2610,25 @@ export class SimEngine {
    * 防守方执行球队统一任务：press / screen / intercept / shape。
    * 任务短时锁定，目标点仍连续跟随球和被盯球员。
    */
+  _defensiveSupportTarget(x, y, ownGoalY, minDistance = 5.5, sideHint = 0) {
+    const b = this.ball;
+    let dx = x - b.x;
+    let dy = y - b.y;
+    let length = Math.hypot(dx, dy);
+    if (length >= minDistance) {
+      return { x: clamp(x, 3, 97), y: clamp(y, 3, 97) };
+    }
+    if (length < 1e-6) {
+      dx = sideHint || (b.x >= 50 ? -1 : 1);
+      dy = (ownGoalY - b.y) * 0.2;
+      length = Math.hypot(dx, dy) || 1;
+    }
+    return {
+      x: clamp(b.x + (dx / length) * minDistance, 3, 97),
+      y: clamp(b.y + (dy / length) * minDistance, 3, 97),
+    };
+  }
+
   _thinkDefend(a, owner) {
     const b = this.ball;
     const ownGoalY = a.team === "home" ? SIM.HOME_GOAL_Y : SIM.AWAY_GOAL_Y;
@@ -2643,8 +2668,16 @@ export class SimEngine {
         // 站在 mark 与球门之间，切断直塞
         const mx = mark.x + (50 - mark.x) * 0.15;
         const my = mark.y + (ownGoalY - mark.y) * 0.22;
-        a.tx = clamp(mx, 3, 97);
-        a.ty = clamp(my, 3, 97);
+        const dBallGoal = dist(b.x, b.y, 50, ownGoalY);
+        const support = this._defensiveSupportTarget(
+          mx,
+          my,
+          ownGoalY,
+          dBallGoal < 18 ? 3.8 : 5.5,
+          mark.x <= b.x ? -1 : 1
+        );
+        a.tx = support.x;
+        a.ty = support.y;
         a.fsm = "cover";
         return;
       }
@@ -2658,11 +2691,13 @@ export class SimEngine {
       // 只有在中前场、且离球不太远时才主动上抢拦截（后场交给防线站位）
       const midField = a.role !== "DEF";
       if (midField && dBall < 22) {
-        // 扑向"持球人身前"的拦截点：切断其向前推进/传球的线路
+        // 分居持球人前方两侧封线，保持支援距离；只有 press 职责贴身下脚。
         const dir = this.attackDir(owner?.team || b.kickTeam); // 进攻方推进方向
-        a.tx = clamp(b.x, 3, 97);
-        a.ty = clamp(b.y + dir * 3, 3, 97); // 站到持球人身前一点
-        a.fsm = "press";
+        const order = Number(job.order) || 0;
+        const side = Number(job.side) || ((a.baseX ?? a.x) <= b.x ? -1 : 1);
+        a.tx = clamp(b.x + side * (4.8 + order * 1.2), 3, 97);
+        a.ty = clamp(b.y + dir * (3.8 + order * 0.8), 3, 97);
+        a.fsm = "cover";
         return;
       }
     }
@@ -2677,8 +2712,15 @@ export class SimEngine {
     const toward = 0.28 + central * 0.34;
     // 横向目标：baseX 与「球门中路和球位的混合」按 toward 插值
     const anchorX = (50 * 0.55 + b.x * 0.45);
-    a.tx = clamp(a.baseX + (anchorX - a.baseX) * toward, 4, 96);
-    a.ty = clamp(lineY, 3, 97);
+    const shape = this._defensiveSupportTarget(
+      a.baseX + (anchorX - a.baseX) * toward,
+      lineY,
+      ownGoalY,
+      dBallGoal < 18 ? 3.6 : 4.8,
+      (a.baseX ?? a.x) <= b.x ? -1 : 1
+    );
+    a.tx = clamp(shape.x, 4, 96);
+    a.ty = shape.y;
     a.fsm = "cover";
   }
 

@@ -55,8 +55,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=214";
-import { clubCrestHtml } from "./club-crest.js?v=214";
+import { nationFlagHtml } from "./flags.js?v=215";
+import { clubCrestHtml } from "./club-crest.js?v=215";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -315,7 +315,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=214";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=215";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -381,7 +381,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=214";
+} from "./avatar.js?v=215";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
@@ -474,7 +474,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=214").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=215").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -8693,8 +8693,27 @@ async function driveMatchEvent(ev, snap, { live = true } = {}) {
     if (simDrive) {
       if (snap?.sim && matchView?.applySimSnapshot) matchView.applySimSnapshot(snap.sim);
       if (matchView) matchView.onEvent(ev, snap, fixture);
-      const goalWait = live ? 3200 / Math.min(spd, 1.25) : 500;
+      // 普通空间事件路径此前只停在入网提示，连续时间轴路径才会自动回放。
+      // 直播时统一先保留短暂真实入网画面，再进入带明确标识的进球回放。
+      const goalWait = live ? 650 / Math.min(spd, 1.25) : 350;
       await sleepPlayback(goalWait);
+      if (live && matchView?.playGoalHighlight) {
+        matchPlayback.replaying = true;
+        try {
+          const played = await matchView.playGoalHighlight(ev, snap, fixture, {
+            speed: Math.min(spd, 1),
+            lang: getLang(),
+            sleepFn: sleepPlayback,
+            scene: scene || null,
+            rewatch: true,
+          });
+          if (!played) throw new Error("Spatial goal replay could not enter playback state");
+        } catch (error) {
+          console.warn(error);
+        } finally {
+          matchPlayback.replaying = false;
+        }
+      }
       return;
     }
 

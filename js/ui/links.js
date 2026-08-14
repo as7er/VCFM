@@ -10,7 +10,7 @@
 import { escapeHtml } from "./dom.js";
 import { getLang } from "../i18n.js";
 import { localizedClubName, localizedClubShortName } from "../branding.js";
-import { clubCrestHtml } from "../club-crest.js?v=214";
+import { clubCrestHtml } from "../club-crest.js?v=215";
 
 let readWorld = () => null;
 

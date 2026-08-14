@@ -6801,7 +6801,9 @@ export class MatchView {
     this.attackPhase = null;
 
     const kickSide = attHome ? "away" : "home";
-    this.possession = replayReturn?.possession || kickSide;
+    this.possession = replayReturn?.liveSim
+      ? kickSide
+      : replayReturn?.possession || kickSide;
     this._resetShape();
     this._updatePossessionChrome();
     this.ball.x = 50;
@@ -6819,7 +6821,9 @@ export class MatchView {
       this.simDrive = replayReturn.simDrive;
       this.fieldEl?.classList.toggle("mp-sim-drive", replayReturn.simDrive);
       this.setBanner(
-        replayReturn.bannerText || (lang === "en" ? "FULL-TIME" : "完场回顾"),
+        replayReturn.liveSim
+          ? ""
+          : replayReturn.bannerText || (lang === "en" ? "FULL-TIME" : "完场回顾"),
         "info"
       );
       this.setCaption("");
@@ -7027,12 +7031,13 @@ export class MatchView {
     const isRewatch = !!opts.rewatch;
     const scene = opts.scene || null;
     const replayReturn =
-      isRewatch && ['FULL_TIME', 'PAUSED'].includes(this.fsm.current())
+      isRewatch && (['FULL_TIME', 'PAUSED'].includes(this.fsm.current()) || this.simDrive)
         ? {
             state: this.fsm.current(),
             subState: this.fsm.subState,
             frozen: this._legacyFrozen,
             simDrive: this.simDrive,
+            liveSim: this.simDrive && this.fsm.current() === 'PLAYING',
             possession: this.possession,
             bannerText: this.bannerEl?.textContent || "",
           }
