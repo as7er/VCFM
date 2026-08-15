@@ -55,8 +55,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=215";
-import { clubCrestHtml } from "./club-crest.js?v=215";
+import { nationFlagHtml } from "./flags.js?v=216";
+import { clubCrestHtml } from "./club-crest.js?v=216";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -315,7 +315,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=215";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=216";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -381,7 +381,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=215";
+} from "./avatar.js?v=216";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
@@ -474,7 +474,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=215").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=216").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -696,19 +696,54 @@ function updateMatchSfxUI() {
   if (glyph) glyph.textContent = muted ? "🔇" : "🔊";
 }
 
+function trimGoalReplayFrames(frames, climaxAt) {
+  if (!Array.isArray(frames) || frames.length < 4) return [];
+  const firstT = Number(frames[0]?.t);
+  const lastT = Number(frames[frames.length - 1]?.t);
+  const netT = Number(frames.find((frame) => frame?.ball?.netHit)?.t);
+  const requested = climaxAt == null ? NaN : Number(climaxAt);
+  const climax = Number.isFinite(requested)
+    ? requested
+    : Number.isFinite(netT)
+      ? netT
+      : lastT;
+  if (!Number.isFinite(firstT) || !Number.isFinite(lastT) || !Number.isFinite(climax)) return [];
+  if (climax < firstT - 0.5 || climax > lastT + 0.5) return [];
+  const replay = frames.filter((frame) => {
+    const t = Number(frame?.t);
+    return Number.isFinite(t) && t >= climax - 5.5 && t <= climax + 2;
+  });
+  return replay.length >= 4 ? replay : [];
+}
+
+function currentGoalReplayData() {
+  const timeline = matchView?._lastTimeline;
+  const climaxAt = timeline?.climaxAt == null ? NaN : Number(timeline.climaxAt);
+  return {
+    frames: trimGoalReplayFrames(timeline?.frames, climaxAt),
+    climaxAt: Number.isFinite(climaxAt) ? climaxAt : null,
+  };
+}
+
 /**
  * @param {object} ev
  * @param {object} [snap]
  * @param {object} [fixture]
- * @param {object|null} [scene] 进球瞬间场面（回看还原用）
+ * @param {object|null} [scene] 进球瞬间场面（无真实帧的旧战报回退用）
+ * @param {{ frames?: object[], climaxAt?: number|null }} [replay]
  */
-function rememberGoalReplay(ev, snap, fixture, scene = null) {
+function rememberGoalReplay(ev, snap, fixture, scene = null, replay = {}) {
   if (!ev || ev.type !== "goal") return;
   matchPlayback.goals.push({
     ev: { ...ev },
     snap: snap ? { ...snap } : { homeGoals: 0, awayGoals: 0, minute: ev.minute },
     fixture: fixture || pendingMatch,
     scene: scene || null,
+    frames: Array.isArray(replay.frames) ? replay.frames.slice() : [],
+    climaxAt:
+      replay.climaxAt != null && Number.isFinite(Number(replay.climaxAt))
+        ? Number(replay.climaxAt)
+        : null,
   });
 }
 
@@ -734,14 +769,24 @@ async function replayStoredGoal(index) {
     pitchRoot?.scrollIntoView?.({ behavior: "smooth", block: "center" });
     await new Promise((resolve) => requestAnimationFrame(() => resolve()));
     const spd = Math.max(0.25, Number(matchSpeed) || 1);
-    // 回看时略慢一点更好看；有场面快照则从同一帧接续
-    const played = await matchView.playGoalHighlight(item.ev, item.snap, item.fixture, {
-      speed: Math.min(spd, 1),
-      lang: getLang(),
-      sleepFn: sleepPlayback,
-      rewatch: true,
-      scene: item.scene || null,
-    });
+    // 空间比赛优先重播真实帧；旧战报没有帧时才使用确定性的轻量回退。
+    const played =
+      item.frames?.length >= 4 && matchView.playRecordedGoalReplay
+        ? await matchView.playRecordedGoalReplay({
+            frames: item.frames,
+            climaxAt: item.climaxAt,
+            lang: getLang(),
+            sleepFn: sleepPlayback,
+            getSpeed: () => Math.min(1, spd),
+            isPaused: () => !!matchPlayback.paused,
+          })
+        : await matchView.playGoalHighlight(item.ev, item.snap, item.fixture, {
+            speed: Math.min(spd, 1),
+            lang: getLang(),
+            sleepFn: sleepPlayback,
+            rewatch: true,
+            scene: item.scene || null,
+          });
     if (!played) throw new Error("Goal replay could not enter playback state");
   } catch (err) {
     console.error(err);
@@ -8315,7 +8360,8 @@ function handleSimLiveEvent(ev, snap) {
 
   if (ev.type === "goal") {
     const scene = matchView?.captureSceneSnapshot?.() || null;
-    rememberGoalReplay(ev, snap, fixture, scene);
+    const replay = currentGoalReplayData();
+    rememberGoalReplay(ev, snap, fixture, scene, replay);
     if (ev.text) appendMatchEvent(ev, { goalIndex: matchPlayback.goals.length - 1 });
     if (matchView) {
       if (snap?.sim) matchView.applySimSnapshot(snap.sim);
@@ -8327,8 +8373,8 @@ function handleSimLiveEvent(ev, snap) {
       matchPlayback.pendingGoalReplay = {
         lang,
         scene,
-        frames: matchView._lastTimeline?.frames || null,
-        climaxAt: matchView._lastTimeline?.climaxAt ?? null,
+        frames: replay.frames,
+        climaxAt: replay.climaxAt,
       };
     }
     return;
@@ -8592,7 +8638,7 @@ async function playHighlightPlanBridge(spec) {
         matchPlayback.pendingGoalReplay = null;
         matchPlayback.replaying = true;
         try {
-          await matchView.playFmmGoalReplay({
+          await (matchView.playRecordedGoalReplay || matchView.playFmmGoalReplay).call(matchView, {
             lang: pr.lang || getLang(),
             scene: pr.scene,
             frames: pr.frames || seg.frames,
@@ -8601,6 +8647,7 @@ async function playHighlightPlanBridge(spec) {
             // 自动重播不是二次慢镜：×1 约 6.5s，低速档也封在约 8s。
             getSpeed: () => Math.min(1.25, Math.max(0.8, getSpeed())),
             isPaused: () => !!(matchPlayback.paused || matchView._fmmReplay?.skip),
+            returnToLiveSim: true,
           });
         } catch (e) {
           console.warn(e);
@@ -8676,7 +8723,8 @@ async function driveMatchEvent(ev, snap, { live = true } = {}) {
   if (ev.type === "goal") {
     // 先抓场面，再对齐/高光——回看才能从同一帧接
     const scene = matchView?.captureSceneSnapshot?.() || null;
-    rememberGoalReplay(ev, snap, fixture, scene);
+    const replay = currentGoalReplayData();
+    rememberGoalReplay(ev, snap, fixture, scene, replay);
     // 顶栏比分/分钟：快速模拟也必须同步（横幅已在播，不能还显示 0-0 / 0′）
     if (snap) {
       setMatchScore(snap.homeGoals, snap.awayGoals);
@@ -8697,16 +8745,27 @@ async function driveMatchEvent(ev, snap, { live = true } = {}) {
       // 直播时统一先保留短暂真实入网画面，再进入带明确标识的进球回放。
       const goalWait = live ? 650 / Math.min(spd, 1.25) : 350;
       await sleepPlayback(goalWait);
-      if (live && matchView?.playGoalHighlight) {
+      if (live && (matchView?.playRecordedGoalReplay || matchView?.playGoalHighlight)) {
         matchPlayback.replaying = true;
         try {
-          const played = await matchView.playGoalHighlight(ev, snap, fixture, {
-            speed: Math.min(spd, 1),
-            lang: getLang(),
-            sleepFn: sleepPlayback,
-            scene: scene || null,
-            rewatch: true,
-          });
+          const played =
+            replay.frames.length >= 4 && matchView.playRecordedGoalReplay
+              ? await matchView.playRecordedGoalReplay({
+                  frames: replay.frames,
+                  climaxAt: replay.climaxAt,
+                  lang: getLang(),
+                  sleepFn: sleepPlayback,
+                  getSpeed: () => Math.min(1, spd),
+                  isPaused: () => !!matchPlayback.paused,
+                  returnToLiveSim: true,
+                })
+              : await matchView.playGoalHighlight(ev, snap, fixture, {
+                  speed: Math.min(spd, 1),
+                  lang: getLang(),
+                  sleepFn: sleepPlayback,
+                  scene: scene || null,
+                  rewatch: true,
+                });
           if (!played) throw new Error("Spatial goal replay could not enter playback state");
         } catch (error) {
           console.warn(error);

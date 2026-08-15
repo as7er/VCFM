@@ -116,6 +116,10 @@ const matchPoolSource = readFileSync(
   new URL("../js/sim/match-worker-pool.js", import.meta.url),
   "utf8"
 );
+const benchmarkSource = readFileSync(
+  new URL("./performance-benchmark.mjs", import.meta.url),
+  "utf8"
+);
 const mainSource = readFileSync(new URL("../js/main.js", import.meta.url), "utf8");
 assert.match(workerSource, /aiEngineMode:\s*"spatial"/);
 assert.match(workerSource, /aiSimulationProfile:\s*"background"/);
@@ -127,6 +131,22 @@ assert.match(matchWorkerSource, /runPreparedMatchSimulation/);
 assert.match(matchPoolSource, /prepareMatchSimulation/);
 assert.match(matchPoolSource, /commitPreparedMatch/);
 assert.match(matchPoolSource, /new Worker\(/);
+assert.match(matchPoolSource, /const workerSlots = \[\]/);
+assert.match(matchPoolSource, /shutdownMatchWorkerPool/);
+const workerWaveSource = matchPoolSource.slice(
+  matchPoolSource.indexOf("function runWorkerWave"),
+  matchPoolSource.indexOf("export function shutdownMatchWorkerPool")
+);
+assert.doesNotMatch(
+  workerWaveSource,
+  /terminate\(/,
+  "successful fixture waves must retain their match workers"
+);
+assert.match(benchmarkSource, /totalAdvanceMs/);
+assert.match(benchmarkSource, /totalSerializeMs/);
+assert.match(benchmarkSource, /totalCompressMs/);
+assert.match(benchmarkSource, /totalWallMs/);
+assert.doesNotMatch(benchmarkSource, /totalBenchmarkMs/);
 assert.match(mainSource, /advanceDayAsync\(world\)/);
 assert.match(mainSource, /advanceToNextMatchDayAsync\(world\)/);
 assert.match(mainSource, /advanceToSeasonEndAsync\(world/);

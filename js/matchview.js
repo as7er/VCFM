@@ -31,6 +31,29 @@ function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
+function replayRandomFor(event = {}) {
+  const key = [
+    event.teamId,
+    event.playerId,
+    event.assistId,
+    event.minute,
+    event.penalty ? 1 : 0,
+    event.ownGoal ? 1 : 0,
+  ].join("|");
+  let seed = 2166136261;
+  for (let index = 0; index < key.length; index++) {
+    seed ^= key.charCodeAt(index);
+    seed = Math.imul(seed, 16777619);
+  }
+  return () => {
+    seed += 0x6d2b79f5;
+    let value = seed;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 /** 战术站位 → 球场坐标（主队守下方，客队翻转） */
 function slotToPitch(slot, isHome) {
   let x = slot.x;
@@ -201,6 +224,7 @@ export class MatchView {
      * 直播 v2 时开启。
      */
     this.simDrive = false;
+    this._presentationReadOnlyDepth = 0;
   }
 
   // ===== 状态标志兼容层（getter/setter 代理到 FSM） =====
@@ -247,6 +271,7 @@ export class MatchView {
    * @param {boolean} on
    */
   setSimDrive(on) {
+    const wasOn = this.simDrive;
     this.simDrive = !!on;
     this.fieldEl?.classList.toggle("mp-sim-drive", !!on);
     // 开赛时布局常从 pre-kickoff 变 live，必须重测 canvas
@@ -269,7 +294,7 @@ export class MatchView {
         const paths = this.networkSvg.querySelector("#mp-net-paths");
         if (paths) paths.innerHTML = "";
       }
-      this.passNetwork?.clear?.();
+      if (!wasOn && this._presentationReadOnlyDepth <= 0) this.passNetwork?.clear?.();
       const currentState = this.fsm.current();
       if (currentState === 'PRE_MATCH' || currentState === 'PAUSED' || currentState === 'HALF_TIME') {
         this.fsm.transition('PLAYING', 'FREE_PLAY');
@@ -2029,7 +2054,7 @@ export class MatchView {
    * 轻推进攻队形目标（不改 x/y，只改 tx/ty）
    * amount 0..1
    */
-  _nudgeAttackShape(team, amount = 0.4) {
+  _nudgeAttackShape(team, amount = 0.4, random = Math.random) {
     const dir = this._attackDir(team);
     const a = clamp(amount, 0.1, 0.65);
     for (const pl of this.players) {
@@ -2037,13 +2062,13 @@ export class MatchView {
       if (pl === this.carrier) continue;
       const push = pl.pos === "ATT" ? 4.5 : pl.pos === "MID" ? 3 : pl.pos === "DEF" ? 1.1 : 0.15;
       // 以 base 为主，轻微前压 — 更贴阵型
-      pl.tx = clamp(lerp(pl.baseX, pl.x, 0.15) + (Math.random() - 0.5) * 1.2, 6, 94);
-      pl.ty = clamp(pl.baseY + dir * push * a + (Math.random() - 0.5) * 0.8, 5, 95);
+      pl.tx = clamp(lerp(pl.baseX, pl.x, 0.15) + (random() - 0.5) * 1.2, 6, 94);
+      pl.ty = clamp(pl.baseY + dir * push * a + (random() - 0.5) * 0.8, 5, 95);
     }
   }
 
   /** 防守方：后卫追球深度 + 中前场按球回撤（不再锁死 baseY） */
-  _nudgeDefendShape(team, toward) {
+  _nudgeDefendShape(team, toward, random = Math.random) {
     const tx = toward?.x ?? this.ball?.x ?? 50;
     const ty = toward?.y ?? this.ball?.y ?? 50;
     const outfield = this.players.filter(
@@ -2064,8 +2089,8 @@ export class MatchView {
         team === "home"
           ? clamp(ty - (i < 2 ? 8 : 12), 56, 91)
           : clamp(ty + (i < 2 ? 8 : 12), 9, 44);
-      pl.tx = clamp(lerp(pl.baseX, tx, ballW) + (Math.random() - 0.5) * 2.5, 8, 92);
-      pl.ty = clamp(lerp(pl.baseY, lineY, 0.72) + (Math.random() - 0.5) * 2, 6, 94);
+      pl.tx = clamp(lerp(pl.baseX, tx, ballW) + (random() - 0.5) * 2.5, 8, 92);
+      pl.ty = clamp(lerp(pl.baseY, lineY, 0.72) + (random() - 0.5) * 2, 6, 94);
     }
 
     for (const pl of mids) {
@@ -2073,15 +2098,15 @@ export class MatchView {
         team === "home"
           ? clamp(ty - 22, 48, 80)
           : clamp(ty + 22, 20, 52);
-      pl.tx = clamp(lerp(pl.baseX, tx, 0.22) + (Math.random() - 0.5) * 2, 10, 90);
-      pl.ty = clamp(lineY + (Math.random() - 0.5) * 3, team === "home" ? 46 : 18, team === "home" ? 82 : 54);
+      pl.tx = clamp(lerp(pl.baseX, tx, 0.22) + (random() - 0.5) * 2, 10, 90);
+      pl.ty = clamp(lineY + (random() - 0.5) * 3, team === "home" ? 46 : 18, team === "home" ? 82 : 54);
     }
     for (const pl of atts) {
       const lineY =
         team === "home"
           ? clamp(Math.max(48, ty - 34), 46, 68)
           : clamp(Math.min(52, ty + 34), 32, 54);
-      pl.tx = clamp(lerp(pl.baseX, 50, 0.2) + (Math.random() - 0.5) * 4, 12, 88);
+      pl.tx = clamp(lerp(pl.baseX, 50, 0.2) + (random() - 0.5) * 4, 12, 88);
       pl.ty = lineY;
     }
   }
@@ -2964,7 +2989,7 @@ export class MatchView {
   }
 
   _markHeat(x, y, team, amount = 1) {
-    if (!this.heatEnabled || !this.heatCells.length) return;
+    if (this._presentationReadOnlyDepth > 0 || !this.heatEnabled || !this.heatCells.length) return;
     for (const cell of this.heatCells) {
       if (x >= cell.x && x < cell.x + cell.w && y >= cell.y && y < cell.y + cell.h) {
         if (team === "home") cell.home += amount;
@@ -3959,7 +3984,7 @@ export class MatchView {
    * passing 高 → 更准、略快；vision 高 → 预判更靠前
    * 飞行时长按场地%距离估算，接近 FM 2D 观感（短传 ~0.45–0.7s，中传 ~0.8–1.2s）
    */
-  _passTo(fromPl, toPl, { flightMs = 520 } = {}) {
+  _passTo(fromPl, toPl, { flightMs = 520, random = Math.random } = {}) {
     if (!fromPl || !toPl) return;
     const from = { x: this.ball.x, y: this.ball.y };
     const passing = this._attr(fromPl, "passing", 10);
@@ -3971,8 +3996,8 @@ export class MatchView {
     const aimX = lerp(toPl.x, leadX, lead);
     const aimY = lerp(toPl.y, leadY, lead);
     const scatter = Math.max(0.4, 2.2 - passing / 12);
-    const tx = clamp(aimX + (Math.random() - 0.5) * scatter, 5, 95);
-    const ty = clamp(aimY + (Math.random() - 0.5) * scatter, 5, 95);
+    const tx = clamp(aimX + (random() - 0.5) * scatter, 5, 95);
+    const ty = clamp(aimY + (random() - 0.5) * scatter, 5, 95);
     // 好传球略快（最多约 8%），不再把短传压到“瞬移”
     const ms = Math.round(flightMs * (1.04 - passing / 120));
     this._beginFlight({ x: tx, y: ty, receiverId: toPl.id, kind: "pass", ms });
@@ -3982,8 +4007,8 @@ export class MatchView {
     this.carrier = null; // 保持 ballState=flight
     this._setTouch(fromPl, 280);
     // 接球人迎球
-    toPl.tx = clamp(tx + (Math.random() - 0.5) * 2, 6, 94);
-    toPl.ty = clamp(ty + (Math.random() - 0.5) * 2, 6, 94);
+    toPl.tx = clamp(tx + (random() - 0.5) * 2, 6, 94);
+    toPl.ty = clamp(ty + (random() - 0.5) * 2, 6, 94);
   }
 
   /** 飞行结束：接球 / 落地 free */
@@ -4373,6 +4398,7 @@ export class MatchView {
    * @param {object} toPl
    */
   _recordPass(fromPl, toPl) {
+    if (this._presentationReadOnlyDepth > 0) return;
     if (!fromPl?.id || !toPl?.id || fromPl.id === toPl.id) return;
     if (fromPl.team !== toPl.team) return;
     // 无向边 key（同一对球员合并）
@@ -4838,6 +4864,62 @@ export class MatchView {
    * 进球后 FMM 自动重播：用最近高光段帧再播一遍（全场镜头 + 可跳过）
    * @param {object} [opts]
    */
+  async playRecordedGoalReplay(opts = {}) {
+    const frames = opts.frames || this._lastTimeline?.frames;
+    if (!frames?.length || frames.length < 4) return false;
+    const captured = {
+      state: this.fsm.current(),
+      subState: this.fsm.subState,
+      frozen: this._legacyFrozen,
+      simDrive: this.simDrive,
+      possession: this.possession,
+      bannerText: this.bannerEl?.textContent || "",
+      captionText: this.captionEl?.textContent || "",
+      camMode: this.camMode,
+      scene: this.captureSceneSnapshot(),
+    };
+    const target = opts.returnToLiveSim
+      ? {
+          ...captured,
+          state: "PLAYING",
+          subState: "SIM_DRIVEN",
+          frozen: false,
+          simDrive: true,
+          bannerText: "",
+          captionText: "",
+        }
+      : captured;
+    this._presentationReadOnlyDepth++;
+    try {
+      return (await this.playFmmGoalReplay(opts)) !== false;
+    } finally {
+      try {
+        if (target.scene) this.restoreSceneSnapshot(target.scene);
+        if (
+          this.fsm.isIn("GOAL_SEQUENCE") &&
+          this.fsm.subState !== "CELEBRATE" &&
+          target.state !== "GOAL_SEQUENCE"
+        ) {
+          this.fsm.transition("GOAL_SEQUENCE", "CELEBRATE", { replay: true });
+        }
+        this.fsm.transition(target.state, target.subState, { replayReturn: true });
+        this._legacyFrozen = target.frozen;
+        this.fieldEl?.classList.toggle("mp-ui-paused", target.frozen);
+        this.simDrive = target.simDrive;
+        this.fieldEl?.classList.toggle("mp-sim-drive", target.simDrive);
+        this.possession = target.possession;
+        this.camMode = target.camMode;
+        this.setBanner(target.bannerText, "info");
+        this.setCaption(target.captionText, "info", 0);
+        this._updatePossessionChrome();
+        this._syncClickable();
+        this.refreshLayout?.();
+      } finally {
+        this._presentationReadOnlyDepth = Math.max(0, this._presentationReadOnlyDepth - 1);
+      }
+    }
+  }
+
   async playFmmGoalReplay(opts = {}) {
     const lang = opts.lang || "zh";
     const en = lang === "en";
@@ -4859,7 +4941,7 @@ export class MatchView {
         this.setFmmReplayChrome(false, { lang });
         this.setFmmTicker("", "", 0);
       }
-      return;
+      return !!opts.scene;
     }
     this.setFmmReplayChrome(true, { lang });
     this.setFmmTicker(en ? "▶ Goal replay" : "▶ 进球重播", "replay", 0);
@@ -4930,6 +5012,7 @@ export class MatchView {
     if (this.fsm.isIn('GOAL_SEQUENCE')) {
       this.fsm.transition('PLAYING', 'FREE_PLAY');
     }
+    return true;
   }
 
   /**
@@ -6179,11 +6262,11 @@ export class MatchView {
   /**
    * 赛后无快照：轻摆到半场威胁区（不整队回中圈硬演）
    */
-  _seedGoalRewatchPositions(team, attHome, scorer, assister) {
+  _seedGoalRewatchPositions(team, attHome, scorer, assister, random = Math.random) {
     const dir = this._attackDir(team);
-    const seedX = 36 + Math.random() * 28;
+    const seedX = 36 + random() * 28;
     // 偏中前场，避免从中圈突然开打
-    const seedY = attHome ? 32 + Math.random() * 14 : 68 - Math.random() * 14;
+    const seedY = attHome ? 32 + random() * 14 : 68 - random() * 14;
     if (assister && assister !== scorer) {
       assister.x = seedX;
       assister.y = seedY;
@@ -6192,7 +6275,7 @@ export class MatchView {
       this._applyPlayer(assister);
     }
     if (scorer) {
-      scorer.x = clamp(seedX + (Math.random() - 0.5) * 14, 14, 86);
+      scorer.x = clamp(seedX + (random() - 0.5) * 14, 14, 86);
       scorer.y = clamp(seedY + dir * 10, 12, 88);
       scorer.tx = scorer.x;
       scorer.ty = scorer.y;
@@ -6206,11 +6289,11 @@ export class MatchView {
     this.ball.ty = by;
     this._applyBall();
     // 队友轻前压，不瞬移整队
-    this._nudgeAttackShape(team, 0.35);
+    this._nudgeAttackShape(team, 0.35, random);
     this._nudgeDefendShape(team === "home" ? "away" : "home", {
       x: bx,
       y: by,
-    });
+    }, random);
   }
 
   /**
@@ -6877,16 +6960,16 @@ export class MatchView {
   }
 
   /** 球门线内侧坐标（主队攻上 / 客队攻下）——要看得见球进网 */
-  _goalMouth(attHome, { deep = true } = {}) {
+  _goalMouth(attHome, { deep = true, random = Math.random } = {}) {
     // 俯视：主队球门在 y≈0 端，客队在 y≈100 端；进网要比球门线更深一点
-    const gx = 50 + (Math.random() - 0.5) * (deep ? 7 : 10);
+    const gx = 50 + (random() - 0.5) * (deep ? 7 : 10);
     const gy = attHome
       ? deep
-        ? 1.2 + Math.random() * 1.6
-        : 4 + Math.random() * 3
+        ? 1.2 + random() * 1.6
+        : 4 + random() * 3
       : deep
-        ? 98.2 - Math.random() * 1.6
-        : 96 - Math.random() * 3;
+        ? 98.2 - random() * 1.6
+        : 96 - random() * 3;
     return { gx: clamp(gx, 42, 58), gy: clamp(gy, 0.6, 99.4) };
   }
 
@@ -7020,6 +7103,16 @@ export class MatchView {
    * opts.scene：直播进球前抓取的场面；回看优先还原，避免中圈重演。
    */
   async playGoalHighlight(ev, snap, fixture, opts = {}) {
+    if (!opts.rewatch) return this._playGoalHighlight(ev, snap, fixture, opts);
+    this._presentationReadOnlyDepth++;
+    try {
+      return await this._playGoalHighlight(ev, snap, fixture, opts);
+    } finally {
+      this._presentationReadOnlyDepth = Math.max(0, this._presentationReadOnlyDepth - 1);
+    }
+  }
+
+  async _playGoalHighlight(ev, snap, fixture, opts = {}) {
     if (!this._built || !ev) return;
     const speed = Math.max(0.25, Number(opts.speed) || 1);
     const lang = opts.lang || "zh";
@@ -7029,6 +7122,7 @@ export class MatchView {
     const team = attHome ? "home" : "away";
     const dir = this._attackDir(team);
     const isRewatch = !!opts.rewatch;
+    const random = isRewatch ? replayRandomFor(ev) : Math.random;
     const scene = opts.scene || null;
     const replayReturn =
       isRewatch && (['FULL_TIME', 'PAUSED'].includes(this.fsm.current()) || this.simDrive)
@@ -7094,7 +7188,7 @@ export class MatchView {
       this.players.find((p) => p.team === team && p.pos !== "GK");
 
     let assister = ev.assistId ? this.players.find((p) => p.id === ev.assistId) : null;
-    if (!assister || assister === scorer) {
+    if (!isRewatch && (!assister || assister === scorer)) {
       if (prevCarrier && prevCarrier !== scorer && prevCarrier.team === team) {
         assister = prevCarrier;
       } else if (this.lastCarrierId && this.lastCarrierId !== scorer?.id) {
@@ -7102,7 +7196,7 @@ export class MatchView {
         if (prev && prev.team === team) assister = prev;
       }
     }
-    if (!assister || assister === scorer) {
+    if (!isRewatch && (!assister || assister === scorer)) {
       const mates = this.players.filter(
         (p) =>
           p.team === team &&
@@ -7119,7 +7213,7 @@ export class MatchView {
 
     // 赛后无场面快照：轻摆威胁区（旧档 / 战报回看）
     if (isRewatch && !restored && scorer) {
-      this._seedGoalRewatchPositions(team, attHome, scorer, assister);
+      this._seedGoalRewatchPositions(team, attHome, scorer, assister, random);
       ballX = this.ball.x;
       ballY = this.ball.y;
     }
@@ -7134,7 +7228,7 @@ export class MatchView {
         lang === "en" ? "▶ REPLAY · SLOW" : "▶ 进球回放 · 慢镜";
     }
     const boxY = attHome ? 18 : 82;
-    const { gx, gy } = this._goalMouth(attHome, { deep: true });
+    const { gx, gy } = this._goalMouth(attHome, { deep: true, random });
 
     // 距球门越近，组织越短（禁区内直接射，中场才完整组织）
     const goalDist = Math.hypot(ballX - gx, ballY - gy);
@@ -7146,7 +7240,7 @@ export class MatchView {
     // 有助攻：回放/高光强制走出「助攻传球 → 射门」，不直接禁区终结跳过传球
     const wantAssist =
       !!(assister && scorer && assister !== scorer) &&
-      (isRewatch || !!ev.assistId || depth !== "box");
+      (isRewatch ? !!ev.assistId : !!ev.assistId || depth !== "box");
     if (wantAssist && depth === "box") depth = "final";
 
     this.camMode = depth === "box" && !wantAssist ? "box" : "ball";
@@ -7192,10 +7286,11 @@ export class MatchView {
     );
 
     // 只轻推队形，不整队瞬移
-    this._nudgeAttackShape(team, depth === "box" ? 0.22 : 0.4);
+    this._nudgeAttackShape(team, depth === "box" ? 0.22 : 0.4, random);
     this._nudgeDefendShape(
       team === "home" ? "away" : "home",
-      prevCarrier || { x: ballX, y: ballY }
+      prevCarrier || { x: ballX, y: ballY },
+      random
     );
 
     // —— 1) 从当前球权接组织者 ——
@@ -7229,12 +7324,13 @@ export class MatchView {
       // 已在禁区且无助攻：射手本人持球终结
       organizer = scorer;
     }
-    if (!assister && organizer && organizer !== scorer) assister = organizer;
+    if (isRewatch && !ev.assistId) organizer = scorer;
+    if (!isRewatch && !assister && organizer && organizer !== scorer) assister = organizer;
 
     // 回放/有助攻：把助攻者摆到稍身后持球位，射手前插要球（明显看出传球）
     if (wantAssist && assister && scorer) {
       const midX = clamp((assister.x + scorer.x) / 2, 18, 82);
-      assister.x = clamp(midX + (Math.random() - 0.5) * 6, 16, 84);
+      assister.x = clamp(midX + (random() - 0.5) * 6, 16, 84);
       assister.y = clamp(
         attHome ? Math.max(assister.y, boxY + 14) : Math.min(assister.y, boxY - 14),
         12,
@@ -7243,7 +7339,7 @@ export class MatchView {
       assister.tx = assister.x;
       assister.ty = assister.y;
       this._applyPlayer(assister);
-      scorer.x = clamp(midX + (Math.random() - 0.5) * 10, 18, 82);
+      scorer.x = clamp(midX + (random() - 0.5) * 10, 18, 82);
       scorer.y = clamp(lerp(scorer.y, boxY, 0.45), 10, 90);
       scorer.tx = scorer.x;
       scorer.ty = scorer.y;
@@ -7287,10 +7383,10 @@ export class MatchView {
     if (scorer) {
       scorer.el.classList.add("highlight");
       if (depth !== "box" || wantAssist) {
-        scorer.tx = clamp(scorer.x + (Math.random() - 0.5) * 10, 14, 86);
-        scorer.ty = clamp(scorer.y + dir * (8 + Math.random() * 8), 10, 90);
+        scorer.tx = clamp(scorer.x + (random() - 0.5) * 10, 14, 86);
+        scorer.ty = clamp(scorer.y + dir * (8 + random() * 8), 10, 90);
       } else {
-        scorer.tx = clamp(scorer.x + (Math.random() - 0.5) * 5, 18, 82);
+        scorer.tx = clamp(scorer.x + (random() - 0.5) * 5, 18, 82);
         scorer.ty = clamp(lerp(scorer.y, boxY, 0.35), 8, 92);
       }
     }
@@ -7304,21 +7400,21 @@ export class MatchView {
           Math.hypot(b.x - (organizer?.x || ballX), b.y - (organizer?.y || ballY))
       );
     for (let i = 0; i < Math.min(depth === "box" ? 1 : 2, defs.length); i++) {
-      defs[i].tx = clamp((organizer?.x || ballX) + (Math.random() - 0.5) * 8, 8, 92);
-      defs[i].ty = clamp((organizer?.y || ballY) + (Math.random() - 0.5) * 6, 8, 92);
+      defs[i].tx = clamp((organizer?.x || ballX) + (random() - 0.5) * 8, 8, 92);
+      defs[i].ty = clamp((organizer?.y || ballY) + (random() - 0.5) * 6, 8, 92);
     }
 
     if (depth === "build") {
       await wait(560);
       // —— 2) 前压 ——
       if (organizer) {
-        organizer.tx = clamp(organizer.x + (Math.random() - 0.5) * 8, 12, 88);
-        organizer.ty = clamp(organizer.y + dir * (8 + Math.random() * 6), 10, 90);
+        organizer.tx = clamp(organizer.x + (random() - 0.5) * 8, 12, 88);
+        organizer.ty = clamp(organizer.y + dir * (8 + random() * 6), 10, 90);
         this._setTouch(organizer, 1800);
       }
       if (scorer && scorer !== organizer) {
         scorer.tx = clamp(
-          (organizer?.x || scorer.x) + (Math.random() < 0.5 ? -11 : 11),
+          (organizer?.x || scorer.x) + (random() < 0.5 ? -11 : 11),
           12,
           88
         );
@@ -7327,20 +7423,20 @@ export class MatchView {
       for (const pl of this.players.filter(
         (p) => p.team === team && p !== scorer && p !== organizer && p.pos !== "GK"
       )) {
-        if (Math.random() < 0.35) {
-          pl.tx = clamp(pl.x + (Math.random() - 0.5) * 8, 8, 92);
-          pl.ty = clamp(pl.y + dir * (4 + Math.random() * 6), 8, 92);
+        if (random() < 0.35) {
+          pl.tx = clamp(pl.x + (random() - 0.5) * 8, 8, 92);
+          pl.ty = clamp(pl.y + dir * (4 + random() * 6), 8, 92);
         }
       }
       await wait(720);
     } else if (depth === "final") {
       await wait(380);
       if (organizer) {
-        organizer.tx = clamp(organizer.x + (Math.random() - 0.5) * 6, 14, 86);
+        organizer.tx = clamp(organizer.x + (random() - 0.5) * 6, 14, 86);
         organizer.ty = clamp(organizer.y + dir * 6, 10, 90);
       }
       if (scorer && scorer !== organizer) {
-        scorer.tx = clamp(scorer.x + (Math.random() - 0.5) * 8, 14, 86);
+        scorer.tx = clamp(scorer.x + (random() - 0.5) * 8, 14, 86);
         scorer.ty = clamp(lerp(scorer.y, boxY, 0.5), 8, 92);
       }
       await wait(420);
@@ -7351,7 +7447,7 @@ export class MatchView {
     // —— 3) 助攻直塞 / 自己带入 ——
     // 有助攻时强制：助攻者持球 → 传球轨迹 → 射手接球再射（回放重点）
     if ((wantAssist || depth !== "box") && organizer && scorer && organizer !== scorer) {
-      scorer.tx = clamp(scorer.x + (Math.random() - 0.5) * 6, 16, 84);
+      scorer.tx = clamp(scorer.x + (random() - 0.5) * 6, 16, 84);
       scorer.ty = clamp(lerp(scorer.y, boxY, 0.72), 8, 92);
       this.setCaption(
         lang === "en"
@@ -7363,12 +7459,12 @@ export class MatchView {
       this._setFocus([organizer, scorer], 5000);
       this._passTo(organizer, scorer, {
         flightMs: Math.round((isRewatch || wantAssist ? 780 : depth === "final" ? 560 : 720) / Math.min(speed, 1.5)),
+        random,
       });
       this._addTrail(organizer.x, organizer.y, scorer.tx, scorer.ty, "pass", 0.55);
-      if (assister && assister !== scorer) this._recordPass(assister, scorer);
       await wait(isRewatch || wantAssist ? 920 : depth === "final" ? 700 : 880);
       if (this.carrier !== scorer) this._setCarrier(scorer, { stick: true });
-      scorer.tx = clamp(scorer.x + (Math.random() - 0.5) * 5, 18, 82);
+      scorer.tx = clamp(scorer.x + (random() - 0.5) * 5, 18, 82);
       scorer.ty = clamp(boxY + dir * 3, 8, 92);
       this._setTouch(scorer, 1600);
       this.setCaption(
@@ -7379,7 +7475,7 @@ export class MatchView {
       await wait(isRewatch || wantAssist ? 480 : depth === "final" ? 320 : 420);
     } else if (scorer) {
       this._setCarrier(scorer, { stick: true });
-      scorer.tx = clamp(scorer.x + (Math.random() - 0.5) * 5, 18, 82);
+      scorer.tx = clamp(scorer.x + (random() - 0.5) * 5, 18, 82);
       scorer.ty = clamp(lerp(scorer.y, boxY, depth === "box" ? 0.4 : 0.65), 8, 92);
       await wait(depth === "box" ? 280 : 480);
     }
@@ -7398,7 +7494,6 @@ export class MatchView {
       this.highlightId = finisher.id;
       this.flashUntil = performance.now() + 3600;
       this._setTouch(finisher, 2200);
-      if (assister && assister !== finisher) this._recordPass(assister, finisher);
       this.lastCarrierId = finisher.id;
     }
     this._shootBall(gx, gy, "goal");

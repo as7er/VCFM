@@ -48,7 +48,7 @@ async function assertCrestLoaded(locator, label) {
 
 async function assertStraightPassRendering(page) {
   const result = await page.evaluate(async () => {
-    const { MatchView } = await import("./js/matchview.js?v=215");
+    const { MatchView } = await import("./js/matchview.js?v=216");
     const positions = ["GK", "DEF", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT", "ATT"];
     const makeClub = (id, color) => {
       const players = positions.map((pos, index) => ({
@@ -190,9 +190,14 @@ async function assertStraightPassRendering(page) {
       nonBlankPixels,
     };
     const replayScene = view.captureSceneSnapshot();
+    const presentationBeforeReplay = {
+      passNetwork: JSON.stringify([...view.passNetwork.entries()]),
+      heat: JSON.stringify(view.heatCells.map(({ home: valueHome, away: valueAway }) => [valueHome, valueAway])),
+    };
     let replayBadgeVisible = false;
     let replayGoalSequenceVisible = false;
     let replayNonBlankPixels = 0;
+    const replayCaptions = [];
     const replayPlayed = await view.playGoalHighlight(
       {
         type: "goal",
@@ -210,6 +215,7 @@ async function assertStraightPassRendering(page) {
         scene: replayScene,
         sleepFn: async () => {
           view._drawCanvas();
+          replayCaptions.push(view.captionEl?.textContent || "");
           replayBadgeVisible ||= !view.replayBadgeEl?.classList.contains("hidden");
           replayGoalSequenceVisible ||= view.fsm.current() === "GOAL_SEQUENCE";
           const replayPixels = view.canvas
@@ -230,6 +236,72 @@ async function assertStraightPassRendering(page) {
       subState: view.fsm.subState,
       simDrive: view.simDrive,
     };
+    const presentationAfterSyntheticReplay = {
+      passNetwork: JSON.stringify([...view.passNetwork.entries()]),
+      heat: JSON.stringify(view.heatCells.map(({ home: valueHome, away: valueAway }) => [valueHome, valueAway])),
+    };
+    const goalFrames = [
+      { ...frames[0], t: 8 },
+      { ...frames[1], t: 8.03 },
+      { ...frames[2], t: 8.06 },
+      { ...frames[3], t: 8.09 },
+      {
+        t: 8.12,
+        ball: { x: 50, y: 30, z: 0.25, owner: null, state: "shot" },
+        players: withActors({ x: 20, y: 40 }, { x: 50, y: 55 }),
+      },
+      {
+        t: 8.15,
+        ball: { x: 50, y: 1.5, z: 0.1, owner: null, state: "shot", netHit: true },
+        players: withActors({ x: 20, y: 40 }, { x: 50, y: 55 }),
+      },
+    ];
+    const recordedSamples = [];
+    const recordedReplayPlayed = await view.playRecordedGoalReplay({
+      frames: goalFrames,
+      climaxAt: 8.15,
+      lang: "en",
+      getSpeed: () => 8,
+      onSimT: (simT) => recordedSamples.push(simT),
+      returnToLiveSim: true,
+    });
+    const recordedReplayReturn = {
+      state: view.fsm.current(),
+      subState: view.fsm.subState,
+      simDrive: view.simDrive,
+    };
+    view.fsm.transition("GOAL_SEQUENCE", "STRIKE", { replay: true });
+    const goalSequenceReplayPlayed = await view.playRecordedGoalReplay({
+      frames: goalFrames,
+      climaxAt: 8.15,
+      lang: "en",
+      getSpeed: () => 8,
+      returnToLiveSim: true,
+    });
+    const goalSequenceReplayReturn = {
+      state: view.fsm.current(),
+      subState: view.fsm.subState,
+      simDrive: view.simDrive,
+    };
+    view.fsm.transition("FULL_TIME");
+    view._legacyFrozen = true;
+    view.simDrive = false;
+    const fullTimeReplayPlayed = await view.playRecordedGoalReplay({
+      frames: goalFrames,
+      climaxAt: 8.15,
+      lang: "en",
+      getSpeed: () => 8,
+    });
+    const fullTimeReplayReturn = {
+      state: view.fsm.current(),
+      subState: view.fsm.subState,
+      simDrive: view.simDrive,
+      frozen: view._legacyFrozen,
+    };
+    const presentationAfterRecordedReplay = {
+      passNetwork: JSON.stringify([...view.passNetwork.entries()]),
+      heat: JSON.stringify(view.heatCells.map(({ home: valueHome, away: valueAway }) => [valueHome, valueAway])),
+    };
     view.destroy();
     root.remove();
     return {
@@ -245,6 +317,17 @@ async function assertStraightPassRendering(page) {
       replayGoalSequenceVisible,
       replayNonBlankPixels,
       replayReturn,
+      replayCaptions,
+      presentationBeforeReplay,
+      presentationAfterSyntheticReplay,
+      presentationAfterRecordedReplay,
+      recordedReplayPlayed,
+      recordedSamples,
+      recordedReplayReturn,
+      goalSequenceReplayPlayed,
+      goalSequenceReplayReturn,
+      fullTimeReplayPlayed,
+      fullTimeReplayReturn,
     };
   });
 
@@ -259,10 +342,44 @@ async function assertStraightPassRendering(page) {
   assert.equal(result.replayBadgeVisible, true, "spatial goal replay never displayed replay chrome");
   assert.equal(result.replayGoalSequenceVisible, true, "spatial goal replay never entered GOAL_SEQUENCE");
   assert.ok(result.replayNonBlankPixels > 1000, "spatial goal replay canvas was blank");
+  assert.equal(
+    result.replayCaptions.some((caption) => /(?:\bA:|\bAssist)/i.test(caption)),
+    false,
+    "an unassisted goal replay fabricated an assist"
+  );
+  assert.deepEqual(
+    result.presentationAfterSyntheticReplay,
+    result.presentationBeforeReplay,
+    "synthetic replay mutated pass-network or heatmap data"
+  );
+  assert.deepEqual(
+    result.presentationAfterRecordedReplay,
+    result.presentationBeforeReplay,
+    "recorded replay mutated pass-network or heatmap data"
+  );
+  assert.equal(result.recordedReplayPlayed, true, "recorded goal frames did not replay");
+  assert.ok(result.recordedSamples.length > 0, "recorded goal replay never advanced through its frames");
   assert.deepEqual(
     result.replayReturn,
     { state: "PLAYING", subState: "SIM_DRIVEN", simDrive: true },
     "spatial goal replay did not restore SIM_DRIVEN playback"
+  );
+  assert.deepEqual(
+    result.recordedReplayReturn,
+    { state: "PLAYING", subState: "SIM_DRIVEN", simDrive: true },
+    "recorded goal replay did not restore SIM_DRIVEN playback"
+  );
+  assert.equal(result.goalSequenceReplayPlayed, true, "goal-sequence frames did not replay");
+  assert.deepEqual(
+    result.goalSequenceReplayReturn,
+    { state: "PLAYING", subState: "SIM_DRIVEN", simDrive: true },
+    "goal-sequence replay did not restore SIM_DRIVEN playback"
+  );
+  assert.equal(result.fullTimeReplayPlayed, true, "full-time goal frames did not replay");
+  assert.deepEqual(
+    result.fullTimeReplayReturn,
+    { state: "FULL_TIME", subState: null, simDrive: false, frozen: true },
+    "recorded goal replay did not restore the full-time state"
   );
 }
 

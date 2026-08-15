@@ -46,8 +46,8 @@ export const SIM = {
   DT: 0.1, // 固定步长（秒），10Hz
   FIELD_W: 100,
   FIELD_H: 100,
-  // 标准职业球场约 68m × 105m。空间坐标仍保持 0..100，但涉及球速和
-  // 传球距离时必须先换算成米，否则同样 20m 横传和纵传会得到不同速度。
+  // 标准职业球场约 68m × 105m。空间坐标仍保持 0..100，但物理距离和
+  // 球速必须先换算成米，否则同样距离的横向与纵向动作会得到不同结果。
   PITCH_W_METRES: 68,
   PITCH_H_METRES: 105,
   // 球门：主队球门在 y≈100 一侧，客队球门在 y≈0 一侧；门宽以 x 计
@@ -57,8 +57,8 @@ export const SIM = {
   AWAY_GOAL_Y: 0, // 客队防守的球门线
   // 球物理
   BALL_FRICTION: 0.96, // 每步地面滚动速度衰减
-  CONTROL_RADIUS: 2.6, // 球员控球半径（百分比坐标）
-  // 真实场地约按 105m×68m；把百分比坐标粗略当作"米级"处理，速度单位 = 场地%/秒
+  CONTROL_RADIUS_METRES: 2.6,
+  // 球员积分仍使用场地百分比/秒；接触与球速判定通过上方尺寸换算为米制。
   MAX_PLAYER_SPEED: 6, // 顶级 pace 的最大移动速度（%/秒）；对齐真实纵穿全场约 14s
   // 控球时间轴采样间隔（模拟秒）：直播按此还原截至当前画面的控球率
   POSS_SAMPLE_SEC: 15,
@@ -85,15 +85,34 @@ function pitchDistanceMetres(dx, dy) {
   const metres = pitchVectorMetres(dx, dy);
   return Math.hypot(metres.x, metres.y);
 }
+function pitchDistanceBetween(ax, ay, bx, by) {
+  return pitchDistanceMetres(ax - bx, ay - by);
+}
+function pitchDistanceToGoalMetres(x, y, goalY) {
+  return pitchDistanceBetween(x, y, clamp(x, SIM.GOAL_X0, SIM.GOAL_X1), goalY);
+}
+function pitchOffsetMetres(dxMetres, dyMetres) {
+  return {
+    x: dxMetres * (SIM.FIELD_W / SIM.PITCH_W_METRES),
+    y: dyMetres * (SIM.FIELD_H / SIM.PITCH_H_METRES),
+  };
+}
+function pitchOffsetToward(dx, dy, distanceMetres) {
+  const metres = pitchVectorMetres(dx, dy);
+  const length = Math.hypot(metres.x, metres.y) || 1;
+  return pitchOffsetMetres(
+    (metres.x / length) * distanceMetres,
+    (metres.y / length) * distanceMetres
+  );
+}
 function pitchSpeedMps(vx, vy) {
   return pitchDistanceMetres(vx, vy);
 }
 function pitchVelocityForMps(dx, dy, metresPerSecond) {
-  const metres = pitchVectorMetres(dx, dy);
-  const length = Math.hypot(metres.x, metres.y) || 1;
+  const offset = pitchOffsetToward(dx, dy, metresPerSecond);
   return {
-    vx: (metres.x / length) * metresPerSecond * (SIM.FIELD_W / SIM.PITCH_W_METRES),
-    vy: (metres.y / length) * metresPerSecond * (SIM.FIELD_H / SIM.PITCH_H_METRES),
+    vx: offset.x,
+    vy: offset.y,
   };
 }
 function applyFreeBallForces(ball, dt) {
@@ -1311,14 +1330,14 @@ export class SimEngine {
 
     // ——————————— 近距离/弧顶射门区 ———————————
     if (inShootZone) {
-      // 全队射门节奏上限只管常规进攻；已杀到门前（dGoal<12）必须允许起脚，
+      // 全队射门节奏上限只管常规进攻；已杀到真正近门区（dGoal<9.5）允许起脚，
       // 否则冷却期内持球者在门前无动作可选 → 底线僵持（看门狗曾兜底的根因）。
       const cdBlocked = this.t < (this._teamShotUntil[a.team] || 0);
       const setPieceChance = this.t < (this._cornerAttackUntil[a.team] || 0);
       const canShoot =
         this.t >= (a.shotCdUntil || 0) &&
-        (opportunity.clearOpenGoal || !cdBlocked || dGoal < 12 || setPieceChance) &&
-        (opportunity.clearOpenGoal || attackAge >= 3.5 || dGoal < 12);
+        (opportunity.clearOpenGoal || !cdBlocked || dGoal < 9.5 || setPieceChance) &&
+        (opportunity.clearOpenGoal || attackAge >= 3.5 || dGoal < 9.5);
       const distF = clamp(1 - dGoal / SHOOT_ZONE, 0, 1);
       const finBias = isMid && !isWing
         ? 0.35 * a.attr.finishing + 0.45 * a.attr.shooting
@@ -1347,9 +1366,9 @@ export class SimEngine {
       const shootThresh = core ? 0.24 : isWing ? 0.26 : isMid && dGoal > 16 ? 0.28 : 0.32;
       // 旧逻辑一旦质量过线便必射，导致每场数百脚。现在质量只决定“是否值得考虑”，
       // 最终仍需一次低频机会选择；越近、越强的终结者越敢起脚。
-      // 12~22 距离的窗口反而略积极：避免强队总是一路带到六码区才射，
+      // 约 10~22 距离的窗口反而略积极：避免强队总是一路带到六码区才射，
       // 既让画面更像正常攻门，也把机会质量拉回合理范围。
-      const rangeBonus = dGoal >= 12 && dGoal <= 22 ? 0.32 : dGoal < 12 ? 0.1 : 0;
+      const rangeBonus = dGoal >= 9.5 && dGoal <= 22 ? 0.32 : dGoal < 9.5 ? 0.1 : 0;
       // 穿透全队冷却的门前射门是"保活性"的例外通道，不是常规机会：
       // 概率重压（×0.3），大部分冷却期门前球走下方泄压阀（传中/回做）出球。
       const shootDecisionP =
@@ -2554,9 +2573,10 @@ export class SimEngine {
     );
     // 角色「压迫」行为只改变谁更愿意成为上抢者：抢球中场 / 压迫型前锋的
     // 有效距离更短，会优先从压迫战术中领到上抢任务，其余仍按离球真实距离。
-    // 权重上限 2.4 码，不会把远端的球员拽到前场，只影响“几近并列”的排序。
+    // 权重上限 2.4 米，不会把远端的球员拽到前场，只影响“几近并列”的排序。
     const pressReach = (a) => Math.min(Math.max(0, this._roleBehavior(a, "press")) * 2.4, 2.4);
-    const effDist = (a) => dist(a.x, a.y, this.ball.x, this.ball.y) - pressReach(a);
+    const effDist = (a) =>
+      pitchDistanceBetween(a.x, a.y, this.ball.x, this.ball.y) - pressReach(a);
     const ordered = candidates.slice().sort((a, b) => {
       const da = effDist(a);
       const db = effDist(b);
@@ -2592,7 +2612,7 @@ export class SimEngine {
       if (interceptN >= maxInterceptors) break;
       if (a.role === "DEF") continue;
       const reach = interceptRange + Math.max(0, this._roleBehavior(a, "press")) * 6;
-      if (dist(a.x, a.y, this.ball.x, this.ball.y) > reach) continue;
+      if (pitchDistanceBetween(a.x, a.y, this.ball.x, this.ball.y) > reach) continue;
       let side = (a.baseX ?? a.x) <= this.ball.x ? -1 : 1;
       if (usedSides.has(side)) side *= -1;
       usedSides.add(side);
@@ -2610,22 +2630,22 @@ export class SimEngine {
    * 防守方执行球队统一任务：press / screen / intercept / shape。
    * 任务短时锁定，目标点仍连续跟随球和被盯球员。
    */
-  _defensiveSupportTarget(x, y, ownGoalY, minDistance = 5.5, sideHint = 0) {
+  _defensiveSupportTarget(x, y, ownGoalY, minDistance = 4.8, sideHint = 0) {
     const b = this.ball;
     let dx = x - b.x;
     let dy = y - b.y;
-    let length = Math.hypot(dx, dy);
+    const length = pitchDistanceMetres(dx, dy);
     if (length >= minDistance) {
       return { x: clamp(x, 3, 97), y: clamp(y, 3, 97) };
     }
     if (length < 1e-6) {
       dx = sideHint || (b.x >= 50 ? -1 : 1);
       dy = (ownGoalY - b.y) * 0.2;
-      length = Math.hypot(dx, dy) || 1;
     }
+    const offset = pitchOffsetToward(dx, dy, minDistance);
     return {
-      x: clamp(b.x + (dx / length) * minDistance, 3, 97),
-      y: clamp(b.y + (dy / length) * minDistance, 3, 97),
+      x: clamp(b.x + offset.x, 3, 97),
+      y: clamp(b.y + offset.y, 3, 97),
     };
   }
 
@@ -2642,9 +2662,8 @@ export class SimEngine {
       const gx = 50, gy = ownGoalY;
       const bx = b.x, by = b.y;
       const vx = gx - bx, vy = gy - by;
-      const len = Math.hypot(vx, vy) || 1;
-      // 球离己方球门越近，standoff 越小（禁区内贴到 0.8，中场保持 2.4）
-      const dBallGoal = dist(bx, by, gx, gy);
+      // 球离己方球门越近，standoff 越小（禁区内贴到 0.8m，中场保持 2.4m）
+      const dBallGoal = pitchDistanceToGoalMetres(bx, by, gy);
       const pressing = this._tacticLevel(a.team, "pressing");
       // 高压迫角色上抢略更贴身，但克制：默认角色几乎无感，只有明确指派
       // 抢球中场/压迫型前锋时才明显，避免整体提高防守强度改变传球基线。
@@ -2653,8 +2672,9 @@ export class SimEngine {
         clamp(0.8 + dBallGoal / 30 * 1.6, 0.8, 2.4) *
         clamp(1 - (pressing - 3) * 0.07, 0.78, 1.18) *
         clamp(1 - rolePress * 0.08, 0.9, 1);
-      a.tx = clamp(bx + (vx / len) * standoff, 3, 97);
-      a.ty = clamp(by + (vy / len) * standoff, 3, 97);
+      const offset = pitchOffsetToward(vx, vy, standoff);
+      a.tx = clamp(bx + offset.x, 3, 97);
+      a.ty = clamp(by + offset.y, 3, 97);
       a.fsm = "press";
       return;
     }
@@ -2668,12 +2688,12 @@ export class SimEngine {
         // 站在 mark 与球门之间，切断直塞
         const mx = mark.x + (50 - mark.x) * 0.15;
         const my = mark.y + (ownGoalY - mark.y) * 0.22;
-        const dBallGoal = dist(b.x, b.y, 50, ownGoalY);
+        const dBallGoal = Math.abs(b.y - ownGoalY) * (SIM.PITCH_H_METRES / SIM.FIELD_H);
         const support = this._defensiveSupportTarget(
           mx,
           my,
           ownGoalY,
-          dBallGoal < 18 ? 3.8 : 5.5,
+          dBallGoal < 19 ? 3.15 : 4.35,
           mark.x <= b.x ? -1 : 1
         );
         a.tx = support.x;
@@ -2687,7 +2707,7 @@ export class SimEngine {
     // 这是把"三区进入波次"从 ~650 压到真实 ~50 的核心——大部分进攻在中场
     // 就被断掉、逼回，而不是轻松穿过。只有离球较近的中前场人参与，避免防线散架。
     if (job.type === "intercept") {
-      const dBall = dist(a.x, a.y, b.x, b.y);
+      const dBall = pitchDistanceBetween(a.x, a.y, b.x, b.y);
       // 只有在中前场、且离球不太远时才主动上抢拦截（后场交给防线站位）
       const midField = a.role !== "DEF";
       if (midField && dBall < 22) {
@@ -2695,8 +2715,12 @@ export class SimEngine {
         const dir = this.attackDir(owner?.team || b.kickTeam); // 进攻方推进方向
         const order = Number(job.order) || 0;
         const side = Number(job.side) || ((a.baseX ?? a.x) <= b.x ? -1 : 1);
-        a.tx = clamp(b.x + side * (4.8 + order * 1.2), 3, 97);
-        a.ty = clamp(b.y + dir * (3.8 + order * 0.8), 3, 97);
+        const offset = pitchOffsetMetres(
+          side * (3.4 + order * 0.8),
+          dir * (4 + order * 0.8)
+        );
+        a.tx = clamp(b.x + offset.x, 3, 97);
+        a.ty = clamp(b.y + offset.y, 3, 97);
         a.fsm = "cover";
         return;
       }
@@ -2706,9 +2730,9 @@ export class SimEngine {
     // 只锚 baseX 会让边后卫在禁区外沿两侧拉成横排、中路空虚——
     // 真实防守是"球进危险区，全队向球门前中路收拢成人墙"。
     const lineY = this._defLineY(a);
-    const dBallGoal = Math.abs(b.y - ownGoalY);
+    const dBallGoal = Math.abs(b.y - ownGoalY) * (SIM.PITCH_H_METRES / SIM.FIELD_H);
     // 收缩强度：球离己方球门越近，越向中路(x=50)与球的 x 收拢（0.3→0.75）
-    const central = clamp(1 - dBallGoal / 45, 0, 1); // 0=远 1=贴门
+    const central = clamp(1 - dBallGoal / 47, 0, 1); // 0=远 1=贴门
     const toward = 0.28 + central * 0.34;
     // 横向目标：baseX 与「球门中路和球位的混合」按 toward 插值
     const anchorX = (50 * 0.55 + b.x * 0.45);
@@ -2716,7 +2740,7 @@ export class SimEngine {
       a.baseX + (anchorX - a.baseX) * toward,
       lineY,
       ownGoalY,
-      dBallGoal < 18 ? 3.6 : 4.8,
+      dBallGoal < 19 ? 3.05 : 4.05,
       (a.baseX ?? a.x) <= b.x ? -1 : 1
     );
     a.tx = clamp(shape.x, 4, 96);
@@ -2727,11 +2751,11 @@ export class SimEngine {
   /** 本队按"离球距离"给该 agent 的排名（0=最近外场人），用于分派上抢/补位 */
   _defBallRank(a) {
     if (a.role === "GK") return 99;
-    const dMe = dist(a.x, a.y, this.ball.x, this.ball.y);
+    const dMe = pitchDistanceBetween(a.x, a.y, this.ball.x, this.ball.y);
     let rank = 0;
     for (const o of this.agents) {
       if (o === a || o.team !== a.team || o.role === "GK") continue;
-      const d = dist(o.x, o.y, this.ball.x, this.ball.y);
+      const d = pitchDistanceBetween(o.x, o.y, this.ball.x, this.ball.y);
       if (d < dMe || (d === dMe && o.id < a.id)) rank++;
     }
     return rank;
@@ -2759,7 +2783,7 @@ export class SimEngine {
     const b = this.ball;
     if (this._isClosestToBall(a)) {
       // 预测球的落点（简单外推），朝落点冲。
-      // clamp 必须比拾球半径更贴边（1..99）：球停在底线死角（y>97+2.6）时
+      // clamp 必须比拾球半径更贴边（1..99）：球停在底线死角时
       // 3..97 的旧 clamp 会让追球者永远停在拾球半径之外 → 无主球僵持。
       const lead = 0.4;
       a.tx = clamp(b.x + b.vx * lead, 1, 99);
@@ -3054,11 +3078,11 @@ export class SimEngine {
       return false;
     }
 
-    const dBall = dist(gk.x, gk.y, b.x, b.y);
+    const dBall = pitchDistanceBetween(gk.x, gk.y, b.x, b.y);
     const reach = 2 + (gk.attr.reflexes || 0.5) * 0.4;
     if (dBall > reach) return false;
     // 刚完成第一脚控制仍有很短的身体保护；门将已经贴到脚下则可直接封堵。
-    if (this.t < (owner.protectUntil || 0) && dBall > 1.45) return false;
+    if (this.t < (owner.protectUntil || 0) && dBall > 1.5) return false;
 
     gk.challengeCdUntil = this.t + 2.4;
     gk.challengeOwnerId = owner.id;
@@ -3187,9 +3211,9 @@ export class SimEngine {
    */
   _resolvePossession(dt) {
     const b = this.ball;
-    // 抢断、扑救与控球半径仍在既有 0..100 空间标尺上校准。传球的真实
-    // 米制速度只负责生成 vx/vy，不在本次修正中重标定这些独立规则。
+    // 门将轨迹覆盖仍沿用既有画面标尺；控球、抢断和传球拦截统一使用米制。
     const speed = Math.hypot(b.vx, b.vy);
+    const speedMps = pitchSpeedMps(b.vx, b.vy);
 
     // —— 门将扑救（合理化）——
     // 轨迹线段判定 + 每脚只掷一次；空门/球已过身几乎不扑；成功后扑倒姿态。
@@ -3385,7 +3409,9 @@ export class SimEngine {
     // 导致球轻松穿越中场、三区进入频率高达真实的 ~11 倍。这里让飞行中的传球，
     // 只要有对手足够贴近球的当前位置，就按 tackling/positioning 概率抢截下来。
     if (b.state === "pass" && !b.owner) {
-      const flown = (b.kickX != null) ? dist(b.x, b.y, b.kickX, b.kickY) : 999;
+      const flown = b.kickX != null
+        ? pitchDistanceBetween(b.x, b.y, b.kickX, b.kickY)
+        : 999;
       const interceptTeam = b.kickTeam === "home" ? "away" : "home";
       // 传中球飞在头顶以上（z>2.2 ≈ 起跳争顶极限）时物理上够不着——
       // 不加这条，吊过人墙/人堆头顶的球会被"原地吃掉"，传中永远到不了禁区。
@@ -3399,14 +3425,14 @@ export class SimEngine {
           // sentOff：离场者（红牌/伤退走向边线途中）绝不能拦截，否则带球离场冻结比赛
           if (o.team === b.kickTeam || o.role === "GK" || o.sentOff) continue;
           if (this.t < (o.tackleCdUntil || 0)) continue;
-          const d = dist(o.x, o.y, b.x, b.y);
+          const d = pitchDistanceBetween(o.x, o.y, b.x, b.y);
           // 拦截半径：比脚下控球略大（伸脚/身体挡），越靠近越易成
-          if (d < SIM.CONTROL_RADIUS + 1.6) {
+          if (d < SIM.CONTROL_RADIUS_METRES + 2.4) {
             o.tackleCdUntil = this.t + 2;
             this._teamInterceptUntil[interceptTeam] = this.t + 75 + this.random() * 30;
             const pick = 0.45 * o.attr.tackling + 0.35 * o.attr.positioning + 0.2 * o.attr.pace;
             const p = clamp(
-              (0.22 + pick * 0.45 - speed / 150) * this._teamModifier(o.team, "def"),
+              (0.22 + pick * 0.45 - speedMps / 150) * this._teamModifier(o.team, "def"),
               0.08,
               0.68
             );
@@ -3454,12 +3480,12 @@ export class SimEngine {
         if (tacklePlan?.jobs.get(o.id)?.type !== "press") continue;
         // 抢断尝试冷却：个人与全队都不能每 tick 掷骰子。
         if (this.t < (o.tackleCdUntil || 0)) continue;
-        const d = dist(o.x, o.y, b.x, b.y);
+        const d = pitchDistanceBetween(o.x, o.y, b.x, b.y);
         const divesIntoTackles = this._hasHabit(o, "dives_into_tackles");
         // 角色「下脚」倾向（抢球中场 / 压迫型前锋）扩大真实下脚范围并缩短个人冷却：
         // 只改变“更愿意主动抢”的尺度，不碰单次抢断成功率（成功率仍由属性结算）。
         const tackleAgg = Math.max(0, this._roleBehavior(o, "tackle"));
-        if (d < SIM.CONTROL_RADIUS + (divesIntoTackles ? 0.7 : 0.25) + tackleAgg * 0.8) {
+        if (d < SIM.CONTROL_RADIUS_METRES + (divesIntoTackles ? 0.8 : 0.55) + tackleAgg * 0.8) {
           o.tackleCdUntil = this.t + (divesIntoTackles ? 36 : 50) - tackleAgg * 14 + this.random() * 10;
           this._teamTackleUntil[defendingTeam] = this.t + 44 + this.random() * 10;
           this._emit("pressure", o, { onId: owner.id });
@@ -3513,8 +3539,9 @@ export class SimEngine {
     // 传球早段保护：球刚踢出、尚未飞离原点足够距离时，对手不能"贴脸截断"
     // （真实里无法在传球者脚下断球）。这是根治"传球乒乓"的关键——
     // 让球有机会飞到本方接球人，而不是被紧贴的对手零距离吃掉。
-    const flownFromKick = (b.kickX != null)
-      ? dist(b.x, b.y, b.kickX, b.kickY) : 999;
+    const flownFromKick = b.kickX != null
+      ? pitchDistanceBetween(b.x, b.y, b.kickX, b.kickY)
+      : 999;
     const oppBlocked = b.state === "pass" && flownFromKick < 8; // 8 以内对手不可截
 
     // 注意：射门飞行中仍允许近距离争夺（原始行为，否则进球爆炸）；
@@ -3525,7 +3552,7 @@ export class SimEngine {
     const overheadCross = b.state === "pass" && !!b.isCrossPass;
 
     let best = null;
-    let bestD = SIM.CONTROL_RADIUS + speed * 0.04;
+    let bestD = SIM.CONTROL_RADIUS_METRES + speedMps * 0.04;
     for (const a of this.agents) {
       // 已离场者（红牌/伤退）绝不能接管球：否则球会跟着他走出边线并永远 held
       if (a.sentOff) continue;
@@ -3541,7 +3568,7 @@ export class SimEngine {
             : b.y < 20 && b.x > 18 && b.x < 82;
         if (!inBox) continue;
       }
-      const d = dist(a.x, a.y, b.x, b.y);
+      const d = pitchDistanceBetween(a.x, a.y, b.x, b.y);
       if (d < bestD) {
         bestD = d;
         best = a;
@@ -3549,14 +3576,15 @@ export class SimEngine {
     }
 
     // 小禁区慢球：门将与对方前锋贴在一起时，优先归门将（防「门将与前锋传球」乒乓）
-    if (best && best.role !== "GK" && speed < 8) {
+    if (best && best.role !== "GK" && speedMps < 8) {
       const nearGk = this.agents.find((g) => {
         if (g.role !== "GK" || g.team === best.team) return false;
         const inSix =
           g.team === "home"
             ? b.y > 86 && b.x > 28 && b.x < 72
             : b.y < 14 && b.x > 28 && b.x < 72;
-        return inSix && dist(g.x, g.y, b.x, b.y) < SIM.CONTROL_RADIUS + 2.2;
+        return inSix &&
+          pitchDistanceBetween(g.x, g.y, b.x, b.y) < SIM.CONTROL_RADIUS_METRES + 2.2;
       });
       if (nearGk) best = nearGk;
     }
@@ -3565,14 +3593,16 @@ export class SimEngine {
     if (best && best.role !== "GK") {
       const last = b.lastKicker ? this.agentById(b.lastKicker) : null;
       if (last?.role === "GK" && last.team !== best.team) {
-        const flown = b.kickX != null ? dist(b.x, b.y, b.kickX, b.kickY) : 999;
+        const flown = b.kickX != null
+          ? pitchDistanceBetween(b.x, b.y, b.kickX, b.kickY)
+          : 999;
         const inSix =
           last.team === "home"
             ? b.y > 84 && b.x > 26 && b.x < 74
             : b.y < 16 && b.x > 26 && b.x < 74;
         // 保护只在球仍在运动时有效：解围软弱球停在门区内时 flown 永远 <14，
         // 若继续禁止拾取会让对方站在死球旁边干瞪眼（无主球僵持来源之一）。
-        if (inSix && flown < 14 && Math.hypot(b.vx, b.vy) > 1) {
+        if (inSix && flown < 14 && speedMps > 1) {
           // 球还没真正离开门区 → 对方不能抢
           best = null;
         }
@@ -3618,7 +3648,7 @@ export class SimEngine {
       }
       if (best.role === "GK") ctl = 0.75 + 0.22 * (best.attr.handling || 0.5);
       const speedScale = wasPass && b.isCrossPass ? (intendedReceive ? 180 : 135) : (intendedReceive ? 310 : 125);
-      const p = clamp(ctl - speed / speedScale, 0.15, 0.99);
+      const p = clamp(ctl - speedMps / speedScale, 0.15, 0.99);
       if (this.random() < p) {
         const passFrom = b.lastKicker;
         const intendedId = b.receiverId;
@@ -3881,11 +3911,11 @@ export class SimEngine {
     const goalkeeperChallenge = !!context?.goalkeeperChallenge;
     let pFoul = goalkeeperChallenge
       ? clamp(
-          0.002 +
-            (1 - (defender.attr.handling || 0.5)) * 0.006 +
-            ((victim.attr.dribbling || 0.5) - (defender.attr.positioning || 0.5)) * 0.01,
-          0.001,
-          0.012
+          0.06 +
+            (1 - (defender.attr.handling || 0.5)) * 0.06 +
+            ((victim.attr.dribbling || 0.5) - (defender.attr.positioning || 0.5)) * 0.05,
+          0.04,
+          0.12
         )
       : clamp(
           0.16 + (1 - defender.attr.tackling) * 0.2 + (pressing - 3) * 0.018,
