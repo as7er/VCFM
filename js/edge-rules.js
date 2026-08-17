@@ -207,6 +207,44 @@ export function varReviewDecision({
   };
 }
 
+/**
+ * Referee perception for penalty-area classification. The exact spatial
+ * evidence remains authoritative for VAR; this only models the on-field view,
+ * which is less reliable close to the painted line or for obscured handballs.
+ */
+export function penaltyOnFieldDecision({
+  exactInPenaltyArea = false,
+  boundaryDistance = Infinity,
+  offenceType = "foul",
+  bodyExposure = 1,
+  roll = 1,
+} = {}) {
+  const distance = Math.max(0, Number(boundaryDistance) || 0);
+  const rollValue = clamp(Number.isFinite(Number(roll)) ? Number(roll) : 1, 0, 1);
+  if (exactInPenaltyArea) {
+    const lineUncertainty = clamp(1 - distance / 3, 0, 1);
+    const visibilityPenalty = offenceType === "handball"
+      ? (1 - clamp(Number(bodyExposure) || 0, 0, 1)) * 0.12
+      : 0;
+    const missRisk = clamp(0.05 + lineUncertainty * 0.32 + visibilityPenalty, 0.05, 0.48);
+    return {
+      onFieldDecision: rollValue < missRisk ? "no-penalty" : "penalty",
+      missRisk,
+      reason: lineUncertainty > 0 ? "penalty-area-line-view" : "official-view",
+    };
+  }
+  if (distance > 1.4) {
+    return { onFieldDecision: "no-penalty", missRisk: 0, reason: "clear-outside" };
+  }
+  const lineUncertainty = clamp(1 - distance / 1.4, 0, 1);
+  const falseAwardRisk = clamp(0.03 + lineUncertainty * 0.2, 0.03, 0.23);
+  return {
+    onFieldDecision: rollValue < falseAwardRisk ? "penalty" : "no-penalty",
+    missRisk: falseAwardRisk,
+    reason: "penalty-area-line-view",
+  };
+}
+
 /** 用于回放/审计的前进距离：按球队进攻方向把纵向位移转成正值。 */
 export function forwardProgress({ fromY = 0, toY = 0, attackDirection = -1 } = {}) {
   return Math.max(0, (Number(toY) - Number(fromY)) * (Number(attackDirection) || -1));

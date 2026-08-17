@@ -71,12 +71,12 @@ await new Promise((resolve) => setTimeout(resolve, 0));
 
 assert.equal(workerInstances.length, 1, "one worker should serve the queue");
 assert.equal(workerInstances[0].terminated, true, "failed worker should be terminated");
-assert.equal(save.loadGame(1).day, 2, "fallback must persist the newest snapshot for slot 1");
-assert.equal(save.loadGame(2).day, 3, "fallback must persist the queued snapshot for slot 2");
+assert.equal((await save.loadGame(1)).day, 2, "fallback must persist the newest snapshot for slot 1");
+assert.equal((await save.loadGame(2)).day, 3, "fallback must persist the queued snapshot for slot 2");
 assert.ok(events.some((event) => event.type === "vcfm-save-error"), "worker failure should reach the UI");
 
 assert.equal(save.saveGame(makeWorld(4), 1), true, "saving should continue after worker failure");
-assert.equal(save.loadGame(1).day, 4);
+assert.equal((await save.loadGame(1)).day, 4);
 assert.equal(workerInstances.length, 1, "disabled worker should not be recreated");
 assert.equal(unloadListeners.length, 1, "pending saves should register an unload flush");
 
@@ -141,7 +141,7 @@ assert.throws(
 );
 
 console.log(JSON.stringify({
-  fallbackSlots: [save.loadGame(1).day, save.loadGame(2).day],
+  fallbackSlots: [(await save.loadGame(1)).day, (await save.loadGame(2)).day],
   schemaVersion: legacy.schemaVersion,
   errorEvents: events.length,
 }, null, 2));

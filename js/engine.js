@@ -165,6 +165,7 @@ import {
   startFacilityUpgrade,
   upgradeYouthAcademy,
   processFacilityDay,
+  processAiFacilityInvestment,
   matchdayIncome,
   applySeasonLeagueFinance,
   trainingGrowthBonus,
@@ -895,6 +896,10 @@ function finishAdvanceDay(world, context) {
     const settlements = settleWorldWeeklyFinances(world);
     const debtActions = processAiDebtActions(world);
     if (debtActions.length) events.push({ type: "ai_debt_actions", actions: debtActions });
+    const facilityInvestments = processAiFacilityInvestment(world);
+    if (facilityInvestments.length) {
+      events.push({ type: "ai_facility_investments", actions: facilityInvestments });
+    }
     const user = clubById(world, world.userClubId);
     const userSettle = settlements.find((item) => item.clubId === world.userClubId);
     const total = userSettle?.operatingOut || 0;

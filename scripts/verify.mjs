@@ -41,6 +41,7 @@ const checks = [
   "scripts/club-crest-audit.mjs",
   "scripts/intl-audit.mjs",
   "scripts/finance-audit.mjs",
+  "scripts/ai-facility-investment-audit.mjs",
   "scripts/matchday-finance-audit.mjs",
   "scripts/finance-ledger-audit.mjs",
   "scripts/ai-debt-audit.mjs",
@@ -70,7 +71,10 @@ const checks = [
   "scripts/ecosystem-audit.mjs",
   "scripts/world-invariants-audit.mjs",
 ];
-const fullChecks = [["scripts/match-realism-audit.mjs", "24"]];
+const fullChecks = [
+  ["scripts/match-realism-audit.mjs", "24"],
+  ["scripts/match-realism-audit.mjs", "24", "background"],
+];
 
 function javascriptFiles(directory) {
   const files = [];

@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=222";
-import { clubCrestHtml } from "./club-crest.js?v=222";
+import { nationFlagHtml } from "./flags.js?v=223";
+import { clubCrestHtml } from "./club-crest.js?v=223";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -316,7 +316,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=222";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=223";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -368,6 +368,7 @@ import {
   SLOT_COUNT,
   exportSaveDownload,
   importSaveText,
+  initializeSaveStorage,
   migrateLegacySave,
   clearSave,
 } from "./save.js";
@@ -382,7 +383,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=222";
+} from "./avatar.js?v=223";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
@@ -475,7 +476,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=222").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=223").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1103,9 +1104,9 @@ function initStart() {
     }
   };
 
-  $("#btn-load-game").onclick = () => {
+  $("#btn-load-game").onclick = async () => {
     const slot = getActiveSlot();
-    const data = loadGame(slot);
+    const data = await loadGame(slot);
     if (!data) {
       $("#start-hint").textContent = t("start.noSave", { n: slot });
       return;
@@ -1116,13 +1117,13 @@ function initStart() {
     enterMain();
   };
 
-  $("#btn-export-save").onclick = () => {
+  $("#btn-export-save").onclick = async () => {
     const slot = getActiveSlot();
     if (!hasSave(slot)) {
       $("#start-hint").textContent = t("start.noExport", { n: slot });
       return;
     }
-    const data = loadGame(slot);
+    const data = await loadGame(slot);
     if (exportSaveDownload(data)) {
       markExportDone();
       toast(t("toast.exportedOk"));
@@ -8108,6 +8109,20 @@ function setCalendarAdvanceBusy(busy) {
 async function runCalendarAdvance(task) {
   if (calendarAdvanceBusy) return null;
   setCalendarAdvanceBusy(true);
+  let lastProgressAt = 0;
+  const onProgress = (event) => {
+    const now = performance.now();
+    const completed = Number(event.detail?.completed) || 0;
+    const total = Number(event.detail?.total) || 0;
+    if (!total || (completed < total && now - lastProgressAt < 700)) return;
+    lastProgressAt = now;
+    toast(
+      getLang() === "en"
+        ? `Running spatial matches ${completed}/${total}`
+        : `正在运行空间比赛 ${completed}/${total}`
+    );
+  };
+  window.addEventListener("vcfm-calendar-progress", onProgress);
   toast(
     getLang() === "en"
       ? "Running headless spatial matches…"
@@ -8120,6 +8135,7 @@ async function runCalendarAdvance(task) {
     toast(getLang() === "en" ? "Calendar advance failed" : "日历推进失败");
     return null;
   } finally {
+    window.removeEventListener("vcfm-calendar-progress", onProgress);
     setCalendarAdvanceBusy(false);
   }
 }
@@ -11272,6 +11288,7 @@ function toast(msg) {
 }
 
 // ---------- Boot ----------
+await initializeSaveStorage();
 initPrefs();
 window.addEventListener("vcfm-save-error", () => toast(t("toast.autosaveFail")));
 window.addEventListener("vc-prefs-change", () => {
@@ -11292,14 +11309,14 @@ fillDivisionSelects(START_DIVISION);
  * （否则每次刷新都会停在开始页，像「没记住进度」）
  * URL 加 ?menu=1 可强制停在开始页（例如要换档 / 导出）
  */
-function tryAutoResume() {
+async function tryAutoResume() {
   try {
     const params = new URLSearchParams(location.search || "");
     if (params.get("menu") === "1" || params.get("noload") === "1") return false;
     // session 内主动回菜单：同一会话刷新仍自动读；仅当带 menu=1 时停菜单
     const slot = getActiveSlot();
     if (!hasSave(slot)) return false;
-    const data = loadGame(slot);
+    const data = await loadGame(slot);
     if (!data) return false;
     world = data;
     dashboardAdvanceDigest = null;
@@ -11319,4 +11336,4 @@ function tryAutoResume() {
   }
 }
 
-tryAutoResume();
+await tryAutoResume();

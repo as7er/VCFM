@@ -40,6 +40,14 @@ function seasonSnapshot(world) {
   const wages = players.map((player) => Number(player.wage) || 0).filter((value) => value > 0);
   const values = players.map((player) => Number(player.value) || 0).filter((value) => value > 0);
   const ages = players.map((player) => Number(player.age) || 0).filter((value) => value > 0);
+  const facilityLevels = clubs.map((club) => {
+    const facilities = club.facilities || {};
+    return (
+      (Number(facilities.stadium) || 1) +
+      (Number(facilities.training) || 1) +
+      (Number(facilities.youth) || 1)
+    ) / 3;
+  });
   return {
     season: world.season,
     clubs: clubs.length,
@@ -51,6 +59,10 @@ function seasonSnapshot(world) {
     medianWage: median(wages),
     medianValue: median(values),
     averageAge: ages.reduce((sum, value) => sum + value, 0) / Math.max(1, ages.length),
+    medianFacilityLevel: median(facilityLevels),
+    aiFacilityInvestments: clubs.filter(
+      (club) => club.finance?.lastAiFacilityInvestmentSeason === world.season
+    ).length,
     missingPositionClubs: clubs.filter((club) =>
       ["GK", "DEF", "MID", "ATT"].some((position) =>
         !(club.players || []).some((player) => player.pos === position)
@@ -80,7 +92,7 @@ function playUserFixturesAsBackground(world, fixtures) {
   }
 }
 
-const seasons = Math.max(3, Number(process.env.VCFM_ECO_SEASONS) || 5);
+const seasons = Math.max(3, Number(process.argv[2]) || Number(process.env.VCFM_ECO_SEASONS) || 5);
 const progressEnabled = process.env.VCFM_ECO_PROGRESS === "1";
 const progressDays = Math.max(1, Number(process.env.VCFM_ECO_PROGRESS_DAYS) || 30);
 const startClub = CLUB_TEMPLATES.find((club) => club.division === 3);
@@ -170,6 +182,7 @@ try {
     assert.equal(snapshot.invalidFinanceClubs, 0, "all club ledgers remain finite and non-negative");
     assert.ok(snapshot.negativeClubs <= Math.ceil(snapshot.clubs * 0.15), "widespread insolvency detected");
     assert.ok(snapshot.averageAge >= 22 && snapshot.averageAge <= 30, "player age structure left a plausible range");
+    assert.ok(snapshot.aiFacilityInvestments >= 10, "solvent AI clubs should reinvest retained income");
 
     if (index < seasons - 1) {
       const next = startNextSeason(longWorld);
@@ -183,6 +196,13 @@ try {
   assert.ok(last.medianWage <= first.medianWage * 2.5, "median wages inflated too quickly");
   assert.ok(last.medianValue <= first.medianValue * 2.5, "median transfer values inflated too quickly");
   assert.ok(last.p90Money <= Math.max(250_000_000, first.p90Money * 8), "club wealth concentration exploded");
+  assert.ok(last.medianFacilityLevel >= first.medianFacilityLevel, "AI capital investment must remain visible in facilities");
+  if (snapshots.length >= 5) {
+    assert.ok(
+      last.medianMoney <= Math.max(first.medianMoney * 2.25, first.medianMoney + 12_000_000),
+      "median club cash grew faster than wages, values and real investment"
+    );
+  }
 
   console.log(JSON.stringify({ seasons, snapshots }, null, 2));
   console.log("Ecosystem audit passed: shared finances, solvency, squads, ages and inflation");

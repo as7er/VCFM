@@ -4,7 +4,17 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v222**（克制信息层、稳定镜头与赛事氛围）
+> 缓存：**vcfm-v223**（耐久存档、可见推进与长期生态修复）
+
+## v223 耐久存档、可见推进与长期生态修复（2026-08-17）
+
+- 浏览器三槽存档迁移到 IndexedDB，所有并发读取共享同一个初始化任务；旧压缩 localStorage 槽在耐久写入确认后清理，连续自动保存按槽合并并保证读取最新快照，页面退出不再同步压缩数十 MB 世界
+- 保存序列化省略可重建的阵容计划，把出场历史压缩为可迁移元组；AI 只保留真实出场分钟，玩家队继续保留承诺复核所需的可用场次，导出/导入与旧档保持兼容
+- 比赛 Worker 池逐场上报进度，日历推进显示已完成/总场次；防守计划按原随机顺序首次计算后在同一步复用，越位线与战术读取减少重复分配，并新增 Edge 浏览器性能基准
+- 后台空间档加入时间步长离散补偿，标准档按真实射门量缩短全队射门复核间隔并统一校准门将基础覆盖；24 场发布门禁同时覆盖标准与后台档，直塞由视野、决策、压力、角色和习惯共同决定，VAR 初判允许禁区边界/手球视野误差，最终结论仍只读取精确空间证据
+- AI 董事会把长期盈余投入真实球场、训练或青训项目，每赛季最多一次并服从负债、财政限制和现金储备；资金、工期、维护与设施效果继续走统一总账和既有设施系统
+- 新增 `js/save-serialization.js`、`scripts/browser-save-audit.mjs`、`scripts/browser-performance-audit.mjs` 与 `scripts/ai-facility-investment-audit.mjs`；缓存 `vcfm-v223`
+- 已验证：`node scripts/verify.mjs --full`、`node js/sim/_p5_integration.mjs`、`node scripts/match-seed-audit.mjs`、`npm run test:browser`、`npm run test:save-browser`、Edge 6 核 134 场浏览器基准 59.6 秒及 `git diff --check`；标准档 2.63 球/场、10.9% 转化、24.17 次射门、81.3% 传球成功率，后台档 3.08 球/场、13.2% 转化、23.29 次射门、84.3% 传球成功率，两档均零停滞
 
 ## v222 克制信息层、稳定镜头与赛事氛围（2026-08-17）
 

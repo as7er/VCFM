@@ -14,19 +14,27 @@ self.onmessage = async (event) => {
   const { requestId, action, world, payload = {} } = event.data || {};
   if (!requestId || !world) return;
   try {
+    const matchRunner = (targetWorld, fixtures, options) => runFixtureBatch(
+      targetWorld,
+      fixtures,
+      {
+        ...options,
+        onProgress: (progress) => self.postMessage({ requestId, progress }),
+      }
+    );
     let result;
     if (action === "day") {
       result = await advanceDayWithMatchRunner(
         world,
         AI_SIMULATION_OPTIONS,
-        runFixtureBatch
+        matchRunner
       );
     } else if (action === "to-matchday") {
       result = await advanceToNextMatchDayWithMatchRunner(
         world,
         Number(payload.maxDays) || 60,
         AI_SIMULATION_OPTIONS,
-        runFixtureBatch
+        matchRunner
       );
     } else if (action === "to-season-end") {
       result = await advanceToSeasonEndWithMatchRunner(
@@ -36,7 +44,7 @@ self.onmessage = async (event) => {
           stopOnUserMatch: payload.stopOnUserMatch !== false,
           ...AI_SIMULATION_OPTIONS,
         },
-        runFixtureBatch
+        matchRunner
       );
     } else {
       throw new Error(`unknown calendar action: ${action}`);

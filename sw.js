@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v222";
+const CACHE = "vcfm-v223";
 const ASSETS = [
   "./",
   "./index.html",
@@ -46,6 +46,7 @@ const ASSETS = [
   "./js/avatar.js",
   "./js/i18n.js",
   "./js/save.js",
+  "./js/save-serialization.js",
   "./js/save-schema.js",
   "./js/player-pathway.js",
   "./js/development-football.js",

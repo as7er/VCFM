@@ -7,6 +7,7 @@ import {
   forwardProgress,
   goalkeeperBackpassControl,
   handballContactDecision,
+  penaltyOnFieldDecision,
   varReviewDecision,
 } from "../js/edge-rules.js";
 import { SimEngine } from "../js/sim/engine.js";
@@ -135,6 +136,26 @@ assert.equal(
   }).finalDecision,
   "no-goal",
   "a contradictory offside snapshot must overturn a goal"
+);
+assert.equal(
+  penaltyOnFieldDecision({
+    exactInPenaltyArea: true,
+    boundaryDistance: 0.2,
+    offenceType: "foul",
+    roll: 0,
+  }).onFieldDecision,
+  "no-penalty",
+  "an official can initially place a marginal foul outside the area"
+);
+assert.equal(
+  penaltyOnFieldDecision({
+    exactInPenaltyArea: false,
+    boundaryDistance: 0.2,
+    offenceType: "foul",
+    roll: 0,
+  }).onFieldDecision,
+  "penalty",
+  "an official can initially place a marginal outside foul inside the area"
 );
 assert.equal(
   varReviewDecision({
@@ -314,9 +335,13 @@ assert.ok(
 );
 assert.ok(
   handballEngine.events.some(
-    (event) => event.type === "var_decision" && event.incident === "penalty"
+    (event) =>
+      event.type === "var_decision" &&
+      event.incident === "penalty" &&
+      event.decision === "overturned" &&
+      event.finalDecision === "penalty"
   ),
-  "a penalty handball must enter the VAR evidence stream"
+  "a missed penalty handball must be upgraded from the stored spatial evidence"
 );
 assert.ok(handballEngine.pendingPenalty, "a handball in the own penalty area must award a penalty");
 

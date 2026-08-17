@@ -224,7 +224,7 @@ world.clubs[0].short = world.clubs[0].legacyShortName;
 world.clubs[0].kit = { primary: "#ffffff", secondary: "#ffffff", style: "solid" };
 world.transferHistory = [{ fromClubId: "vcc", toClubId: "harbor", playerId: world.clubs[0].players[0].id }];
 assert.equal(saveGame(world, 1, { immediate: true }), true);
-const loaded = loadGame(1);
+const loaded = await loadGame(1);
 assert.ok(loaded);
 const managedBefore = loaded.userClubId;
 const fixtureRefsBefore = loaded.fixtures.map((fixture) => `${fixture.home}|${fixture.away}`);

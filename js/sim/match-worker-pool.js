@@ -127,12 +127,18 @@ function enqueueWorkerTask(prepared) {
   });
 }
 
-function runWorkerWave(preparedMatches) {
-  if (typeof Worker !== "function" || preparedMatches.length < 2) {
-    return Promise.all(preparedMatches.map(runPreparedLocally));
+function runWorkerWave(preparedMatches, onCompleted = null) {
+  let runner = runPreparedLocally;
+  if (typeof Worker === "function" && preparedMatches.length >= 2) {
+    ensureWorkerPool(workerCount(preparedMatches.length));
+    runner = enqueueWorkerTask;
   }
-  ensureWorkerPool(workerCount(preparedMatches.length));
-  return Promise.all(preparedMatches.map(enqueueWorkerTask));
+  let completed = 0;
+  return Promise.all(preparedMatches.map((prepared) => runner(prepared).then((result) => {
+    completed++;
+    onCompleted?.(completed);
+    return result;
+  })));
 }
 
 export function shutdownMatchWorkerPool() {
@@ -155,18 +161,25 @@ export function shutdownMatchWorkerPool() {
  */
 export async function runFixtureBatch(world, fixtures, options) {
   const reports = [];
+  const onProgress = typeof options?.onProgress === "function" ? options.onProgress : null;
+  let completedBeforeWave = 0;
   for (const wave of fixtureWaves(fixtures)) {
     const prepared = wave.map((fixture) => prepareMatchSimulation(world, fixture, options));
     let completed;
     try {
-      completed = await runWorkerWave(prepared);
+      completed = await runWorkerWave(prepared, (waveCompleted) => onProgress?.({
+        completed: completedBeforeWave + waveCompleted,
+        total: fixtures.length,
+      }));
     } catch (error) {
       console.warn("parallel match workers unavailable; finishing wave locally", error);
       completed = prepared.map((match) => runPreparedMatchSimulation(match));
+      onProgress?.({ completed: completedBeforeWave + wave.length, total: fixtures.length });
     }
     for (let index = 0; index < wave.length; index++) {
       reports.push(commitPreparedMatch(world, wave[index], completed[index]));
     }
+    completedBeforeWave += wave.length;
   }
   return reports;
 }
