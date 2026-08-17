@@ -114,8 +114,10 @@ function pitchVectorMetres(dx, dy) {
   };
 }
 function pitchDistanceMetres(dx, dy) {
-  const metres = pitchVectorMetres(dx, dy);
-  return Math.hypot(metres.x, metres.y);
+  return Math.hypot(
+    dx * (SIM.PITCH_W_METRES / SIM.FIELD_W),
+    dy * (SIM.PITCH_H_METRES / SIM.FIELD_H)
+  );
 }
 function pitchDistanceBetween(ax, ay, bx, by) {
   return pitchDistanceMetres(ax - bx, ay - by);
@@ -130,12 +132,13 @@ function pitchOffsetMetres(dxMetres, dyMetres) {
   };
 }
 function pitchOffsetToward(dx, dy, distanceMetres) {
-  const metres = pitchVectorMetres(dx, dy);
-  const length = Math.hypot(metres.x, metres.y) || 1;
-  return pitchOffsetMetres(
-    (metres.x / length) * distanceMetres,
-    (metres.y / length) * distanceMetres
-  );
+  const metresX = dx * (SIM.PITCH_W_METRES / SIM.FIELD_W);
+  const metresY = dy * (SIM.PITCH_H_METRES / SIM.FIELD_H);
+  const length = Math.hypot(metresX, metresY) || 1;
+  return {
+    x: (metresX / length) * distanceMetres * (SIM.FIELD_W / SIM.PITCH_W_METRES),
+    y: (metresY / length) * distanceMetres * (SIM.FIELD_H / SIM.PITCH_H_METRES),
+  };
 }
 function pitchSpeedMps(vx, vy) {
   return pitchDistanceMetres(vx, vy);

@@ -4,7 +4,15 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v224**（后台关键事件自适应积分与档位一致性）
+> 缓存：**vcfm-v225**（比赛引擎热路径几何分配优化）
+
+## v225 比赛引擎热路径几何分配优化（2026-08-18）
+
+- `pitchDistanceMetres` 与 `pitchOffsetToward` 直接在标尺坐标上完成米制换算和归一化，移除高频临时向量对象分配，不改变空间规则、随机调用顺序或事件数据
+- 曾验证的 8 米空间候选网格方案因 Edge 端到端基准退化至 84.8 秒而撤回；v225 仅保留无状态算术优化，避免用性能倒退换取额外索引维护
+- 固定种子标准档 8 场与后台档 8 场统计保持 v224 对照，均零停滞；Edge 6 核 134 场浏览器基准 56.4 秒（v224 为 75.4 秒），进度事件完整到 134/134
+- 缓存 `vcfm-v225`
+- 已验证：`node scripts/match-realism-audit.mjs 8 standard equal-only`、`node scripts/match-realism-audit.mjs 8 background`、`node scripts/background-spatial-worker-audit.mjs`、`node js/sim/_p5_integration.mjs`、`npm run test:browser`、Edge 6 核 134 场浏览器基准及 `git diff --check`
 
 ## v224 后台关键事件自适应积分与档位一致性（2026-08-18）
 
