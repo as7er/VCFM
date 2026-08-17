@@ -1145,6 +1145,29 @@ html[data-theme="light"] .pitch {
 .tac-summary strong {
   color: var(--text);
 }
+.tac-phase-shapes {
+  margin: 0.15rem 0 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.tac-phase-shapes h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+.tac-phase-shape-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+.tac-phase-shape-grid label {
+  margin-bottom: 0;
+}
+.tac-phase-shapes > .hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
 .tac-shape-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1272,6 +1295,7 @@ html[data-theme="light"] .pitch {
   .pitch { max-width: 360px; }
   .player-dot { width: 72px; }
   .tac-shape-grid { grid-template-columns: 1fr; }
+  .tac-phase-shape-grid { grid-template-columns: 1fr; }
   .tac-role-list { grid-template-columns: 1fr; }
   .tac-role-badge { max-width: 70px; font-size: 0.54rem; }
 }

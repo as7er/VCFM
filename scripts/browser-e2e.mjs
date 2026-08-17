@@ -479,6 +479,13 @@ try {
     await page.waitForTimeout(100);
     await assertNoHorizontalOverflow(page, `desktop ${tab}`);
     if (tab === "tactics") {
+      const possessionShape = page.locator("#possession-formation-select");
+      const defensiveShape = page.locator("#out-possession-formation-select");
+      assert.equal(await possessionShape.locator("option").count(), 9, "possession shape must include follow-base plus all formations");
+      assert.equal(await defensiveShape.locator("option").count(), 9, "defensive shape must include follow-base plus all formations");
+      await possessionShape.selectOption("3-4-3");
+      await defensiveShape.selectOption("5-3-2");
+      assert.match(await page.locator("#tac-summary").innerText(), /3-4-3.*5-3-2/s);
       // v209 角色/职责面板：每个首发槽都有角色徽章，点击可打开角色面板并切换角色/职责
       await page.waitForSelector("#pitch .tac-slot");
       assert.equal(await page.locator("#pitch .tac-slot").count(), 11);
@@ -596,6 +603,8 @@ try {
   await assertNoHorizontalOverflow(page, "mobile squad planning");
   await openTab(page, "tactics");
   await page.waitForSelector("#pitch .tac-slot");
+  assert.equal(await page.locator("#possession-formation-select").inputValue(), "3-4-3", "possession shape must persist across navigation");
+  assert.equal(await page.locator("#out-possession-formation-select").inputValue(), "5-3-2", "defensive shape must persist across navigation");
   await page.locator("#pitch .tac-role-badge").first().click();
   await page.waitForSelector("#tac-role-panel .tac-role-card");
   await assertNoHorizontalOverflow(page, "mobile tactics role panel");

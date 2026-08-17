@@ -1,11 +1,94 @@
 /** Team shape phases derived from the existing public tactical instructions. */
 
+import { FORMATIONS } from "./data.js";
+
 export const TEAM_SHAPE_PHASES = Object.freeze({
   IN_POSSESSION: "in-possession",
   OUT_OF_POSSESSION: "out-of-possession",
   ATTACKING_TRANSITION: "attacking-transition",
   DEFENSIVE_TRANSITION: "defensive-transition",
 });
+
+const shapeSlotMapCache = new Map();
+
+function isAttackingPhase(phase) {
+  return phase === TEAM_SHAPE_PHASES.IN_POSSESSION ||
+    phase === TEAM_SHAPE_PHASES.ATTACKING_TRANSITION;
+}
+
+export function explicitShapeFormationId(tactics = {}, phase = TEAM_SHAPE_PHASES.IN_POSSESSION) {
+  const configured = isAttackingPhase(phase)
+    ? tactics.possessionFormation
+    : tactics.outOfPossessionFormation;
+  return typeof configured === "string" && FORMATIONS[configured] ? configured : null;
+}
+
+export function shapeFormationId(tactics = {}, phase = TEAM_SHAPE_PHASES.IN_POSSESSION) {
+  const fallback = typeof tactics.formation === "string" && FORMATIONS[tactics.formation]
+    ? tactics.formation
+    : "4-3-3";
+  return explicitShapeFormationId(tactics, phase) || fallback;
+}
+
+/**
+ * Match the base XI slots to another formation without crossing the whole team.
+ * The result maps each base slot index to one target slot index.
+ */
+export function shapeFormationSlotMap(baseFormationId, targetFormationId) {
+  const baseId = FORMATIONS[baseFormationId] ? baseFormationId : "4-3-3";
+  const targetId = FORMATIONS[targetFormationId] ? targetFormationId : baseId;
+  const cacheKey = `${baseId}>${targetId}`;
+  if (shapeSlotMapCache.has(cacheKey)) return shapeSlotMapCache.get(cacheKey);
+
+  const baseSlots = FORMATIONS[baseId].slots || [];
+  const targetSlots = FORMATIONS[targetId].slots || [];
+  const count = Math.min(baseSlots.length, targetSlots.length);
+  const result = Array.from({ length: count }, (_, index) => index);
+  if (count <= 1 || baseId === targetId) {
+    const frozen = Object.freeze(result);
+    shapeSlotMapCache.set(cacheKey, frozen);
+    return frozen;
+  }
+
+  // All current formations contain one goalkeeper at index 0. Keep that identity
+  // fixed and solve the ten outfield assignments with a small bitmask DP.
+  const baseIndexes = Array.from({ length: count - 1 }, (_, index) => index + 1);
+  const targetIndexes = Array.from({ length: count - 1 }, (_, index) => index + 1);
+  const roleRank = { GK: 0, DEF: 1, MID: 2, ATT: 3 };
+  const memo = new Map();
+  const solve = (baseOffset, usedMask) => {
+    if (baseOffset >= baseIndexes.length) return { cost: 0, targets: [] };
+    const key = `${baseOffset}:${usedMask}`;
+    if (memo.has(key)) return memo.get(key);
+    const source = baseSlots[baseIndexes[baseOffset]];
+    let best = null;
+    for (let targetOffset = 0; targetOffset < targetIndexes.length; targetOffset++) {
+      const bit = 1 << targetOffset;
+      if (usedMask & bit) continue;
+      const targetIndex = targetIndexes[targetOffset];
+      const target = targetSlots[targetIndex];
+      const dx = (Number(source.x) || 50) - (Number(target.x) || 50);
+      const dy = (Number(source.y) || 50) - (Number(target.y) || 50);
+      const roleDistance = Math.abs((roleRank[source.pos] ?? 2) - (roleRank[target.pos] ?? 2));
+      const tail = solve(baseOffset + 1, usedMask | bit);
+      const candidate = {
+        cost: dx * dx + dy * dy + roleDistance * roleDistance * 90 + tail.cost,
+        targets: [targetIndex, ...tail.targets],
+      };
+      if (!best || candidate.cost < best.cost - 1e-9) best = candidate;
+    }
+    memo.set(key, best);
+    return best;
+  };
+
+  const assignment = solve(0, 0)?.targets || [];
+  for (let index = 0; index < assignment.length; index++) {
+    result[baseIndexes[index]] = assignment[index];
+  }
+  const frozen = Object.freeze(result);
+  shapeSlotMapCache.set(cacheKey, frozen);
+  return frozen;
+}
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, Number(value) || 0));
@@ -118,6 +201,8 @@ function blockLabel(tactics, lang) {
 
 export function teamShapeSummary(tactics = {}, lang = "zh") {
   const profile = teamShapeProfile(tactics);
+  const possessionFormation = shapeFormationId(tactics, TEAM_SHAPE_PHASES.IN_POSSESSION);
+  const outOfPossessionFormation = shapeFormationId(tactics, TEAM_SHAPE_PHASES.OUT_OF_POSSESSION);
   const transition = profile.transition.counterPress
     ? (lang === "en" ? "counter-press after losing it" : "丢球后就地反抢")
     : profile.transition.regroup
@@ -131,17 +216,17 @@ export function teamShapeSummary(tactics = {}, lang = "zh") {
     {
       key: TEAM_SHAPE_PHASES.IN_POSSESSION,
       title: lang === "en" ? "In possession" : "持球形态",
-      detail: `${widthLabel(profile.inPossession.widthMul, lang)} · ${attackTransition}`,
+      detail: `${possessionFormation} · ${widthLabel(profile.inPossession.widthMul, lang)} · ${attackTransition}`,
     },
     {
       key: TEAM_SHAPE_PHASES.OUT_OF_POSSESSION,
       title: lang === "en" ? "Out of possession" : "无球形态",
-      detail: blockLabel(tactics, lang),
+      detail: `${outOfPossessionFormation} · ${blockLabel(tactics, lang)}`,
     },
     {
       key: "transition",
       title: lang === "en" ? "Transitions" : "攻防转换",
-      detail: transition,
+      detail: `${transition} · ${possessionFormation} → ${outOfPossessionFormation}`,
     },
   ];
 }

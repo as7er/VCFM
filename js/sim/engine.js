@@ -32,6 +32,8 @@ import { positionCoverage } from "../player-positions.js";
 import { roleBehavior } from "../player-roles.js";
 import {
   TEAM_SHAPE_PHASES,
+  explicitShapeFormationId,
+  shapeFormationSlotMap,
   teamShapePhase,
   teamShapeProfile,
 } from "../team-shapes.js";
@@ -499,6 +501,7 @@ export class SimEngine {
         baseX: base.x,
         baseY: base.y,
         // 阵型槽原始 x（未翻转）：主客队判定边锋/边卫时一致，不依赖场地翻转后的 baseX
+        shapeSlotIndex: i,
         slotX: slot.x ?? 50,
         slotY: slot.y ?? 50,
         // —— 归一化属性（决策用，读一次缓存）——
@@ -800,6 +803,30 @@ export class SimEngine {
     return this._shapeProfileCache[team].profile;
   }
 
+  /**
+   * Apply an explicitly selected phase formation as a geometric target only.
+   * With a null selector the old base-formation path remains byte-for-byte
+   * equivalent; selecting a phase shape opts that phase into this blend.
+   */
+  _applyExplicitShapeAnchor(a, phase, weight = 0.25) {
+    if (!a || a.role === "GK") return false;
+    const tactics = this._teamTactics(a.team);
+    const targetFormationId = explicitShapeFormationId(tactics, phase);
+    if (!targetFormationId) return false;
+    const baseFormationId = FORMATIONS[tactics.formation] ? tactics.formation : "4-3-3";
+    const slotMap = shapeFormationSlotMap(baseFormationId, targetFormationId);
+    const targetIndex = slotMap[a.shapeSlotIndex];
+    const targetSlot = FORMATIONS[targetFormationId]?.slots?.[targetIndex];
+    if (!targetSlot) return false;
+    const targetX = a.isHome ? targetSlot.x : 100 - targetSlot.x;
+    const targetY = a.isHome ? targetSlot.y : 100 - targetSlot.y;
+    const blend = clamp(Number(weight) || 0, 0, 0.65);
+    if (blend <= 0) return false;
+    a.tx = clamp(a.tx * (1 - blend) + targetX * blend, 3, 97);
+    a.ty = clamp(a.ty * (1 - blend) + targetY * blend, 3, 97);
+    return true;
+  }
+
   _collectiveDefenseProfile(team) {
     const tactics = this._teamTactics(team);
     const style = tactics.style || "balanced";
@@ -1097,6 +1124,11 @@ export class SimEngine {
       a.ty = clamp(a.ty * (1 - pull) + phaseActor.y * pull, 3, 97);
     }
     a.ty = clamp(a.ty + dir * depthShift, 3, 97);
+    this._applyExplicitShapeAnchor(
+      a,
+      phase,
+      isTransition ? 0.16 : 0.28
+    );
     a.shapePhase = phase;
     this._clampOffside(a);
   }
@@ -3639,6 +3671,7 @@ export class SimEngine {
       a.tx = clamp(bx + targetOffset.x, 3, 97);
       a.ty = clamp(by + targetOffset.y, 3, 97);
       a.fsm = "press";
+      this._applyExplicitShapeAnchor(a, phase, 0.06);
       return;
     }
 
@@ -3652,6 +3685,7 @@ export class SimEngine {
       a.tx = clamp(b.x + offset.x, 3, 97);
       a.ty = clamp(b.y + offset.y, 3, 97);
       a.fsm = "cover";
+      this._applyExplicitShapeAnchor(a, phase, 0.1);
       return;
     }
 
@@ -3688,6 +3722,7 @@ export class SimEngine {
         a.tx = support.x;
         a.ty = support.y;
         a.fsm = "cover";
+        this._applyExplicitShapeAnchor(a, phase, 0.12);
         return;
       }
     }
@@ -3719,6 +3754,7 @@ export class SimEngine {
         a.tx = target.x;
         a.ty = target.y;
         a.fsm = "mark";
+        this._applyExplicitShapeAnchor(a, phase, 0.1);
         return;
       }
     }
@@ -3742,6 +3778,7 @@ export class SimEngine {
         a.tx = clamp(b.x + offset.x, 3, 97);
         a.ty = clamp(b.y + offset.y, 3, 97);
         a.fsm = "cover";
+        this._applyExplicitShapeAnchor(a, phase, 0.12);
         return;
       }
     }
@@ -3764,6 +3801,7 @@ export class SimEngine {
       a.tx = target.x;
       a.ty = target.y;
       a.fsm = "cover";
+      this._applyExplicitShapeAnchor(a, phase, 0.18);
       return;
     }
 
@@ -3780,6 +3818,7 @@ export class SimEngine {
       a.tx = target.x;
       a.ty = target.y;
       a.fsm = "recover";
+      this._applyExplicitShapeAnchor(a, phase, phase === TEAM_SHAPE_PHASES.DEFENSIVE_TRANSITION ? 0.18 : 0.28);
       return;
     }
 
@@ -3814,6 +3853,7 @@ export class SimEngine {
     a.tx = clamp(shape.x, 4, 96);
     a.ty = shape.y;
     a.fsm = "cover";
+    this._applyExplicitShapeAnchor(a, phase, phase === TEAM_SHAPE_PHASES.DEFENSIVE_TRANSITION ? 0.24 : 0.4);
   }
 
   /** 本队按"离球距离"给该 agent 的排名（0=最近外场人），用于分派上抢/补位 */
@@ -3865,6 +3905,11 @@ export class SimEngine {
     a.tx = clamp(a.baseX + (b.x - a.baseX) * pull, 3, 97);
     a.ty = clamp(a.baseY + (b.y - a.baseY) * pull, 3, 97);
     a.fsm = "home";
+    this._applyExplicitShapeAnchor(
+      a,
+      this._teamShapePhase(a.team),
+      0.18
+    );
   }
 
   /** 本队离球最近的外场球员？（防守上抢用） */

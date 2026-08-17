@@ -4,7 +4,16 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v225**（比赛引擎热路径几何分配优化）
+> 缓存：**vcfm-v226**（可编辑持球/无球双阵型）
+
+## v226 可编辑持球/无球双阵型（2026-08-18）
+
+- 战术板新增持球阵型与无球阵型选择器，支持 8 种既有阵型；留空表示跟随基础阵型，旧存档自动迁移且 AI 默认保持原有链接行为
+- 选择结果持久化到 `tactics.possessionFormation` / `tactics.outOfPossessionFormation`，战术摘要显示当前两阶段阵型；完整职责委托时控件只读，不绕过主教练权限
+- 空间引擎按稳定距离与位置职责把基础首发槽映射到阶段目标槽位，进攻、转换、防守和松散球阶段逐步靠拢对应几何；只改变可解释站位，不写入隐藏能力、胜率或赛果修正
+- 新增 `scripts/team-shapes-audit.mjs` 与存档、浏览器断言，覆盖旧档回退、阵型映射、阶段站位、持久化及移动端布局
+- 已验证：`node scripts/verify.mjs`、`node js/sim/_p5_integration.mjs`、`npm run test:browser`、标准与后台档各 8 场真实性审计及 `git diff --check`；标准档 2.63 球/场、81.8% 传球成功率，后台档 2.75 球/场、82.8% 传球成功率，两档均零停滞
+- 缓存 `vcfm-v226`
 
 ## v225 比赛引擎热路径几何分配优化（2026-08-18）
 

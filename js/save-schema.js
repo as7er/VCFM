@@ -1,3 +1,5 @@
+import { FORMATIONS } from "./data.js";
+
 export const CURRENT_SAVE_SCHEMA_VERSION = 3;
 
 function isRecord(value) {
@@ -169,6 +171,12 @@ export function validateSaveStructure(world, options = {}) {
           throw new Error(`invalid save: club ${club.id} lineup contains duplicate player`);
         }
         lineupIds.add(playerId);
+      }
+    }
+    for (const field of ["possessionFormation", "outOfPossessionFormation"]) {
+      const formationId = club.tactics?.[field];
+      if (formationId != null && (typeof formationId !== "string" || !FORMATIONS[formationId])) {
+        throw new Error(`invalid save: club ${club.id} ${field} is invalid`);
       }
     }
     // 战术角色与职责：结构与 lineup 同长、每项为非空字符串；合法角色/职责 id

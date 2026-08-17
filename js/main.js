@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=225";
-import { clubCrestHtml } from "./club-crest.js?v=225";
+import { nationFlagHtml } from "./flags.js?v=226";
+import { clubCrestHtml } from "./club-crest.js?v=226";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -316,7 +316,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=225";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=226";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -383,7 +383,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=225";
+} from "./avatar.js?v=226";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
@@ -476,7 +476,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=225").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=226").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1615,6 +1615,37 @@ function bindMainOnce() {
     htForm.innerHTML = Object.keys(FORMATIONS)
       .map((k) => `<option value="${k}">${FORMATIONS[k].name}</option>`)
       .join("");
+  }
+
+  const phaseShapeSelectors = [
+    { id: "#possession-formation-select", key: "possessionFormation" },
+    { id: "#out-possession-formation-select", key: "outOfPossessionFormation" },
+  ];
+  const fillPhaseShapeOptions = () => {
+    const followLabel = t("tac.followBaseFormation");
+    const lang = getLang();
+    for (const { id } of phaseShapeSelectors) {
+      const select = $(id);
+      if (!select || select.dataset.optionsLang === lang) continue;
+      select.innerHTML = [
+        `<option value="">${escapeHtml(followLabel)}</option>`,
+        ...Object.keys(FORMATIONS).map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(FORMATIONS[k].name)}</option>`),
+      ].join("");
+      select.dataset.optionsLang = lang;
+    }
+  };
+  fillPhaseShapeOptions();
+  for (const { id, key } of phaseShapeSelectors) {
+    const select = $(id);
+    if (!select) continue;
+    select.onchange = (e) => {
+      const club = getUserClub(world);
+      ensureTactics(club);
+      const value = e.target.value;
+      club.tactics[key] = FORMATIONS[value] ? value : null;
+      renderTactics();
+      saveGame(world);
+    };
   }
 
   formSel.onchange = () => {
@@ -5990,6 +6021,25 @@ function renderTactics() {
   const formSel = $("#formation-select");
   if (formSel) formSel.value = tac.formation;
   if (formSel) formSel.disabled = coachControlled;
+  const phaseShapeSelectors = [
+    { id: "#possession-formation-select", key: "possessionFormation" },
+    { id: "#out-possession-formation-select", key: "outOfPossessionFormation" },
+  ];
+  const followLabel = t("tac.followBaseFormation");
+  const lang = getLang();
+  for (const { id, key } of phaseShapeSelectors) {
+    const select = $(id);
+    if (!select) continue;
+    if (select.dataset.optionsLang !== lang) {
+      select.innerHTML = [
+        `<option value="">${escapeHtml(followLabel)}</option>`,
+        ...Object.keys(FORMATIONS).map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(FORMATIONS[k].name)}</option>`),
+      ].join("");
+      select.dataset.optionsLang = lang;
+    }
+    select.value = tac[key] || "";
+    select.disabled = coachControlled;
+  }
   const styleSel = $("#style-select");
   if (styleSel) styleSel.value = tac.style;
   if (styleSel) styleSel.disabled = coachControlled;

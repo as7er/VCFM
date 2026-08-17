@@ -1278,6 +1278,9 @@ function playerSelectable(p) {
 export function defaultTactics() {
   return {
     formation: "4-3-3",
+    /** null 表示跟随基础阵型；显式值只改变对应比赛阶段的空间站位 */
+    possessionFormation: null,
+    outOfPossessionFormation: null,
     style: "balanced",
     pressing: 3,
     tempo: 3,
@@ -1633,6 +1636,14 @@ export function ensureTactics(club) {
   } else {
     const t = club.tactics;
     if (!t.formation || !FORMATIONS[t.formation]) t.formation = d.formation;
+    if (t.possessionFormation === undefined) t.possessionFormation = null;
+    if (t.outOfPossessionFormation === undefined) t.outOfPossessionFormation = null;
+    if (t.possessionFormation !== null && !FORMATIONS[t.possessionFormation]) {
+      t.possessionFormation = null;
+    }
+    if (t.outOfPossessionFormation !== null && !FORMATIONS[t.outOfPossessionFormation]) {
+      t.outOfPossessionFormation = null;
+    }
     if (!t.style) t.style = d.style;
     if (t.pressing == null) t.pressing = d.pressing;
     if (t.tempo == null) t.tempo = d.tempo;

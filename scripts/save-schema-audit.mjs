@@ -32,6 +32,15 @@ const brokenLineup = clone(source);
 brokenLineup.clubs[0].tactics.lineup[0] = "missing-player";
 rejects(brokenLineup, /lineup references missing player/);
 
+const validPhaseShapes = clone(source);
+validPhaseShapes.clubs[0].tactics.possessionFormation = "3-4-3";
+validPhaseShapes.clubs[0].tactics.outOfPossessionFormation = "5-3-2";
+assert.equal(validateSaveStructure(validPhaseShapes), validPhaseShapes);
+
+const invalidPhaseShape = clone(source);
+invalidPhaseShape.clubs[0].tactics.outOfPossessionFormation = "9-0-1";
+rejects(invalidPhaseShape, /outOfPossessionFormation is invalid/);
+
 const brokenNegotiation = clone(source);
 brokenNegotiation.transferNegotiations = [{
   id: "bad-negotiation",

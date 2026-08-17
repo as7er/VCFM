@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { SimEngine } from "../js/sim/engine.js";
 import {
   TEAM_SHAPE_PHASES,
+  shapeFormationId,
+  shapeFormationSlotMap,
   teamShapeProfile,
   teamShapeSummary,
 } from "../js/team-shapes.js";
@@ -74,6 +76,33 @@ assert.equal(counterProfile.transition.counterPress, true);
 assert.equal(regroupProfile.transition.counterPress, false);
 assert.equal(regroupProfile.transition.regroup, true);
 assert.equal(teamShapeSummary({}, "zh").length, 3, "the tactics UI must expose all three team-shape facts");
+assert.equal(
+  shapeFormationId({ formation: "4-3-3" }, TEAM_SHAPE_PHASES.IN_POSSESSION),
+  "4-3-3",
+  "old tactics must follow their base formation"
+);
+assert.equal(
+  shapeFormationId(
+    { formation: "4-3-3", outOfPossessionFormation: "5-3-2" },
+    TEAM_SHAPE_PHASES.DEFENSIVE_TRANSITION
+  ),
+  "5-3-2",
+  "the defensive transition must move toward the selected out-of-possession shape"
+);
+const fourFourTwoMap = shapeFormationSlotMap("4-3-3", "4-4-2");
+assert.equal(new Set(fourFourTwoMap).size, 11, "phase-shape mapping must assign every target slot exactly once");
+assert.equal(fourFourTwoMap[0], 0, "the goalkeeper must remain the goalkeeper");
+assert.ok(
+  fourFourTwoMap[8] !== 8 && fourFourTwoMap[10] === 8,
+  "a 4-3-3 winger dropping into 4-4-2 must stay on the same flank"
+);
+assert.match(
+  teamShapeSummary({ formation: "4-3-3", possessionFormation: "3-4-3", outOfPossessionFormation: "5-3-2" }, "zh")
+    .map((item) => item.detail)
+    .join(" "),
+  /3-4-3.*5-3-2/,
+  "the tactics summary must expose both selected formations"
+);
 
 const home = makeClub("shape-home", {
   style: "counter",
@@ -174,4 +203,31 @@ assert.ok(
   "the out-of-possession shape must compact the weak-side width"
 );
 
-console.log("Team shapes audit passed: public tactics derive possession, defensive and transition geometry without ability or result weighting");
+const explicitHome = makeClub("explicit-home", {
+  formation: "4-3-3",
+  possessionFormation: "4-4-2",
+  outOfPossessionFormation: "5-3-2",
+});
+const linkedHome = makeClub("linked-home", { formation: "4-3-3" });
+const explicitEngine = new SimEngine(explicitHome, makeClub("explicit-away"), { random: () => 0.5 });
+const linkedEngine = new SimEngine(linkedHome, makeClub("linked-away"), { random: () => 0.5 });
+for (const testEngine of [explicitEngine, linkedEngine]) {
+  testEngine._phaseTeam = "home";
+  testEngine.t = 20;
+  testEngine._teamGainAt.home = 0;
+}
+const explicitWinger = explicitEngine.agents.find((agent) => agent.team === "home" && agent.shapeSlotIndex === 10);
+const linkedWinger = linkedEngine.agents.find((agent) => agent.team === "home" && agent.shapeSlotIndex === 10);
+assert.ok(explicitWinger && linkedWinger);
+for (const winger of [explicitWinger, linkedWinger]) {
+  winger.tx = 50;
+  winger.ty = 50;
+}
+explicitEngine._applyAttackTactics(explicitWinger, null);
+linkedEngine._applyAttackTactics(linkedWinger, null);
+assert.ok(
+  explicitWinger.tx > linkedWinger.tx + 7,
+  "an explicit 4-4-2 possession shape must pull the right winger toward its mapped right-midfield lane"
+);
+
+console.log("Team shapes audit passed: editable phase formations map stable XI slots into possession, defensive and transition geometry without ability weighting");
