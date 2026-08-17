@@ -797,6 +797,7 @@ export function translatePeriodToMatch(state, period, helpers) {
   }
 
   if (state.simEngineMeta) {
+    state.simEngineMeta.integration = eng.integrationSummary();
     state.simEngineMeta.halves.push({
       tStart,
       tEnd,

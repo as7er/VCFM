@@ -85,6 +85,27 @@ assert.equal(first.result.report.engine, "spatial-v2");
 assert.equal(first.result.report.simulationProfile, "background");
 assert.equal(first.result.report.simulationMeta?.timeStep, 0.3);
 assert.equal(first.result.report.simulationMeta?.separationPasses, 4);
+assert.equal(first.result.report.simulationMeta?.integration?.adaptive, true);
+assert.ok(
+  first.result.report.simulationMeta?.integration?.fineSharePct > 0,
+  "background match must substep critical ball interactions"
+);
+assert.ok(
+  first.result.report.simulationMeta?.integration?.fineSharePct <= 20,
+  "background critical ball windows exceeded their time budget"
+);
+assert.ok(
+  first.result.report.simulationMeta?.integration?.extraStepSharePct <= 32,
+  "background critical ball substeps exceeded their execution budget"
+);
+assert.ok(
+  first.result.report.simulationMeta?.integration?.reasons?.["pass-interaction"] > 0,
+  "background match must preserve pass contact resolution"
+);
+assert.ok(
+  first.result.report.simulationMeta?.integration?.reasons?.["goalkeeper-motion"] > 0,
+  "background match must preserve goalkeeper reaction movement"
+);
 assert.ok(first.result.report.analysis, "AI spatial match must persist match analysis");
 assert.ok(
   JSON.stringify(first.result.report).length <= 25_000,
@@ -160,6 +181,7 @@ console.log(
       xg: first.fingerprint.xg,
       engine: first.fixture.matchEngine,
       profile: first.fixture.simulationProfile,
+      integration: first.result.report.simulationMeta?.integration,
       reportBytes: JSON.stringify(first.result.report).length,
       workerTransferBytes: JSON.stringify(completed).length,
       analysisEvents: first.result.report.analysis?.summary?.events || null,

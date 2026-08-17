@@ -1365,6 +1365,7 @@ async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighl
   period.frames = null;
 
   if (state.simEngineMeta) {
+    state.simEngineMeta.integration = state.simEng.integrationSummary();
     state.simEngineMeta.halves.push({
       tStart,
       tEnd,
@@ -1570,6 +1571,7 @@ function simulatePeriodWithSimSync(state, fromMin, toMin) {
     byMin[minute].push({ kind: "flavor", ...f, minute });
   }
   if (state.simEngineMeta) {
+    state.simEngineMeta.integration = state.simEng.integrationSummary();
     state.simEngineMeta.halves.push({
       tStart,
       tEnd,

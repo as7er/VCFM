@@ -350,6 +350,15 @@ export class SimEngine {
     this.simulationProfile = opts.simulationProfile || "standard";
     this.timeStep = clamp(Number(opts.timeStep) || SIM.DT, SIM.DT, 0.5);
     this.separationPasses = clamp(Math.round(Number(opts.separationPasses) || 8), 1, 8);
+    this.integrationStats = {
+      outerSteps: 0,
+      coarseSteps: 0,
+      fineSteps: 0,
+      fineIntervals: 0,
+      fineSeconds: 0,
+      reasons: {},
+    };
+    this._activeStepDt = this.timeStep;
     this.t = 0; // 已模拟时间（秒）
     this.agents = [];
     this.ball = null;
@@ -1160,7 +1169,122 @@ export class SimEngine {
     );
   }
 
+  _ballFlightNearInteraction(dt) {
+    const b = this.ball;
+    const xScale = SIM.PITCH_W_METRES / SIM.FIELD_W;
+    const yScale = SIM.PITCH_H_METRES / SIM.FIELD_H;
+    const sx = b.x * xScale;
+    const sy = b.y * yScale;
+    const ex = (b.x + b.vx * dt) * xScale;
+    const ey = (b.y + b.vy * dt) * yScale;
+    if (ex < 0 || ex > SIM.PITCH_W_METRES || ey < 0 || ey > SIM.PITCH_H_METRES) return true;
+    const dx = ex - sx;
+    const dy = ey - sy;
+    const lengthSquared = dx * dx + dy * dy || 1e-9;
+    for (const agent of this.agents) {
+      if (agent.sentOff) continue;
+      const px = agent.x * xScale;
+      const py = agent.y * yScale;
+      const along = clamp(((px - sx) * dx + (py - sy) * dy) / lengthSquared, 0, 1);
+      const nearestX = sx + dx * along;
+      const nearestY = sy + dy * along;
+      const interactionRadius = SIM.CONTROL_RADIUS_METRES + (agent.role === "GK" ? 2.4 : 2);
+      if (Math.hypot(px - nearestX, py - nearestY) <= interactionRadius) return true;
+    }
+    return false;
+  }
+
+  _ballPhysicsFineReason(dt) {
+    if (
+      this.simulationProfile !== "background" ||
+      dt <= SIM.DT + 1e-9 ||
+      (this.celebrateUntil && this.t < this.celebrateUntil)
+    ) {
+      return null;
+    }
+    const b = this.ball;
+    if (!b) return null;
+    if (!b.owner && b.state === "shot") return "shot-flight";
+    if (!b.owner && b.state === "pass" && this._ballFlightNearInteraction(dt)) {
+      return "pass-interaction";
+    }
+    if (
+      !b.owner &&
+      b.state === "loose" &&
+      pitchSpeedMps(b.vx, b.vy) > 1 &&
+      this._ballFlightNearInteraction(dt)
+    ) {
+      return "loose-interaction";
+    }
+    return null;
+  }
+
+  _contactFineReason() {
+    if (this.simulationProfile !== "background") return null;
+    const b = this.ball;
+    const owner = b.owner ? this.agentById(b.owner) : null;
+    if (!owner) return null;
+    const defendingTeam = owner.team === "home" ? "away" : "home";
+    const tackleWindowOpen =
+      this.t >= (this.deadBallUntil || 0) &&
+      this.t >= (owner.protectUntil || 0) &&
+      this.t - (this._teamAttackSince[owner.team] || 0) >= 6.5 &&
+      this.t >= (this._teamTackleUntil[defendingTeam] || 0);
+    for (const opponent of this.agents) {
+      if (opponent.sentOff || opponent.team === owner.team) continue;
+      const contestDistance = pitchDistanceBetween(opponent.x, opponent.y, owner.x, owner.y);
+      if (
+        opponent.role === "GK" &&
+        contestDistance <= 7 &&
+        this._goalkeeperCanPressure(opponent, owner)
+      ) {
+        return "goalkeeper-contest";
+      }
+      if (
+        tackleWindowOpen &&
+        opponent.role !== "GK" &&
+        opponent.fsm === "press" &&
+        this.t >= (opponent.tackleCdUntil || 0) &&
+        contestDistance <= 3.2
+      ) {
+        return "close-contest";
+      }
+    }
+    return null;
+  }
+
+  _goalkeeperNeedsFineMovement(agent, dt) {
+    if (
+      this.simulationProfile !== "background" ||
+      dt <= SIM.DT + 1e-9 ||
+      agent.role !== "GK" ||
+      agent.sentOff
+    ) {
+      return false;
+    }
+    const b = this.ball;
+    const goalY = agent.team === "home" ? SIM.HOME_GOAL_Y : SIM.AWAY_GOAL_Y;
+    const goalDistance = pitchDistanceBetween(b.x, b.y, 50, goalY);
+    if (b.owner) {
+      const owner = this.agentById(b.owner);
+      return !!owner && owner.team !== agent.team && goalDistance <= 26;
+    }
+    if ((b.state === "pass" || b.state === "shot") && b.kickTeam !== agent.team) {
+      return goalDistance <= 38;
+    }
+    return b.state === "loose" && goalDistance <= 22;
+  }
+
   step(dt = SIM.DT) {
+    const requestedDt = clamp(Number(dt) || SIM.DT, 1e-6, 0.5);
+    const stats = this.integrationStats;
+    stats.outerSteps++;
+    stats.coarseSteps++;
+    this._stepOnce(requestedDt);
+  }
+
+  _stepOnce(dt) {
+    this._activeStepDt = dt;
     // 进球庆祝段：球钉在网里，队友聚拢，结束后再中圈开球
     if (this.celebrateUntil && this.t < this.celebrateUntil) {
       this._tickCelebrate(dt);
@@ -1223,16 +1347,54 @@ export class SimEngine {
     this._samplePossession();
     for (const a of this.agents) this._think(a, dt, owner, controlTeam, phaseActor);
     // 2) 积分运动
-    for (const a of this.agents) this._integrate(a, dt);
+    for (const a of this.agents) {
+      if (this._goalkeeperNeedsFineMovement(a, dt)) {
+        const movementSubsteps = Math.max(2, Math.ceil(dt / SIM.DT - 1e-9));
+        const movementDt = dt / movementSubsteps;
+        for (let index = 0; index < movementSubsteps; index++) this._integrate(a, movementDt);
+        this.integrationStats.reasons["goalkeeper-motion"] =
+          (this.integrationStats.reasons["goalkeeper-motion"] || 0) + 1;
+      } else {
+        this._integrate(a, dt);
+      }
+    }
     // 2b) 近距离约束求解，避免禁区争抢时球员互相穿透或叠成一团。
     // 阵型分散的帧首轮即退出，只有真正的禁区混战才用满迭代预算。
     this._separateAgents(this.separationPasses);
-    // 3) 球物理
-    this._stepBall(dt);
-    // 4) 接管/控球判定
-    this._resolvePossession(dt);
-    // 5) 裁判规则（P3 填充：越位/出界/进球）——P0 仅做出界夹回
-    this._resolveBounds();
+    // 3-5) 无风险跑位仍使用粗步；只有未来一个粗步内会接触球员、门将或边界的
+    // 球路才细分球物理与接管。全队决策/跑位不会重复计算。
+    const physicsReason = this._ballPhysicsFineReason(dt);
+    const contactReason = this._contactFineReason();
+    const physicsSubsteps = physicsReason
+      ? Math.max(2, Math.ceil(dt / SIM.DT - 1e-9))
+      : 1;
+    const physicsDt = dt / physicsSubsteps;
+    if (physicsReason) {
+      this.integrationStats.fineSteps += physicsSubsteps;
+      this.integrationStats.fineIntervals++;
+      this.integrationStats.fineSeconds += dt;
+      this.integrationStats.reasons[physicsReason] =
+        (this.integrationStats.reasons[physicsReason] || 0) + 1;
+    }
+    if (contactReason) {
+      this.integrationStats.reasons[contactReason] =
+        (this.integrationStats.reasons[contactReason] || 0) + 1;
+    }
+    const stepStartedAt = this.t;
+    const startingBallState = this.ball.state;
+    for (let index = 0; index < physicsSubsteps; index++) {
+      this.t = stepStartedAt + index * physicsDt;
+      this._activeStepDt = contactReason ? SIM.DT : physicsDt;
+      this._stepBall(physicsDt);
+      this._resolvePossession(physicsDt);
+      this._resolveBounds();
+      const flightResolved =
+        (startingBallState === "pass" || startingBallState === "shot") &&
+        (this.ball.owner || this.ball.state !== startingBallState);
+      if (this.pendingPenalty || this.celebrateUntil || flightResolved) break;
+    }
+    this.t = stepStartedAt;
+    this._activeStepDt = dt;
     // 5a) 防死锁看门狗：僵持 20s 强制解围（存量僵持 + 减员放大的兜底）
     this._antiDeadlock(dt);
     // 5b) 疲劳伤病抽查（每 60s 模拟时间一次）
@@ -4192,7 +4354,11 @@ export class SimEngine {
     }
 
     const dBall = pitchDistanceBetween(gk.x, gk.y, b.x, b.y);
-    const reach = 2 + (gk.attr.reflexes || 0.5) * 0.4;
+    // Coarse positions can quantize both players onto the same side of the
+    // contact boundary. Remove the maximum extra travel represented by the
+    // larger sampling interval; standard 0.1s geometry is unchanged.
+    const samplingReach = Math.max(0, this.timeStep - SIM.DT) * 2;
+    const reach = Math.max(1.65, 2 + (gk.attr.reflexes || 0.5) * 0.4 - samplingReach);
     if (dBall > reach) return false;
     // 刚完成第一脚控制仍有很短的身体保护；门将已经贴到脚下则可直接封堵。
     if (this.t < (owner.protectUntil || 0) && dBall > 1.5) return false;
@@ -5109,8 +5275,9 @@ export class SimEngine {
     pFoul *= this._teamModifier(defender.team, "foul");
     // 较大的无画面积分步长会让一次接触跨越更宽的空间区间；按采样宽度
     // 校正可吹罚接触，避免仅因数值分辨率下降而凭空增加犯规与点球。
+    const contactStep = this._activeStepDt || this.timeStep || SIM.DT;
     const contactSamplingScale = clamp(
-      0.5 + 0.5 * (SIM.DT / (this.timeStep || SIM.DT)),
+      0.5 + 0.5 * (SIM.DT / contactStep),
       0.65,
       1
     );
@@ -6345,6 +6512,26 @@ export class SimEngine {
   /** 某队门将 agent */
   _teamGk(team) {
     return this.agents.find((a) => a.team === team && a.role === "GK") || null;
+  }
+
+  integrationSummary() {
+    const stats = this.integrationStats || {};
+    const extraSteps = Math.max(0, (stats.fineSteps || 0) - (stats.fineIntervals || 0));
+    return {
+      adaptive: this.simulationProfile === "background",
+      outerSteps: stats.outerSteps || 0,
+      coarseSteps: stats.coarseSteps || 0,
+      fineSteps: stats.fineSteps || 0,
+      extraSteps,
+      fineSeconds: Number((stats.fineSeconds || 0).toFixed(1)),
+      fineSharePct: Number(
+        ((stats.fineSeconds || 0) * 100 / Math.max(SIM.DT, this.t || 0)).toFixed(1)
+      ),
+      extraStepSharePct: Number(
+        (extraSteps * 100 / Math.max(1, stats.outerSteps || 0)).toFixed(1)
+      ),
+      reasons: { ...(stats.reasons || {}) },
+    };
   }
 
   // ——————————————————————————————————————————————

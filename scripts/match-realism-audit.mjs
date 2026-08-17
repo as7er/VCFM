@@ -8,6 +8,19 @@ const strongMatches = equalOnly ? 0 : Math.max(16, matches);
 const simulationProfile = process.argv[3] === "background" ? "background" : "standard";
 const timeStep = simulationProfile === "background" ? 0.3 : SIM.DT;
 const separationPasses = simulationProfile === "background" ? 4 : 8;
+// Seeds 165000..165023 and 265000..265023 on the standard profile. Update this
+// only after an intentional standard-engine calibration and a fresh 24-match run.
+const STANDARD_PROFILE_REFERENCE_24 = Object.freeze({
+  goals: 2.63,
+  shots: 24.17,
+  passes: 1073.88,
+  passCompletionPct: 81.3,
+  fouls: 26.5,
+  openGoalShots: 0.17,
+  goalkeeperClaims: 13.5,
+  goalkeeperChallenges: 6.63,
+  strongPointsPerMatch: 1.75,
+});
 
 function seededRandom(seed) {
   let value = seed >>> 0;
@@ -147,10 +160,19 @@ const totals = {
   },
 };
 const stallSeeds = [];
+const integration = { fineSeconds: 0, totalSeconds: 0, extraSteps: 0, outerSteps: 0, reasons: {} };
 
 for (let match = 0; match < matches; match++) {
   const seed = 165000 + match;
   const engine = runMatch(13, 13, seed);
+  const integrationSummary = engine.integrationSummary();
+  integration.fineSeconds += integrationSummary.fineSeconds;
+  integration.totalSeconds += engine.t;
+  integration.extraSteps += integrationSummary.extraSteps;
+  integration.outerSteps += integrationSummary.outerSteps;
+  for (const [reason, count] of Object.entries(integrationSummary.reasons)) {
+    integration.reasons[reason] = (integration.reasons[reason] || 0) + count;
+  }
   const recentShots = [];
   const recentCorners = { home: -Infinity, away: -Infinity };
   for (const event of engine.events) {
@@ -240,6 +262,11 @@ const report = {
   simulationProfile,
   timeStep,
   separationPasses,
+  integration: {
+    fineSharePct: pct(integration.fineSeconds, integration.totalSeconds),
+    extraStepSharePct: pct(integration.extraSteps, integration.outerSteps),
+    reasons: integration.reasons,
+  },
   stallSeeds,
   equalMatches: matches,
   perMatch: {
@@ -294,6 +321,31 @@ const report = {
   },
 };
 
+if (simulationProfile === "background" && matches === 24 && !equalOnly) {
+  report.standardProfileReference = STANDARD_PROFILE_REFERENCE_24;
+  report.profileDelta = {
+    goals: Number((report.perMatch.goals - STANDARD_PROFILE_REFERENCE_24.goals).toFixed(2)),
+    shots: Number((report.perMatch.shots - STANDARD_PROFILE_REFERENCE_24.shots).toFixed(2)),
+    passes: Number((report.perMatch.passes - STANDARD_PROFILE_REFERENCE_24.passes).toFixed(2)),
+    passCompletionPct: Number(
+      (report.passCompletionPct - STANDARD_PROFILE_REFERENCE_24.passCompletionPct).toFixed(1)
+    ),
+    fouls: Number((report.perMatch.fouls - STANDARD_PROFILE_REFERENCE_24.fouls).toFixed(2)),
+    openGoalShots: Number(
+      (report.perMatch.openGoalShots - STANDARD_PROFILE_REFERENCE_24.openGoalShots).toFixed(2)
+    ),
+    goalkeeperClaims: Number(
+      (report.perMatch.goalkeeperClaims - STANDARD_PROFILE_REFERENCE_24.goalkeeperClaims).toFixed(2)
+    ),
+    goalkeeperChallenges: Number(
+      (report.perMatch.goalkeeperChallenges - STANDARD_PROFILE_REFERENCE_24.goalkeeperChallenges).toFixed(2)
+    ),
+    strongPointsPerMatch: Number(
+      (report.strongVsWeak.pointsPerMatch - STANDARD_PROFILE_REFERENCE_24.strongPointsPerMatch).toFixed(2)
+    ),
+  };
+}
+
 console.log(JSON.stringify(report, null, 2));
 
 assert.equal(totals.stalls, 0, "spatial engine must not need watchdog clearances");
@@ -324,4 +376,37 @@ assert.ok(totals.varOverturns <= totals.varReviews, "VAR overturns cannot exceed
 if (!equalOnly) {
   assert.ok(report.strongVsWeak.pointsPerMatch >= 1.5, "strong teams must retain a visible ability advantage");
   assert.ok(strongGoals > weakGoals, "strong teams need a positive goal difference");
+}
+if (report.profileDelta) {
+  const delta = report.profileDelta;
+  assert.ok(report.integration.fineSharePct >= 5, "background profile did not activate critical ball substeps");
+  assert.ok(report.integration.fineSharePct <= 20, "background critical ball windows exceeded their time budget");
+  assert.ok(
+    report.integration.extraStepSharePct <= 32,
+    "background critical ball substeps exceeded their execution budget"
+  );
+  assert.ok(Math.abs(delta.goals) <= 0.55, "background goals diverged from the fixed-seed standard profile");
+  assert.ok(Math.abs(delta.shots) <= 3, "background shots diverged from the fixed-seed standard profile");
+  assert.ok(Math.abs(delta.passes) <= 100, "background pass volume diverged from the fixed-seed standard profile");
+  assert.ok(
+    Math.abs(delta.passCompletionPct) <= 2,
+    "background pass completion diverged from the fixed-seed standard profile"
+  );
+  assert.ok(Math.abs(delta.fouls) <= 6, "background fouls diverged from the fixed-seed standard profile");
+  assert.ok(
+    Math.abs(delta.openGoalShots) <= 0.65,
+    "background open-goal chances diverged from the fixed-seed standard profile"
+  );
+  assert.ok(
+    Math.abs(delta.goalkeeperClaims) <= 4,
+    "background goalkeeper claims diverged from the fixed-seed standard profile"
+  );
+  assert.ok(
+    Math.abs(delta.goalkeeperChallenges) <= 3,
+    "background goalkeeper challenges diverged from the fixed-seed standard profile"
+  );
+  assert.ok(
+    Math.abs(delta.strongPointsPerMatch) <= 0.5,
+    "background strength separation diverged from the fixed-seed standard profile"
+  );
 }
