@@ -15,6 +15,12 @@
 import { FORMATIONS, playerDisplaySurname } from "./data.js";
 import { MatchViewFSM } from "./matchview-fsm.js";
 import { interpolateSimBall, simMinuteOf } from "./match-presentation.js";
+import {
+  cameraFraming,
+  crowdAtmosphere,
+  normalizeCameraPreset,
+  visualCuePolicy,
+} from "./match-broadcast.js";
 import { coordSystem } from "./matchview-coords.js";
 import { GOAL_NARRATIVE, DirectorScript } from "./matchview-director.js";
 import {
@@ -152,6 +158,8 @@ export class MatchView {
     this.focusUntil = 0;
     /** 镜头模式：wide | ball | box */
     this.camMode = "wide";
+    /** Stable user-facing camera: full | tv | tactical. */
+    this.cameraPreset = "tv";
     /** @type {((playerId: string, team: 'home'|'away') => void) | null} */
     this.onPlayerClick = null;
     // 镜头：目标与当前（百分比偏移 → CSS translate）
@@ -214,6 +222,11 @@ export class MatchView {
     /** @type {AudioContext | null} */
     this._audioCtx = null;
     this._sfxMuted = false;
+    this._broadcastContext = { attendanceRatio: 0.84 };
+    this._crowdBed = null;
+    this._crowdReaction = { value: 0, until: 0 };
+    this._crowdLastUpdate = 0;
+    this._broadcastScore = { home: 0, away: 0 };
     /** 事件闪卡 DOM */
     this.flashCardEl = null;
     this._flashCardToken = 0;
@@ -990,12 +1003,22 @@ export class MatchView {
   /**
    * @param {object} home
    * @param {object} away
-   * @param {{ onPlayerClick?: (playerId, team) => void }} [opts]
+   * @param {{ onPlayerClick?: (playerId, team) => void, cameraPreset?: string, broadcastContext?: object }} [opts]
    */
   mount(home, away, opts = {}) {
     this.home = home;
     this.away = away;
     if (opts.onPlayerClick) this.onPlayerClick = opts.onPlayerClick;
+    this.setBroadcastContext(opts.broadcastContext || {});
+    let storedCamera = opts.cameraPreset;
+    if (!storedCamera) {
+      try {
+        storedCamera = localStorage.getItem("vcfm-match-camera");
+      } catch {
+        storedCamera = null;
+      }
+    }
+    this.cameraPreset = normalizeCameraPreset(storedCamera);
     this.root.innerHTML = "";
     this.root.classList.add("match-pitch-root");
     this.trails = [];
@@ -1234,6 +1257,7 @@ export class MatchView {
     this._applyBall();
 
     this.cam = { x: 0, y: 0, tx: 0, ty: 0, scale: 1, tScale: 1 };
+    this.setCameraPreset(this.cameraPreset, { persist: false });
     this._applyCamera();
     this._updatePossessionChrome();
 
@@ -1276,12 +1300,100 @@ export class MatchView {
     }
   }
 
+  _ensureCrowdBed(ctx) {
+    if (!ctx || this._crowdBed) return this._crowdBed;
+    try {
+      const seconds = 2;
+      const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      let low = 0;
+      for (let index = 0; index < data.length; index++) {
+        low = low * 0.985 + (Math.random() * 2 - 1) * 0.075;
+        data[index] = clamp(low + (Math.random() * 2 - 1) * 0.08, -1, 1);
+      }
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 760;
+      filter.Q.value = 0.45;
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0001;
+      const pan = typeof ctx.createStereoPanner === "function" ? ctx.createStereoPanner() : null;
+      source.connect(filter);
+      filter.connect(gain);
+      if (pan) {
+        gain.connect(pan);
+        pan.connect(ctx.destination);
+      } else {
+        gain.connect(ctx.destination);
+      }
+      source.start();
+      this._crowdBed = { source, filter, gain, pan };
+    } catch {
+      this._crowdBed = null;
+    }
+    return this._crowdBed;
+  }
+
+  _raiseCrowd(kind) {
+    const reactions = {
+      goal: { value: 0.5, duration: 6500 },
+      cheer: { value: 0.34, duration: 5200 },
+      save: { value: 0.2, duration: 2500 },
+      whistle: { value: 0.08, duration: 1200 },
+      card: { value: 0.12, duration: 2200 },
+      kick: { value: 0.04, duration: 700 },
+    };
+    const next = reactions[kind];
+    if (!next) return;
+    const now = performance.now();
+    const current = this._crowdReaction?.until > now ? this._crowdReaction.value : 0;
+    this._crowdReaction = {
+      value: Math.max(current, next.value),
+      duration: next.duration,
+      until: Math.max(this._crowdReaction?.until || 0, now + next.duration),
+    };
+  }
+
+  _updateCrowdAtmosphere(nowMs = performance.now()) {
+    const ctx = this._audioCtx;
+    if (!ctx || !this._crowdBed || nowMs - this._crowdLastUpdate < 120) return;
+    this._crowdLastUpdate = nowMs;
+    const reactionState = this._crowdReaction || { value: 0, until: 0, duration: 1 };
+    const reaction = reactionState.until > nowMs
+      ? reactionState.value * clamp((reactionState.until - nowMs) / Math.max(1, reactionState.duration), 0, 1)
+      : 0;
+    const minute = this._simPlay?.simT != null
+      ? simMinuteOf(this._simPlay.simT)
+      : Number(this._broadcastMinute) || 0;
+    const atmosphere = crowdAtmosphere({
+      context: this._broadcastContext,
+      ball: this.ball,
+      ownerTeam: this.carrier?.team || null,
+      minute,
+      homeGoals: this._broadcastScore?.home || 0,
+      awayGoals: this._broadcastScore?.away || 0,
+      reaction,
+    });
+    const active = this.fsm.canAIAct() || this.fsm.isIn('GOAL_SEQUENCE');
+    const targetGain = this._sfxMuted ? 0.0001 : (active ? 0.0025 : 0.001) + atmosphere.intensity * (active ? 0.018 : 0.006);
+    this._crowdBed.gain.gain.setTargetAtTime(targetGain, ctx.currentTime, 0.32);
+    if (this._crowdBed.pan) {
+      this._crowdBed.pan.pan.setTargetAtTime(atmosphere.pan, ctx.currentTime, 0.28);
+    }
+  }
+
   /**
    * @param {'goal'|'whistle'|'card'|'save'|'kick'|'cheer'} kind
    */
   playSfx(kind) {
     const ctx = this._ensureAudio();
     if (!ctx) return;
+    this._ensureCrowdBed(ctx);
+    this._raiseCrowd(kind);
+    this._updateCrowdAtmosphere();
     const now = ctx.currentTime;
     const beep = (freq, dur, type = "sine", gain = 0.08, when = 0) => {
       const o = ctx.createOscillator();
@@ -1666,10 +1778,20 @@ export class MatchView {
     } catch {
       /* ignore */
     }
+    if (this._audioCtx && this._crowdBed) {
+      const target = this._sfxMuted ? 0.0001 : 0.008;
+      this._crowdBed.gain.gain.setTargetAtTime(target, this._audioCtx.currentTime, 0.08);
+    }
   }
 
   isSfxMuted() {
     return !!this._sfxMuted;
+  }
+
+  setBroadcastState({ minute, homeGoals, awayGoals } = {}) {
+    if (Number.isFinite(Number(minute))) this._broadcastMinute = Number(minute);
+    if (Number.isFinite(Number(homeGoals))) this._broadcastScore.home = Number(homeGoals);
+    if (Number.isFinite(Number(awayGoals))) this._broadcastScore.away = Number(awayGoals);
   }
 
   /**
@@ -2272,6 +2394,50 @@ export class MatchView {
     return 0.72 + (pace / 20) * 0.65;
   }
 
+  setCameraPreset(value, { persist = true } = {}) {
+    this.cameraPreset = normalizeCameraPreset(value);
+    if (persist) {
+      try {
+        localStorage.setItem("vcfm-match-camera", this.cameraPreset);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (this.fieldEl) {
+      this.fieldEl.dataset.cameraPreset = this.cameraPreset;
+      this.fieldEl.classList.toggle("mp-camera-tactical", this.cameraPreset === "tactical");
+      this.fieldEl.classList.toggle("mp-camera-full", this.cameraPreset === "full");
+      this.fieldEl.classList.toggle("mp-camera-tv", this.cameraPreset === "tv");
+    }
+    if (this.cameraPreset !== "tv") {
+      this.cam.tx = 0;
+      this.cam.ty = 0;
+      this.cam.tScale = 1;
+    }
+    this._drawCanvas?.();
+    return this.cameraPreset;
+  }
+
+  getCameraPreset() {
+    return normalizeCameraPreset(this.cameraPreset);
+  }
+
+  setBroadcastContext(context = {}) {
+    const capacity = Number(context.capacity);
+    const attendance = Number(context.attendance);
+    const attendanceRatio =
+      Number.isFinite(attendance) && Number.isFinite(capacity) && capacity > 0
+        ? attendance / capacity
+        : Number(context.attendanceRatio);
+    this._broadcastContext = {
+      ...(this._broadcastContext || {}),
+      ...context,
+      attendanceRatio: Number.isFinite(attendanceRatio)
+        ? clamp(attendanceRatio, 0.35, 1)
+        : this._broadcastContext?.attendanceRatio || 0.84,
+    };
+  }
+
   setOnPlayerClick(fn) {
     this.onPlayerClick = fn;
   }
@@ -2537,24 +2703,21 @@ export class MatchView {
    * 避免旧「每帧 ball 镜头」的眼晕，也不锁死全景。
    */
   _updateSimCamera(d) {
-    // FMM：几乎全场，仅轻微跟球（对照 rec 录屏）
-    const ox = (this.ball.x - 50) / 50;
-    const oy = (this.ball.y - 50) / 50;
-    const deep = this.ball.y < 22 || this.ball.y > 78;
-    const tight = this.camMode === "box" || this.fsm.isIn('GOAL_SEQUENCE');
-    if (tight) {
-      this.cam.tx = clamp(-ox * 1.6, -2.4, 2.4);
-      this.cam.ty = clamp(-oy * 1.8, -2.8, 2.8);
-      this.cam.tScale = performance.now() < this.camBoostUntil ? 1.04 : 1.02;
-    } else {
-      const wantX = clamp(-ox * (deep ? 0.9 : 0.45), -1.4, 1.4);
-      const wantY = clamp(-oy * (deep ? 1.0 : 0.4), -1.5, 1.5);
-      if (Math.hypot(wantX - this.cam.tx, wantY - this.cam.ty) > 0.28) {
-        this.cam.tx = wantX;
-        this.cam.ty = wantY;
-      }
-      this.cam.tScale = deep ? 1.02 : 1.0;
+    const target = cameraFraming({
+      preset: this.cameraPreset,
+      ball: this.ball,
+      mode: this.camMode,
+      goalSequence: this.fsm.isIn('GOAL_SEQUENCE'),
+      boosted: performance.now() < this.camBoostUntil,
+    });
+    if (
+      this.cameraPreset !== "tv" ||
+      Math.hypot(target.x - this.cam.tx, target.y - this.cam.ty) > 0.2
+    ) {
+      this.cam.tx = target.x;
+      this.cam.ty = target.y;
     }
+    this.cam.tScale = target.scale;
     const kPan = 1 - Math.pow(0.05, d);
     const kZoom = 1 - Math.pow(0.08, d);
     this.cam.x = lerp(this.cam.x, this.cam.tx, kPan);
@@ -2563,7 +2726,58 @@ export class MatchView {
     this._applyCamera();
   }
 
+  _drawTacticalStructure(ctx, px, py) {
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const side of ["home", "away"]) {
+      const active = this.players.filter(
+        (player) => player.team === side && player.pos !== "GK" && !player.el.classList.contains("sent-off")
+      );
+      const groups = [
+        active.filter((player) => player.pos === "DEF"),
+        active.filter((player) => player.pos === "MID"),
+        active.filter((player) => player.pos !== "DEF" && player.pos !== "MID"),
+      ];
+      const lineColor = side === "home" ? "rgba(191,219,254,0.48)" : "rgba(254,202,202,0.48)";
+      const spineColor = side === "home" ? "rgba(96,165,250,0.24)" : "rgba(248,113,113,0.24)";
+      const centroids = [];
+      ctx.strokeStyle = lineColor;
+      ctx.lineWidth = 1.15;
+      ctx.setLineDash([4, 4]);
+      for (const group of groups) {
+        if (!group.length) continue;
+        const ordered = group.slice().sort((a, b) => a.x - b.x);
+        centroids.push({
+          x: group.reduce((sum, player) => sum + player.x, 0) / group.length,
+          y: group.reduce((sum, player) => sum + player.y, 0) / group.length,
+        });
+        if (ordered.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(px(ordered[0].x), py(ordered[0].y));
+        for (let index = 1; index < ordered.length; index++) {
+          ctx.lineTo(px(ordered[index].x), py(ordered[index].y));
+        }
+        ctx.stroke();
+      }
+      if (centroids.length >= 2) {
+        centroids.sort((a, b) => a.y - b.y);
+        ctx.strokeStyle = spineColor;
+        ctx.lineWidth = 0.9;
+        ctx.setLineDash([2, 5]);
+        ctx.beginPath();
+        ctx.moveTo(px(centroids[0].x), py(centroids[0].y));
+        for (let index = 1; index < centroids.length; index++) {
+          ctx.lineTo(px(centroids[index].x), py(centroids[index].y));
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
   _drawCanvas() {
+    this._updateCrowdAtmosphere();
     // 每帧检查：布局若已变化则重绑缓冲（不用再手动缩放页面）
     if (this.fieldEl) {
       const fw = Math.floor(this.fieldEl.clientWidth || 0);
@@ -2589,28 +2803,9 @@ export class MatchView {
     const focusOn =
       this.focusIds?.size > 0 && performance.now() < (this.focusUntil || 0);
 
-    // 阵型色块（轻）
-    if (this.formZonesEl) {
-      for (const z of this.formZonesEl.querySelectorAll(".mp-zone")) {
-        const left = parseFloat(z.style.left) || 0;
-        const top = parseFloat(z.style.top) || 0;
-        const zw = parseFloat(z.style.width) || 0;
-        const zh = parseFloat(z.style.height) || 0;
-        ctx.fillStyle = z.classList.contains("home")
-          ? "rgba(59,130,246,0.10)"
-          : "rgba(239,68,68,0.10)";
-        ctx.beginPath();
-        ctx.ellipse(
-          px(left + zw / 2),
-          py(top + zh / 2),
-          px(zw / 2),
-          py(zh / 2),
-          0,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
-      }
+    const scenePolicy = visualCuePolicy({ preset: this.cameraPreset });
+    if (scenePolicy.drawStructure) {
+      this._drawTacticalStructure(ctx, px, py);
     }
 
     // 球轨迹丝带（地面投影）；射门用更醒目的橙黄弧
@@ -2618,7 +2813,7 @@ export class MatchView {
     const isShotTrail =
       this.ballState === "shot" ||
       (this.fsm.isIn('GOAL_SEQUENCE') && trail.some((p) => (p.z || 0) > 0.8));
-    if (trail.length >= 2) {
+    if (!this.carrier && trail.length >= 2) {
       ctx.save();
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
@@ -2656,24 +2851,28 @@ export class MatchView {
       const spd = Math.hypot(pl.vx || 0, pl.vy || 0);
       const dim =
         focusOn && !this.focusIds.has(pl.id) && !pl.el.classList.contains("has-ball");
+      const hasBall = pl.el.classList.contains("has-ball");
+      const cue = visualCuePolicy({
+        preset: this.cameraPreset,
+        speed: spd,
+        hasBall,
+        focused: focusOn && this.focusIds.has(pl.id),
+        pressing: pl.fsm === "press",
+        diving: pl.pose === "dive",
+      });
       ctx.globalAlpha = dim ? 0.38 : 1;
 
-      // 冲刺残影（更克制的强度）
-      if (spd > 0.48 && pl.heading != null && pl.pose !== "dive") {
+      // One short motion cue only for a decisive TV-camera sprint.
+      if (cue.drawTrail && pl.heading != null && pl.pose !== "dive") {
         const hx = Math.cos(pl.heading);
         const hy = Math.sin(pl.heading);
-        for (let k = 1; k <= 3; k++) {
-          ctx.fillStyle = `rgba(255,255,255,${0.08 - k * 0.02})`;
-          ctx.beginPath();
-          ctx.arc(
-            x - hx * r * k * 0.62,
-            y - hy * r * k * 0.62,
-            r * (1 - k * 0.14),
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
-        }
+        ctx.strokeStyle = "rgba(248,250,252,0.2)";
+        ctx.lineWidth = Math.max(1, r * 0.18);
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(x - hx * r * 0.75, y - hy * r * 0.75);
+        ctx.lineTo(x - hx * r * 1.65, y - hy * r * 1.65);
+        ctx.stroke();
       }
 
       // 地面阴影
@@ -2734,22 +2933,17 @@ export class MatchView {
       }
       ctx.stroke();
 
-      // 持球光环（FM 选中/持球感）
-      if (pl.el.classList.contains("has-ball")) {
+      // A single possession ring keeps the ball carrier readable without a glow stack.
+      if (cue.drawPossessionRing) {
         ctx.beginPath();
-        ctx.arc(drawX, drawY, r + 4, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(253, 224, 71, 0.55)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(drawX, drawY, r + 7.5, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(253, 224, 71, 0.22)";
-        ctx.lineWidth = 3;
+        ctx.arc(drawX, drawY, r + 3.6, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(253, 224, 71, 0.7)";
+        ctx.lineWidth = 1.6;
         ctx.stroke();
       }
 
       // 朝向箭头
-      if (pl.heading !== undefined && spd > 0.35) {
+      if (cue.drawArrow && pl.heading !== undefined && spd > 0.35) {
         const hx = Math.cos(pl.heading);
         const hy = Math.sin(pl.heading);
         const tipX = drawX + hx * r * 1.35;
@@ -4736,24 +4930,16 @@ export class MatchView {
     if (performance.now() < this.aftermathUntil) {
       this.camMode = "wide";
     }
-    const ox = (this.ball.x - 50) / 50;
-    const oy = (this.ball.y - 50) / 50;
-    const mode = this.camMode || "wide";
-    if (mode === "box") {
-      // 禁区戏：轻微贴门，不大晃
-      this.cam.tx = clamp(-ox * 2.8, -3.8, 3.8);
-      this.cam.ty = clamp(-oy * 3.4, -4.5, 4.5);
-      this.cam.tScale = performance.now() < this.camBoostUntil ? 1.07 : 1.04;
-    } else if (mode === "ball" || this.fsm.isIn('GOAL_SEQUENCE')) {
-      this.cam.tx = clamp(-ox * 2.2, -3, 3);
-      this.cam.ty = clamp(-oy * 2.0, -2.8, 2.8);
-      this.cam.tScale = performance.now() < this.camBoostUntil ? 1.05 : 1.03;
-    } else {
-      // wide：FMM 全场观感，几乎不晃
-      this.cam.tx = clamp(-ox * 0.55, -1.0, 1.0);
-      this.cam.ty = clamp(-oy * 0.45, -0.85, 0.85);
-      this.cam.tScale = 1.0;
-    }
+    const target = cameraFraming({
+      preset: this.cameraPreset,
+      ball: this.ball,
+      mode: this.camMode || "wide",
+      goalSequence: this.fsm.isIn('GOAL_SEQUENCE'),
+      boosted: performance.now() < this.camBoostUntil,
+    });
+    this.cam.tx = target.x;
+    this.cam.ty = target.y;
+    this.cam.tScale = target.scale;
   }
 
   /** 场内短字幕（FMM 风格事件条）——同步到底栏 ticker */
@@ -5191,6 +5377,14 @@ export class MatchView {
       this._resizeTimers = null;
     }
     if (this._rec?.active) this.stopRecording();
+    if (this._crowdBed?.source) {
+      try {
+        this._crowdBed.source.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    this._crowdBed = null;
     this.root.innerHTML = "";
     this.players = [];
     this.trails = [];

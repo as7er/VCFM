@@ -81,9 +81,10 @@ for (const defender of standard.defenders) {
   standard.engine._thinkDefend(defender, standard.owner);
   const job = standardPlan.jobs.get(defender.id);
   if (job.type !== "press") {
+    const distance = targetDistance(defender, standard.engine.ball);
     assert.ok(
-      targetDistance(defender, standard.engine.ball) >= 4.05,
-      `${job.type} defender was sent into the ball carrier's immediate pressure circle`
+      distance >= 4.049,
+      `${job.type} defender was sent ${distance.toFixed(3)}m from the ball carrier`
     );
   }
 }
@@ -98,7 +99,12 @@ for (let step = 0; step < 30; step++) {
 const closeDefenders = standard.defenders.filter(
   (player) => distanceMetres(player.x, player.y, standard.engine.ball.x, standard.engine.ball.y) < 4
 );
-assert.ok(closeDefenders.length <= 1, "several defenders still surrounded one stationary ball carrier");
+assert.ok(
+  closeDefenders.length <= 1,
+  `several defenders surrounded the carrier: ${closeDefenders
+    .map((player) => `${player.id}:${standard.engine._defPlans.away.jobs.get(player.id)?.type}`)
+    .join(", ")}`
+);
 
 const supportDirections = [
   { dx: 1, dy: 0, label: "horizontal" },

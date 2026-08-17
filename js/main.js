@@ -48,6 +48,7 @@ import {
   roleSuitability,
   rolesForDetailedPosition,
 } from "./player-roles.js";
+import { teamShapeSummary } from "./team-shapes.js";
 import {
   availableHabitTraining,
   cancelHabitTraining,
@@ -55,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=216";
-import { clubCrestHtml } from "./club-crest.js?v=216";
+import { nationFlagHtml } from "./flags.js?v=222";
+import { clubCrestHtml } from "./club-crest.js?v=222";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -315,7 +316,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=216";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=222";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -381,7 +382,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=216";
+} from "./avatar.js?v=222";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
@@ -474,7 +475,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=216").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=222").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -812,6 +813,11 @@ let matchSpeed = (() => {
   // 旧存档若是 2/4，仍尊重；非法值回落到「正常」×1
   if (!MATCH_SPEEDS.includes(raw)) return 1;
   return raw;
+})();
+const MATCH_CAMERAS = ["full", "tv", "tactical"];
+let matchCamera = (() => {
+  const raw = readPref("vcfm-match-camera", null, "tv");
+  return MATCH_CAMERAS.includes(raw) ? raw : "tv";
 })();
 /** 导出提醒：上次导出时间戳 */
 const EXPORT_TIP_KEY = "vcfm-last-export";
@@ -1465,6 +1471,24 @@ function bindMainOnce() {
       }
       syncMatchSpeedUI();
       toast(getLang() === "en" ? `Speed ×${matchSpeed}` : `比赛倍速 ×${matchSpeed}`);
+    });
+  });
+
+  document.querySelectorAll("[data-match-camera]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const next = btn.dataset.matchCamera;
+      matchCamera = MATCH_CAMERAS.includes(next) ? next : "tv";
+      try {
+        localStorage.setItem("vcfm-match-camera", matchCamera);
+      } catch {
+        /* ignore */
+      }
+      matchView?.setCameraPreset?.(matchCamera);
+      syncMatchCameraUI();
+      const labels = getLang() === "en"
+        ? { full: "Full pitch", tv: "TV", tactical: "Tactical" }
+        : { full: "全场", tv: "电视", tactical: "战术" };
+      toast(getLang() === "en" ? `Camera: ${labels[matchCamera]}` : `镜头：${labels[matchCamera]}`);
     });
   });
 
@@ -5589,6 +5613,19 @@ function renderTacticsSummary() {
       ? `<strong>${form.name}</strong>${form.desc ? ` · ${form.desc}` : ""}`
       : `<strong>${form.name}</strong>${form.desc ? ` · ${form.desc}` : ""}`
   );
+  const shapes = teamShapeSummary(tac, en ? "en" : "zh");
+  bits.push(`
+    <div class="tac-shape-grid">
+      ${shapes
+        .map(
+          (shape) => `<div class="tac-shape-fact" data-shape-phase="${escapeHtml(shape.key)}">
+            <strong>${escapeHtml(shape.title)}</strong>
+            <span>${escapeHtml(shape.detail)}</span>
+          </div>`
+        )
+        .join("")}
+    </div>
+  `);
   bits.push(
     en
       ? `Attack bias ${atkBias >= 0 ? "+" : ""}${atkBias.toFixed(0)}% · Defend ${defBias >= 0 ? "+" : ""}${defBias.toFixed(0)}%`
@@ -8285,6 +8322,15 @@ function syncMatchSpeedUI() {
   }
 }
 
+function syncMatchCameraUI() {
+  document.querySelectorAll("[data-match-camera]").forEach((btn) => {
+    const active = btn.dataset.matchCamera === matchCamera;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  matchView?.setCameraPreset?.(matchCamera, { persist: false });
+}
+
 /**
  * 高光观赛：细播段落用实时动画速度（rate=1，不抖）。
  * 平淡时段 skip，整场墙钟目标约 ≤10 分钟（见 adapt.buildHighlightWindows）。
@@ -9123,6 +9169,7 @@ async function openMatch() {
   hideHtPanel();
   hideMatchReport();
   syncMatchSpeedUI();
+  syncMatchCameraUI();
   // 2D 球场：赛前站位（可点球员）
   await ensureMatchPitch(true);
   $("#btn-sim-fast").disabled = false;
@@ -9182,6 +9229,7 @@ function setMatchScore(hg, ag) {
   if (a) a.textContent = String(ag ?? 0);
   const legacy = $("#match-score");
   if (legacy) legacy.textContent = `${hg ?? 0} - ${ag ?? 0}`;
+  matchView?.setBroadcastState?.({ homeGoals: hg ?? 0, awayGoals: ag ?? 0 });
 }
 
 let displayedMatchMinute = 0;
@@ -9190,6 +9238,7 @@ function setMatchMinute(min, { reset = false } = {}) {
   displayedMatchMinute = nextDisplayedMinute(displayedMatchMinute, min, { reset });
   const el = $("#match-minute");
   if (el) el.textContent = `${Math.floor(displayedMatchMinute)}'`;
+  matchView?.setBroadcastState?.({ minute: displayedMatchMinute });
 }
 
 /**
@@ -9502,12 +9551,32 @@ async function ensureMatchPitch(remount = false) {
     // 完整资料弹窗（暂停时最合适，进行中也可点）
     showPlayerModal(playerId);
   };
+  const report = pendingMatch.matchReport || matchState?.report || null;
+  const broadcastContext = {
+    derby: !!(matchState?.derby ?? pendingMatch.derby),
+    bigMatch: !!matchState?.bigMatch,
+    knockout: !!(
+      matchState?.isKnockout ||
+      ["domestic-cup", "continental-knockout"].includes(pendingMatch.competitionType)
+    ),
+    importance: Number(matchState?.importance) || 0.62,
+    attendance: report?.ticketAttendance,
+    capacity: report?.ticketCapacity,
+    attendanceRatio: report?.ticketFillPct ? Number(report.ticketFillPct) / 100 : 0.84,
+  };
   if (!matchView || remount || !matchView._built) {
     matchView = getMatchView(pitchRoot);
-    matchView.mount(home, away, { onPlayerClick });
+    matchView.mount(home, away, { onPlayerClick, cameraPreset: matchCamera, broadcastContext });
   } else {
     matchView.setOnPlayerClick(onPlayerClick);
+    matchView.setBroadcastContext?.(broadcastContext);
+    matchView.setCameraPreset?.(matchCamera, { persist: false });
   }
+  matchView.setBroadcastState?.({
+    minute: displayedMatchMinute,
+    homeGoals: matchState?.hg ?? pendingMatch.homeGoals ?? 0,
+    awayGoals: matchState?.ag ?? pendingMatch.awayGoals ?? 0,
+  });
   matchView?.refreshLayout?.();
 }
 

@@ -302,6 +302,24 @@ async function assertStraightPassRendering(page) {
       passNetwork: JSON.stringify([...view.passNetwork.entries()]),
       heat: JSON.stringify(view.heatCells.map(({ home: valueHome, away: valueAway }) => [valueHome, valueAway])),
     };
+    view.ball.x = 84;
+    view.ball.y = 8;
+    view.setCameraPreset("full", { persist: false });
+    view._updateSimCamera(0.1);
+    const fullCamera = { x: view.cam.tx, y: view.cam.ty, scale: view.cam.tScale };
+    view.setCameraPreset("tv", { persist: false });
+    view.camMode = "box";
+    view._updateSimCamera(0.1);
+    const tvCamera = { x: view.cam.tx, y: view.cam.ty, scale: view.cam.tScale };
+    view.setCameraPreset("tactical", { persist: false });
+    view._updateSimCamera(0.1);
+    view._drawCanvas();
+    const tacticalCamera = {
+      x: view.cam.tx,
+      y: view.cam.ty,
+      scale: view.cam.tScale,
+      classApplied: view.fieldEl.classList.contains("mp-camera-tactical"),
+    };
     view.destroy();
     root.remove();
     return {
@@ -328,6 +346,9 @@ async function assertStraightPassRendering(page) {
       goalSequenceReplayReturn,
       fullTimeReplayPlayed,
       fullTimeReplayReturn,
+      fullCamera,
+      tvCamera,
+      tacticalCamera,
     };
   });
 
@@ -380,6 +401,14 @@ async function assertStraightPassRendering(page) {
     result.fullTimeReplayReturn,
     { state: "FULL_TIME", subState: null, simDrive: false, frozen: true },
     "recorded goal replay did not restore the full-time state"
+  );
+  assert.deepEqual(result.fullCamera, { x: 0, y: 0, scale: 1 }, "full-pitch camera moved during box action");
+  assert.ok(result.tvCamera.scale > 1.04, "TV camera did not push in for box action");
+  assert.notEqual(result.tvCamera.y, 0, "TV camera did not follow deep play");
+  assert.deepEqual(
+    result.tacticalCamera,
+    { x: 0, y: 0, scale: 1, classApplied: true },
+    "tactical camera was not fixed or did not enable live structure rendering"
   );
 }
 
@@ -582,7 +611,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: spatial goal replay, straight-pass rendering, nonblank match canvas, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: broadcast cameras, spatial goal replay, straight-pass rendering, nonblank match canvas, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

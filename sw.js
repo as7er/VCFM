@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v216";
+const CACHE = "vcfm-v222";
 const ASSETS = [
   "./",
   "./index.html",
@@ -18,6 +18,7 @@ const ASSETS = [
   "./js/engine.js",
   "./js/match.js",
   "./js/match-presentation.js",
+  "./js/match-broadcast.js",
   "./js/match-analysis.js",
   "./js/random.js",
   "./js/finance-ledger.js",
@@ -38,6 +39,7 @@ const ASSETS = [
   "./js/player-positions.js",
   "./js/player-attributes.js",
   "./js/player-roles.js",
+  "./js/team-shapes.js",
   "./js/player-habits.js",
   "./js/appearance.js",
   "./js/clubs.js",
@@ -53,6 +55,9 @@ const ASSETS = [
   "./js/discipline.js",
   "./js/career.js",
   "./js/sim/engine.js",
+  "./js/player-control.js",
+  "./js/collective-defense.js",
+  "./js/edge-rules.js",
   "./js/sim/adapt.js",
   "./js/sim/calendar-worker-client.js",
   "./js/sim/calendar-worker.js",

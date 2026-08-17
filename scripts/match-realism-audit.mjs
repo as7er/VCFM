@@ -118,6 +118,10 @@ const totals = {
   tackles: 0,
   interceptions: 0,
   fouls: 0,
+  handballs: 0,
+  varReviews: 0,
+  varDecisions: 0,
+  varOverturns: 0,
   yellows: 0,
   reds: 0,
   penalties: 0,
@@ -196,6 +200,11 @@ for (let match = 0; match < matches; match++) {
       if (event.penalty) totals.penalties++;
       if (event.card === "yellow") totals.yellows++;
       if (event.card === "red" || event.card === "red2") totals.reds++;
+    } else if (event.type === "handball") totals.handballs++;
+    else if (event.type === "var_review") totals.varReviews++;
+    else if (event.type === "var_decision") {
+      totals.varDecisions++;
+      if (event.decision === "overturned") totals.varOverturns++;
     } else if (event.type === "injury") totals.injuries++;
     else if (event.type === "stall_clear") {
       totals.stalls++;
@@ -244,6 +253,9 @@ const report = {
     tackles: perMatch(totals.tackles),
     interceptions: perMatch(totals.interceptions),
     fouls: perMatch(totals.fouls),
+    handballs: perMatch(totals.handballs),
+    varReviews: perMatch(totals.varReviews),
+    varOverturns: perMatch(totals.varOverturns),
     yellows: perMatch(totals.yellows),
     reds: perMatch(totals.reds),
     penalties: perMatch(totals.penalties),
@@ -300,6 +312,9 @@ assert.ok(report.perMatch.interceptions <= 60, "clean interceptions remain unrea
 assert.ok(report.perMatch.penalties >= 0.1 && report.perMatch.penalties <= 0.5, "penalty frequency left the calibration envelope");
 assert.ok(report.perMatch.corners >= 3 && report.perMatch.corners <= 10, "corner frequency left the calibration envelope");
 assert.ok(report.perMatch.cornerShots >= 0.5, "corners are not producing attacking shots");
+assert.ok(report.perMatch.handballs <= 1, "handball frequency is too high");
+assert.equal(totals.varReviews, totals.varDecisions, "every VAR review must have a decision");
+assert.equal(totals.varOverturns, 0, "exact spatial evidence should not randomly overturn valid calls");
 // 24 场样本的胜率会被平局和单场随机性显著扰动；积分/净胜球更稳定地
 // 检验能力差异仍然存在，同时避免把正常的足球方差误判为引擎回归。
 if (!equalOnly) {

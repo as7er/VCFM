@@ -712,6 +712,7 @@ export function createMatchSession(world, fixture, opts = {}) {
     matchSeed,
     previousRandom,
     random,
+    importance,
     derby,
     bigMatch,
     events: [],

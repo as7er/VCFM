@@ -30,6 +30,37 @@ import {
 } from "./../models.js";
 import { positionCoverage } from "../player-positions.js";
 import { roleBehavior } from "../player-roles.js";
+import {
+  TEAM_SHAPE_PHASES,
+  teamShapePhase,
+  teamShapeProfile,
+} from "../team-shapes.js";
+import {
+  angleDelta,
+  ballActionPreparation,
+  bodyControlProfile,
+  firstTouchPlan,
+  moveAngleToward,
+  shieldingMomentumAdjustment,
+} from "../player-control.js";
+import {
+  EDGE_RESTART_TYPES,
+  VAR_INCIDENTS,
+  advantageDecision,
+  backpassViolation,
+  forwardProgress,
+  goalkeeperBackpassControl,
+  handballContactDecision,
+  varReviewDecision,
+} from "../edge-rules.js";
+import {
+  PRESS_TRIGGER_KINDS,
+  collectiveDefenseProfile,
+  defensiveAwarenessProfile,
+  pressingTrigger,
+  shouldHandoffMark,
+  weakSideTargetX,
+} from "../collective-defense.js";
 import { estimateShotXg } from "./../match-analysis.js";
 import {
   PENALTY_RUN_SEC,
@@ -229,6 +260,35 @@ function norm(v) {
   return clamp(0.28 + raw * 0.64, 0.3, 0.92);
 }
 
+function normalizedAgentAttributes(attrs = {}) {
+  const base = {
+    pace: norm(attrs.pace),
+    passing: norm(attrs.passing),
+    vision: norm(attrs.vision),
+    shooting: norm(attrs.shooting),
+    finishing: norm(attrs.finishing),
+    dribbling: norm(attrs.dribbling),
+    tackling: norm(attrs.tackling),
+    marking: norm(attrs.marking),
+    strength: norm(attrs.strength),
+    stamina: norm(attrs.stamina),
+    physical: norm(attrs.physical),
+    positioning: norm(attrs.positioning),
+    reflexes: norm(attrs.reflexes),
+    handling: norm(attrs.handling),
+    kicking: norm(attrs.kicking),
+    heading: norm(attrs.heading),
+    crossing: norm(attrs.crossing),
+    decisions: norm(attrs.decisions),
+  };
+  const control = bodyControlProfile(base);
+  return {
+    ...base,
+    ...control,
+    accel: clamp(base.pace * 0.5 + control.agility * 0.3 + control.balance * 0.2, 0.3, 0.92),
+  };
+}
+
 function heightAerial(heightCm) {
   return clamp(((Number(heightCm) || 180) - 168) / 34, 0, 1);
 }
@@ -297,15 +357,26 @@ export class SimEngine {
     // 会让上抢者/补位者来回交换，视觉上表现为集体抽搐。
     this._phaseTeam = null;
     this._defPlans = {
-      home: { until: 0, jobs: new Map() },
-      away: { until: 0, jobs: new Map() },
+      home: { until: 0, phase: null, ownerId: null, ballSide: 0, trigger: null, jobs: new Map() },
+      away: { until: 0, phase: null, ownerId: null, ballSide: 0, trigger: null, jobs: new Map() },
     };
+    this._teamGainAt = { home: 0, away: 0 };
+    this._teamLoseAt = { home: 0, away: 0 };
+    this.teamPhases = {
+      home: TEAM_SHAPE_PHASES.OUT_OF_POSSESSION,
+      away: TEAM_SHAPE_PHASES.OUT_OF_POSSESSION,
+    };
+    this._shapeProfileCache = { home: null, away: null };
+    this._collectiveDefenseProfileCache = { home: null, away: null };
     this._teamShotUntil = { home: 0, away: 0 };
     this._teamThroughUntil = { home: 0, away: 0 };
     this._teamTackleUntil = { home: 0, away: 0 };
     this._teamInterceptUntil = { home: 0, away: 0 };
     this._cornerAttackUntil = { home: 0, away: 0 };
     this._teamAttackSince = { home: 0, away: 0 };
+    this._advantage = null;
+    this._varReviewSeq = 0;
+    this._lastVarReview = null;
     this._init();
   }
 
@@ -346,6 +417,9 @@ export class SimEngine {
     this.celebrateParticipants = null;
     this.cornerShapeUntil = 0;
     this.pendingPenalty = null;
+    this._advantage = null;
+    this._varReviewSeq = 0;
+    this._lastVarReview = null;
     // 正式开球（不靠"巧合触球"）
     this._kickoff("home");
   }
@@ -414,28 +488,15 @@ export class SimEngine {
         slotX: slot.x ?? 50,
         slotY: slot.y ?? 50,
         // —— 归一化属性（决策用，读一次缓存）——
-        attr: {
-          pace: norm(a.pace),
-          accel: norm(a.pace) * 0.6 + norm(a.strength) * 0.4, // 无独立加速度属性，用 pace/strength 合成
-          passing: norm(a.passing),
-          vision: norm(a.vision),
-          shooting: norm(a.shooting),
-          finishing: norm(a.finishing),
-          dribbling: norm(a.dribbling),
-          tackling: norm(a.tackling),
-          marking: norm(a.marking),
-          strength: norm(a.strength),
-          stamina: norm(a.stamina),
-          positioning: norm(a.positioning),
-          reflexes: norm(a.reflexes),
-          handling: norm(a.handling),
-          kicking: norm(a.kicking),
-          heading: norm(a.heading),
-          crossing: norm(a.crossing),
-          decisions: norm(a.decisions),
-        },
+        attr: normalizedAgentAttributes(a),
         heightCm: Number(p?.heightCm) || 180,
         preferredFoot: p?.preferredFoot || "right",
+        controlFoot: p?.preferredFoot === "left" ? "left" : "right",
+        controlPhase: "settled",
+        controlUntil: 0,
+        bodyTargetHeading: isHome ? -Math.PI / 2 : Math.PI / 2,
+        pendingBallAction: null,
+        actionPreparationActive: false,
         habits: new Set(p?.playingHabits || []),
         // —— 决策缓存（P1 用）——
         decisionUntil: 0, // 到该时间前沿用上次决策
@@ -443,6 +504,7 @@ export class SimEngine {
         intent: null, // { type, tx, ty, targetId... }
         // —— 状态机标签（渲染/调试用）——
         fsm: "home",
+        shapePhase: TEAM_SHAPE_PHASES.OUT_OF_POSSESSION,
         fitness: p?.fitness ?? 100,
         // 核心球员：战术指定，享有进攻绝对权（梅西/C罗式）
         isCore: false,
@@ -696,6 +758,69 @@ export class SimEngine {
     return (team === "home" ? this.home : this.away)?.tactics || {};
   }
 
+  _shapeProfile(team) {
+    const tactics = this._teamTactics(team);
+    const signature = [
+      tactics.style || "balanced",
+      tactics.pressing || 3,
+      tactics.tempo || 3,
+      tactics.width || 3,
+      tactics.defensiveLine || 3,
+    ].join(":");
+    const cached = this._shapeProfileCache[team];
+    if (!cached || cached.signature !== signature) {
+      this._shapeProfileCache[team] = {
+        signature,
+        profile: teamShapeProfile(tactics),
+      };
+    }
+    return this._shapeProfileCache[team].profile;
+  }
+
+  _collectiveDefenseProfile(team) {
+    const tactics = this._teamTactics(team);
+    const style = tactics.style || "balanced";
+    const pressing = tactics.pressing || 3;
+    const width = tactics.width || 3;
+    const defensiveLine = tactics.defensiveLine || 3;
+    const cached = this._collectiveDefenseProfileCache[team];
+    if (
+      !cached ||
+      cached.style !== style ||
+      cached.pressing !== pressing ||
+      cached.width !== width ||
+      cached.defensiveLine !== defensiveLine
+    ) {
+      this._collectiveDefenseProfileCache[team] = {
+        style,
+        pressing,
+        width,
+        defensiveLine,
+        profile: collectiveDefenseProfile(tactics),
+      };
+    }
+    return this._collectiveDefenseProfileCache[team].profile;
+  }
+
+  _teamShapePhase(team, controlTeam = this._phaseTeam || this.possession) {
+    return teamShapePhase({
+      team,
+      controlTeam,
+      now: this.t,
+      gainedAt: this._teamGainAt[team] || 0,
+      lostAt: this._teamLoseAt[team] || 0,
+      tactics: this._teamTactics(team),
+    });
+  }
+
+  _refreshTeamShapePhases(controlTeam = this._phaseTeam || this.possession) {
+    for (const team of ["home", "away"]) {
+      const phase = this._teamShapePhase(team, controlTeam);
+      this.teamPhases[team] = phase;
+    }
+    return this.teamPhases;
+  }
+
   /** 由 match.js 注入的额外比赛情境修正；阵型/风格本身仍直接读取球队战术。 */
   _teamModifier(team, key, fallback = 1) {
     const value = Number(this.matchModifiers?.[team]?.[key]);
@@ -731,30 +856,299 @@ export class SimEngine {
     return this.t + base + this.random() * spread;
   }
 
+  _nearestOpponent(a) {
+    let nearest = null;
+    let nearestDistance = Infinity;
+    for (const opponent of this.agents) {
+      if (opponent.team === a.team || opponent.sentOff) continue;
+      if (opponent.role === "GK" && !this._goalkeeperCanPressure(opponent, a)) continue;
+      const distance = pitchDistanceBetween(a.x, a.y, opponent.x, opponent.y);
+      if (distance < nearestDistance) {
+        nearest = opponent;
+        nearestDistance = distance;
+      }
+    }
+    return nearest ? { opponent: nearest, distance: nearestDistance } : null;
+  }
+
+  _beginBallControl(a, {
+    kind = "receive",
+    passFrom = null,
+    intendedId = null,
+    emitReceive = false,
+    protectSeconds = 0.7,
+    settleSeconds = 0.45,
+    goalkeeperFeet = false,
+  } = {}) {
+    const b = this.ball;
+    const incomingVx = b.vx || 0;
+    const incomingVy = b.vy || 0;
+    b.backpassCandidate = false;
+    b.backpassFrom = null;
+    b.backpassTargetId = null;
+    const incomingSpeedMps = pitchSpeedMps(incomingVx, incomingVy);
+    const nearest = this._nearestOpponent(a);
+    const pressure = this._pressureOn(a);
+    const escapeHeading = nearest
+      ? Math.atan2(a.y - nearest.opponent.y, a.x - nearest.opponent.x)
+      : null;
+    const plan = firstTouchPlan({
+      playerX: a.x,
+      playerY: a.y,
+      heading: a.heading,
+      incomingVx,
+      incomingVy,
+      incomingSpeedMps,
+      attackDirection: this.attackDir(a.team),
+      preferredFoot: a.preferredFoot,
+      attrs: a.attr,
+      pressure,
+      escapeHeading,
+      aerial: (b.z || 0) > 0.8 || !!b.isCrossPass,
+    });
+    const startX = b.x;
+    const startY = b.y;
+    const startZ = b.z || 0;
+    const usesHands = a.role === "GK" && !goalkeeperFeet;
+    b.owner = a.id;
+    b.vx = 0;
+    b.vy = 0;
+    b.vz = 0;
+    b.state = usesHands ? "held" : "control";
+    this._clearBallTarget();
+    b._saveChecked = false;
+    a.controlFoot = plan.foot;
+    a.bodyTargetHeading = plan.desiredHeading;
+    a.pendingBallAction = null;
+    a.actionPreparationActive = !usesHands;
+    a.intent = usesHands ? null : this._forwardDribbleIntent(a);
+    a.fsm = usesHands ? "home" : "receive";
+    a.decisionUntil = this._nextControlDecision(a);
+    if (usesHands) {
+      a.controlPhase = "settled";
+      a.controlUntil = this.t;
+      a.protectUntil = this.t + protectSeconds;
+      b.settleUntil = this.t + settleSeconds;
+      a.pose = "hold";
+      a.poseUntil = this.t + 0.7;
+    } else {
+      a.controlPhase = "first-touch";
+      a.controlUntil = this.t + plan.duration;
+      a.protectUntil = Math.max(this.t + protectSeconds, a.controlUntil + 0.16);
+      b.settleUntil = Math.max(this.t + settleSeconds, a.controlUntil + 0.08);
+      b.controlOwnerId = a.id;
+      b.controlKind = kind;
+      b.controlStartAt = this.t;
+      b.controlUntil = a.controlUntil;
+      b.controlStartX = startX;
+      b.controlStartY = startY;
+      b.controlStartZ = startZ;
+      b.controlOffsetX = plan.targetX - a.x;
+      b.controlOffsetY = plan.targetY - a.y;
+      b.controlFoot = plan.foot;
+    }
+    if (emitReceive) {
+      this._emit("receive", a, {
+        from: passFrom,
+        intendedId,
+        controlDuration: plan.duration,
+        foot: plan.foot,
+      });
+    }
+    return plan;
+  }
+
+  _miscontrolBall(a) {
+    const b = this.ball;
+    const nearest = this._nearestOpponent(a);
+    const plan = firstTouchPlan({
+      playerX: a.x,
+      playerY: a.y,
+      heading: a.heading,
+      incomingVx: b.vx || 0,
+      incomingVy: b.vy || 0,
+      incomingSpeedMps: pitchSpeedMps(b.vx || 0, b.vy || 0),
+      attackDirection: this.attackDir(a.team),
+      preferredFoot: a.preferredFoot,
+      attrs: a.attr,
+      pressure: this._pressureOn(a),
+      escapeHeading: nearest
+        ? Math.atan2(a.y - nearest.opponent.y, a.x - nearest.opponent.x)
+        : null,
+      aerial: (b.z || 0) > 0.8 || !!b.isCrossPass,
+    });
+    const errorHeading = plan.desiredHeading + (this.random() - 0.5) * (0.45 + (1 - plan.firstTouch) * 0.5);
+    const looseSpeed = 4 + this.random() * 5;
+    const velocity = pitchVelocityForMps(Math.cos(errorHeading), Math.sin(errorHeading), looseSpeed);
+    b.owner = null;
+    b.vx = velocity.vx;
+    b.vy = velocity.vy;
+    b.vz = Math.max(0, b.vz || 0) * 0.25;
+    b.state = "loose";
+    this._clearBallTarget();
+    a.controlFoot = plan.foot;
+    a.controlPhase = "miscontrol";
+    a.controlUntil = this.t + 0.35;
+    a.bodyTargetHeading = plan.desiredHeading;
+    a.actionPreparationActive = false;
+  }
+
+  _queueBallAction(a, action, targetX, targetY, payload) {
+    const b = this.ball;
+    if (
+      b.owner !== a.id ||
+      b.state !== "held" ||
+      b.restartType ||
+      this.t < (a.controlUntil || 0) ||
+      !a.actionPreparationActive
+    ) {
+      return false;
+    }
+    const prep = ballActionPreparation({
+      heading: a.heading,
+      targetX,
+      targetY,
+      playerX: a.x,
+      playerY: a.y,
+      preferredFoot: a.preferredFoot,
+      controlFoot: a.controlFoot,
+      attrs: a.attr,
+      action,
+    });
+    a.bodyTargetHeading = prep.targetHeading;
+    if (prep.delay < 0.14) return false;
+    a.pendingBallAction = {
+      action,
+      payload,
+      readyAt: this.t + prep.delay,
+      targetHeading: prep.targetHeading,
+      weakFoot: prep.weakFoot,
+    };
+    a.intent = { type: "prepare", tx: a.x, ty: a.y };
+    a.tx = a.x;
+    a.ty = a.y;
+    a.fsm = "turn";
+    return true;
+  }
+
+  _runPendingBallAction(a) {
+    const pending = a.pendingBallAction;
+    if (!pending) return false;
+    if (this.ball.owner !== a.id) {
+      a.pendingBallAction = null;
+      return false;
+    }
+    a.bodyTargetHeading = pending.targetHeading;
+    a.tx = a.x;
+    a.ty = a.y;
+    a.fsm = "turn";
+    if (this.t + 1e-9 < pending.readyAt) return true;
+    a.pendingBallAction = null;
+    if (pending.action === "pass") {
+      this._pass(a, pending.payload, true);
+    } else if (pending.action === "shot") {
+      this._shoot(a, pending.payload, true);
+    }
+    return true;
+  }
+
   _applyAttackTactics(a, phaseActor) {
     const tactics = this._teamTactics(a.team);
-    const width = this._tacticLevel(a.team, "width");
-    const widthMul = 1 + (width - 3) * 0.09;
+    const profile = this._shapeProfile(a.team);
+    const phase = this._teamShapePhase(a.team);
+    const isTransition = phase === TEAM_SHAPE_PHASES.ATTACKING_TRANSITION;
+    const widthMul = isTransition
+      ? profile.transition.attackWidthMul
+      : profile.inPossession.widthMul;
     a.tx = clamp(50 + (a.tx - 50) * widthMul, 3, 97);
 
     const dir = this.attackDir(a.team);
     const style = tactics.style || "balanced";
-    let depthShift = style === "attack" ? 3 : style === "defend" ? -2.5 : 0;
-    if (style === "counter" && this.t - (this._teamAttackSince[a.team] || 0) < 7) {
-      depthShift = 4;
-    } else if (style === "possession" && phaseActor && phaseActor.team === a.team) {
+    let depthShift = isTransition
+      ? profile.transition.attackDepthShift
+      : profile.inPossession.depthShift;
+    if (!isTransition && style === "possession" && phaseActor && phaseActor.team === a.team) {
       // 控球风格缩短接应距离，形成更多稳定三角，而不是全员冲纵深。
-      a.tx = clamp(a.tx * 0.86 + phaseActor.x * 0.14, 3, 97);
-      a.ty = clamp(a.ty * 0.86 + phaseActor.y * 0.14, 3, 97);
-      depthShift = -1;
+      const pull = profile.inPossession.supportPull;
+      a.tx = clamp(a.tx * (1 - pull) + phaseActor.x * pull, 3, 97);
+      a.ty = clamp(a.ty * (1 - pull) + phaseActor.y * pull, 3, 97);
     }
     a.ty = clamp(a.ty + dir * depthShift, 3, 97);
+    a.shapePhase = phase;
     this._clampOffside(a);
   }
 
   // ——————————————————————————————————————————————
   // 推进一步（dt 秒）
   // ——————————————————————————————————————————————
+  _processAdvantage() {
+    const pending = this._advantage;
+    if (!pending) return;
+    const ball = this.ball;
+    const victim = this.agentById(pending.victimId);
+    const defender = this.agentById(pending.defenderId);
+    if (!victim || !defender) {
+      this._advantage = null;
+      return;
+    }
+    const owner = ball.owner ? this.agentById(ball.owner) : null;
+    const progress = forwardProgress({
+      fromY: pending.startY,
+      toY: ball.y,
+      attackDirection: this.attackDir(pending.team),
+    });
+    const releasedForward =
+      ball.kickTeam === pending.team &&
+      ball.lastKicker === victim.id &&
+      (ball.state === "pass" || ball.state === "shot");
+    const played = releasedForward || (owner?.team === pending.team && progress >= 3.2);
+    if (played) {
+      this._advantage = null;
+      this._emit("advantage_played", victim, {
+        from: defender.id,
+        reason: pending.reason,
+        x: ball.x,
+        y: ball.y,
+      });
+      this._emit("foul", defender, {
+        from: victim.id,
+        card: pending.card || "none",
+        penalty: false,
+        advantage: true,
+        whistle: false,
+        x: pending.x,
+        y: pending.y,
+      });
+      return;
+    }
+    const broken = owner && owner.team !== pending.team;
+    if (broken || this.t >= pending.until - 1e-9) {
+      this._finalizeAdvantageFoul(pending);
+    }
+  }
+
+  _finalizeAdvantageFoul(pending) {
+    const defender = this.agentById(pending.defenderId);
+    const victim = this.agentById(pending.victimId);
+    this._advantage = null;
+    if (!defender || !victim) return;
+    this._emit("foul", defender, {
+      from: victim.id,
+      card: pending.card || "none",
+      penalty: false,
+      advantage: true,
+      whistle: true,
+      x: pending.x,
+      y: pending.y,
+    });
+    this._restart(
+      EDGE_RESTART_TYPES.DIRECT_FREE_KICK,
+      victim.team,
+      clamp(pending.x, 4, 96),
+      clamp(pending.y, 4, 96)
+    );
+  }
+
   step(dt = SIM.DT) {
     // 进球庆祝段：球钉在网里，队友聚拢，结束后再中圈开球
     if (this.celebrateUntil && this.t < this.celebrateUntil) {
@@ -779,6 +1173,8 @@ export class SimEngine {
       return;
     }
 
+    this._processAdvantage();
+
     // 1) 各 agent 决策 → 设定运动目标 / 触发传射
     const owner = this.ball.owner ? this.agentById(this.ball.owner) : null;
     // 传球/射门飞行中 owner 会暂时为空，但攻防阶段不能因此每脚球都切成“全员抢松球”。
@@ -795,10 +1191,13 @@ export class SimEngine {
     if (controlTeam && controlTeam !== this._phaseTeam) {
       this._phaseTeam = controlTeam;
       this._teamAttackSince[controlTeam] = this.t;
+      this._teamGainAt[controlTeam] = this.t;
+      this._teamLoseAt[controlTeam === "home" ? "away" : "home"] = this.t;
       this._defPlans.home.until = 0;
       this._defPlans.away.until = 0;
       for (const a of this.agents) a.attackThinkUntil = 0;
     }
+    this._refreshTeamShapePhases(controlTeam || this._phaseTeam || this.possession);
     this.possession = controlTeam || this.possession;
     // 控球时间积分（秒）：供战报/计分板同源，而非事后按射门份额捏造
     if (
@@ -855,6 +1254,7 @@ export class SimEngine {
    * 持球者按 decisionUntil 节流（受 tempo 与接球状态影响），中间沿用上次意图。
    */
   _think(a, dt, owner, controlTeam = owner?.team || null, phaseActor = owner) {
+    a.shapePhase = this.teamPhases[a.team] || this._teamShapePhase(a.team, controlTeam || this._phaseTeam);
     if (a.sentOff) {
       // 被罚下：走向边线外并停住，不再参与任何决策/跑位。
       a.tx = a.team === "home" ? 1 : 99;
@@ -920,8 +1320,19 @@ export class SimEngine {
 
     const hasBall = b.owner === a.id;
     const teamHasBall = controlTeam === a.team;
+    if (!hasBall) {
+      if (a.pendingBallAction) a.pendingBallAction = null;
+      a.actionPreparationActive = false;
+    }
 
     if (hasBall) {
+      if (b.state === "control" && this.t < (a.controlUntil || 0)) {
+        a.tx = a.x;
+        a.ty = a.y;
+        a.fsm = "receive";
+        return;
+      }
+      if (this._runPendingBallAction(a)) return;
       // 门将进入近身封角范围时，持球者必须及时感知并重算射/传/带选择。
       // 接球后的常规决策节流不能让门将在一两秒内单方面完成出击。
       const defendingGk = this._teamGk(a.team === "home" ? "away" : "home");
@@ -954,6 +1365,14 @@ export class SimEngine {
       if (a.intent && (a.intent.type === "dribble" || a.intent.type === "hold")) {
         a.tx = a.intent.tx;
         a.ty = a.intent.ty;
+        if (a.intent.type === "hold") {
+          const nearest = this._nearestOpponent(a);
+          a.bodyTargetHeading = nearest
+            ? Math.atan2(a.y - nearest.opponent.y, a.x - nearest.opponent.x)
+            : Math.atan2(a.ty - a.y, a.tx - a.x);
+        } else if (Math.hypot(a.tx - a.x, a.ty - a.y) > 0.05) {
+          a.bodyTargetHeading = Math.atan2(a.ty - a.y, a.tx - a.x);
+        }
       }
       return;
     }
@@ -989,6 +1408,12 @@ export class SimEngine {
 
     // —— 门将持球：护球够久再开球（避免与前锋贴脸「传球互动」）——
     if (b.owner === a.id) {
+      if (b.state === "control" && this.t < (a.controlUntil || 0)) {
+        a.tx = a.x;
+        a.ty = a.y;
+        a.fsm = "receive";
+        return;
+      }
       if (this.t >= a.decisionUntil) {
         a.decisionUntil = this.t + 0.55 + this.random() * 0.35;
         this._gkDistribute(a);
@@ -1278,6 +1703,41 @@ export class SimEngine {
               ty: clamp(fkBoxY + (this.random() - 0.5) * 6, 8, 92),
             }
       );
+      return;
+    }
+
+    // 间接任意球首脚必须传给队友；只有下一名球员触球后才能形成合法射门。
+    if (
+      b.restartType === EDGE_RESTART_TYPES.INDIRECT_FREE_KICK &&
+      b.owner === a.id
+    ) {
+      if (this.t < (this.deadBallUntil || 0)) {
+        a.intent = { type: "hold", tx: a.x, ty: a.y };
+        a.fsm = "carry";
+        return;
+      }
+      let restartPass = this._bestPass(a);
+      if (!restartPass) {
+        const teammate = this.agents
+          .filter((m) => m.team === a.team && m.id !== a.id && !m.sentOff)
+          .sort(
+            (left, right) =>
+              pitchDistanceBetween(a.x, a.y, left.x, left.y) -
+                pitchDistanceBetween(a.x, a.y, right.x, right.y) ||
+              String(left.id).localeCompare(String(right.id))
+          )[0];
+        if (teammate) {
+          restartPass = {
+            agent: teammate,
+            value: 1,
+            through: false,
+            cross: false,
+            tx: teammate.x,
+            ty: teammate.y,
+          };
+        }
+      }
+      if (restartPass) this._pass(a, restartPass);
       return;
     }
 
@@ -1870,8 +2330,34 @@ export class SimEngine {
     const holderPressure = this._pressureOn(a);
     const out = [];
     for (const m of this.agents) {
-      if (m === a || m.team !== a.team || m.role === "GK" || m.sentOff) continue;
+      if (m === a || m.team !== a.team || m.sentOff) continue;
       const d = dist(a.x, a.y, m.x, m.y);
+      if (m.role === "GK") {
+        const inOwnBuildZone = a.team === "home" ? a.y >= 66 : a.y <= 34;
+        const canRecycleToKeeper =
+          inOwnBuildZone &&
+          holderPressure >= 0.68 &&
+          (a.role === "DEF" || a.detailedPosition === "DM") &&
+          d >= 6 &&
+          d <= 32;
+        if (!canRecycleToKeeper) continue;
+        const safety = this._laneSafety(a, m, m.x, m.y);
+        const distanceWeight = clamp(1 - d / 40, 0.25, 1);
+        const value =
+          (0.13 + holderPressure * 0.22) *
+          safety *
+          distanceWeight *
+          (0.82 + (a.attr.decisions || 0.55) * 0.18);
+        out.push({
+          agent: m,
+          value,
+          through: false,
+          backpass: true,
+          tx: m.x,
+          ty: m.y,
+        });
+        continue;
+      }
       if (d < 6 || d > 45) continue; // 太近没必要，太远不可靠
       // 普通传球也瞄准预计接球点，而不是队友当前脚下。接球队员稍后会共享同一目标。
       const nominalSpeed = clamp(18 + d * 0.7, 18, 42) * (0.85 + 0.15 * a.attr.passing);
@@ -1967,8 +2453,9 @@ export class SimEngine {
   }
 
   /** 执行传球：给球初速飞向接球点，清 owner（长传/传中/直塞带弧线高度） */
-  _pass(a, passTo) {
+  _pass(a, passTo, prepared = false) {
     const b = this.ball;
+    if (!prepared && this._queueBallAction(a, "pass", passTo.tx, passTo.ty, passTo)) return;
     const fromCorner = b.state === "corner" || b.restartType === "corner";
     const offsideExempt = !!b.offsideExemptRestart;
     const kickBallY = b.y;
@@ -2045,6 +2532,19 @@ export class SimEngine {
     b.restartType = null;
     b.isThroughPass = isThrough;
     b.isCrossPass = isCross; // 高弧线传中：z 超过头顶时不可拦截/接管（见 _resolvePossession）
+    b._handballChecked = new Set();
+    const backpass = backpassViolation({
+      passer: a,
+      goalkeeper: passTo.agent,
+      pass: {
+        deliberate: true,
+        cross: isCross,
+        through: isThrough,
+      },
+    });
+    b.backpassCandidate = backpass.violation;
+    b.backpassFrom = backpass.violation ? a.id : null;
+    b.backpassTargetId = backpass.violation ? passTo.agent.id : null;
     b.state = "pass";
     if (passTo.agent) {
       passTo.agent.intent = {
@@ -2063,6 +2563,10 @@ export class SimEngine {
     b.lastPassTeam = a.team;
     b.lastPassAt = this.t;
     a.intent = null;
+    a.pendingBallAction = null;
+    a.actionPreparationActive = false;
+    a.controlPhase = "released";
+    a.controlUntil = this.t;
     a.fsm = "home";
     this._emit("pass", a, {
       loft: loft > 2,
@@ -2079,10 +2583,11 @@ export class SimEngine {
   }
 
   /** 执行射门：给球高速飞向球门，门将可扑（远射：更吃 shooting、误差更大） */
-  _shoot(a, extraMeta = null) {
+  _shoot(a, extraMeta = null, prepared = false) {
     const b = this.ball;
     const opportunity = this._goalOpportunity(a);
     const goalY = this.targetGoalY(a.team);
+    if (!prepared && this._queueBallAction(a, "shot", 50, goalY, extraMeta)) return;
     const dGoal = opportunity.dGoal;
     const long = dGoal > 22;
     const freekick = !!extraMeta?.freekick;
@@ -2166,10 +2671,16 @@ export class SimEngine {
     b.shotAt = this.t;
     b._saveChecked = false; // 新射门允许门将掷一次扑救骰
     b._blockersChecked = new Set();
+    b._handballChecked = new Set();
     b._shotAssistId = assistId;
     b._openGoalShot = openGoal;
     this._clearBallTarget();
     a.intent = null;
+    a.pendingBallAction = null;
+    a.actionPreparationActive = false;
+    a.controlPhase = "released";
+    a.controlUntil = this.t;
+    a.bodyTargetHeading = Math.atan2(goalY - a.y, 50 - a.x);
     a.fsm = "home";
     this._emit("shot", a, {
       long: !!long,
@@ -2558,15 +3069,150 @@ export class SimEngine {
     return mids[0]?.id === a.id;
   }
 
-  /** 每 0.65~1s 为整队刷新一次防守任务；窗口内保持上抢/补位职责。 */
-  _refreshDefPlan(team, owner) {
+  _defensiveThreats(attackingTeam, owner, ownGoalY) {
+    return this.agents
+      .filter(
+        (candidate) =>
+          candidate.team === attackingTeam &&
+          candidate.role !== "GK" &&
+          !candidate.sentOff &&
+          candidate.id !== owner?.id
+      )
+      .map((candidate) => {
+        const goalDistance = pitchDistanceToGoalMetres(candidate.x, candidate.y, ownGoalY);
+        const ballDistance = pitchDistanceBetween(candidate.x, candidate.y, this.ball.x, this.ball.y);
+        const centrality = 1 - clamp(Math.abs(candidate.x - 50) / 46, 0, 1);
+        const roleBonus = candidate.role === "ATT" ? 8 : candidate.role === "MID" ? 4 : 0;
+        return {
+          candidate,
+          goalDistance,
+          score:
+            (70 - goalDistance) * 1.15 +
+            Math.max(0, 26 - ballDistance) * 0.42 +
+            centrality * 8 +
+            roleBonus,
+        };
+      })
+      .filter((item) => item.goalDistance < 62)
+      .sort(
+        (left, right) =>
+          right.score - left.score ||
+          String(left.candidate.id).localeCompare(String(right.candidate.id))
+      );
+  }
+
+  _assignMarkingJobs(
+    team,
+    owner,
+    jobs,
+    candidates,
+    previousJobs,
+    profile,
+    ownGoalY,
+    maxMarks = profile.markingCount
+  ) {
+    const occupiedTargets = new Set(
+      [...jobs.values()]
+        .map((job) => job.markId || job.shadowId || null)
+        .filter(Boolean)
+    );
+    const threats = this._defensiveThreats(owner?.team, owner, ownGoalY)
+      .filter((item) => !occupiedTargets.has(item.candidate.id));
+    let assigned = 0;
+    let handoffs = 0;
+    for (const threat of threats) {
+      if (assigned >= maxMarks) break;
+      const available = candidates
+        .filter(
+          (defender) =>
+            (defender.role === "DEF" || defender.role === "MID") &&
+            jobs.get(defender.id)?.type === "shape"
+        )
+        .map((defender) => {
+          const distance = pitchDistanceBetween(
+            defender.x,
+            defender.y,
+            threat.candidate.x,
+            threat.candidate.y
+          );
+          const layerPenalty = defender.role === "MID" && threat.goalDistance < 24 ? 3.2 : 0;
+          const wrongSidePenalty =
+            Math.sign(defender.x - 50) !== Math.sign(threat.candidate.x - 50) ? 1.8 : 0;
+          return { defender, distance, cost: distance + layerPenalty + wrongSidePenalty };
+        })
+        .sort(
+          (left, right) =>
+            left.cost - right.cost ||
+            String(left.defender.id).localeCompare(String(right.defender.id))
+        );
+      const best = available[0];
+      if (!best) break;
+      if (
+        best.distance > profile.markingDistanceMetres &&
+        threat.goalDistance > 24
+      ) {
+        continue;
+      }
+
+      const previous = [...previousJobs.entries()].find(
+        ([, job]) => job.type === "mark" && job.markId === threat.candidate.id
+      );
+      let chosen = best;
+      if (previous) {
+        const current = available.find((item) => item.defender.id === previous[0]);
+        if (
+          current &&
+          !shouldHandoffMark({
+            currentDistanceMetres: current.distance,
+            bestDistanceMetres: best.distance,
+            currentMarking: current.defender.attr.marking,
+            currentDecisions: current.defender.attr.decisions,
+            profile,
+          })
+        ) {
+          chosen = current;
+        }
+      }
+      const handoffFrom = previous && previous[0] !== chosen.defender.id ? previous[0] : null;
+      if (handoffFrom) handoffs++;
+      jobs.set(chosen.defender.id, {
+        type: "mark",
+        markId: threat.candidate.id,
+        handoffFrom,
+      });
+      assigned++;
+    }
+    return handoffs;
+  }
+
+  /** 每 0.48~1.08s 为整队刷新一次防守任务；窗口内保持交接与协防职责。 */
+  _refreshDefPlan(team, owner, phase = this._teamShapePhase(team)) {
     const plan = this._defPlans[team];
-    if (!plan || (this.t < plan.until && plan.jobs.size)) return plan;
     const pressing = clamp(
       this._tacticLevel(team, "pressing") * this._teamModifier(team, "def"),
       1,
       5
     );
+    const shapeProfile = this._shapeProfile(team);
+    const profile = this._collectiveDefenseProfile(team);
+    const defensiveTransition = phase === TEAM_SHAPE_PHASES.DEFENSIVE_TRANSITION;
+    const counterPress = defensiveTransition && shapeProfile.transition.counterPress;
+    const planPhase = defensiveTransition
+      ? TEAM_SHAPE_PHASES.DEFENSIVE_TRANSITION
+      : TEAM_SHAPE_PHASES.OUT_OF_POSSESSION;
+    const ballSide = this.ball.x < 34 ? -1 : this.ball.x > 66 ? 1 : 0;
+    const flankSide = this.ball.x < 22 ? -1 : this.ball.x > 78 ? 1 : 0;
+    const ownerId = owner?.id || this.ball.receiverId || null;
+    if (
+      plan &&
+      plan.phase === planPhase &&
+      plan.ownerId === ownerId &&
+      plan.ballSide === ballSide &&
+      this.t < plan.until &&
+      plan.jobs.size
+    ) {
+      return plan;
+    }
 
     const candidates = this.agents.filter(
       (a) => a.team === team && a.role !== "GK" && !a.sentOff
@@ -2582,8 +3228,35 @@ export class SimEngine {
       const db = effDist(b);
       return da - db || String(a.id).localeCompare(String(b.id));
     });
-    const oldPressId = [...plan.jobs.entries()].find(([, job]) => job.type === "press")?.[0];
     const nearest = ordered[0] || null;
+    const ownGoalY = team === "home" ? SIM.HOME_GOAL_Y : SIM.AWAY_GOAL_Y;
+    const spatialTrigger = pressingTrigger({
+      tactics: this._teamTactics(team),
+      phase,
+      ballX: this.ball.x,
+      ballY: this.ball.y,
+      ownGoalY,
+      ownerHeading: owner?.heading,
+      ownerAttackDirection: owner ? this.attackDir(owner.team) : -this.attackDir(team),
+      ownerControlPhase: owner?.controlPhase,
+      ballState: this.ball.state,
+      nearestDistanceMetres: nearest
+        ? pitchDistanceBetween(nearest.x, nearest.y, this.ball.x, this.ball.y)
+        : Infinity,
+    });
+    const trigger =
+      !spatialTrigger.active && pressing >= 3
+        ? Object.freeze({
+            ...spatialTrigger,
+            active: true,
+            kind: PRESS_TRIGGER_KINDS.PROXIMITY,
+            urgency: 0.5,
+          })
+        : spatialTrigger;
+    const previousJobs = new Map(plan.jobs);
+    const oldPressId = [...previousJobs.entries()].find(
+      ([, job]) => job.type === "press" || job.type === "contain"
+    )?.[0];
     const oldPress = oldPressId ? candidates.find((a) => a.id === oldPressId) : null;
     // 迟滞：旧上抢者没有明显落后就继续，避免两个人每 tick 互换职责。
     // 但必须自己也够得着球（有效距离 <5.5）：否则贴身队友全是 screen/shape 无权下脚，
@@ -2597,16 +3270,31 @@ export class SimEngine {
         : nearest;
 
     const jobs = new Map(candidates.map((a) => [a.id, { type: "shape" }]));
-    if (presser) jobs.set(presser.id, { type: "press" });
+    const danger = owner ? this._mostDangerousReceiver(owner.team) : null;
+    if (presser) {
+      jobs.set(presser.id, {
+        type: trigger.active ? "press" : "contain",
+        trigger: trigger.kind,
+        urgency: trigger.urgency,
+        shadowId: danger?.id || null,
+      });
+    }
 
     const rest = ordered.filter((a) => a !== presser);
-    const danger = owner ? this._mostDangerousReceiver(owner.team) : null;
-    if (rest[0]) jobs.set(rest[0].id, { type: "screen", markId: danger?.id || null });
+    const oldScreenId = [...previousJobs.entries()].find(([, job]) => job.type === "screen")?.[0];
+    const oldScreen = oldScreenId ? rest.find((candidate) => candidate.id === oldScreenId) : null;
+    const screen =
+      oldScreen && rest[0] && effDist(oldScreen) <= effDist(rest[0]) + profile.handoffMarginMetres
+        ? oldScreen
+        : rest[0];
+    if (screen) jobs.set(screen.id, { type: "screen", markId: danger?.id || null });
     let interceptN = 0;
     // 一人贴身、次近者盯接球点，通道拦截者只封线不再同时扑向球。
     // 标准压迫最多一名通道拦截者，极高压迫才允许第二人封另一侧。
-    const maxInterceptors = pressing >= 5 ? 2 : 1;
-    const interceptRange = 16 + pressing * 2;
+    const maxInterceptors = trigger.active
+      ? pressing >= 5 || (counterPress && pressing >= 4) ? 2 : pressing >= 3 ? 1 : 0
+      : 0;
+    const interceptRange = 16 + pressing * 2 + (counterPress ? 4 : 0);
     const usedSides = new Set();
     for (const a of rest.slice(1)) {
       if (interceptN >= maxInterceptors) break;
@@ -2620,9 +3308,51 @@ export class SimEngine {
       interceptN++;
     }
 
+    // 边路触发时由下一名后卫保护肋部，避免边后卫上抢后中卫仍横向不动。
+    if (flankSide !== 0) {
+      const wideCover = candidates
+        .filter((candidate) => candidate.role === "DEF" && jobs.get(candidate.id)?.type === "shape")
+        .sort(
+          (left, right) =>
+            pitchDistanceBetween(left.x, left.y, this.ball.x, this.ball.y) -
+              pitchDistanceBetween(right.x, right.y, this.ball.x, this.ball.y) ||
+            String(left.id).localeCompare(String(right.id))
+        )[0];
+      if (wideCover) jobs.set(wideCover.id, { type: "wide-cover", side: flankSide });
+    }
+
+    const markingLimit = defensiveTransition
+      ? Math.min(1, profile.markingCount)
+      : pressing >= 5 ? 1 : 0;
+    const handoffs = this._assignMarkingJobs(
+      team,
+      owner,
+      jobs,
+      candidates,
+      previousJobs,
+      profile,
+      ownGoalY,
+      markingLimit
+    );
+    if (defensiveTransition && (profile.counterPress || profile.regroup)) {
+      for (const [id, job] of jobs) {
+        if (job.type === "shape") {
+          jobs.set(id, { type: "recover", counterPress: trigger.active && counterPress });
+        }
+      }
+    }
+
     plan.jobs = jobs;
+    plan.phase = planPhase;
+    plan.ownerId = ownerId;
+    plan.ballSide = ballSide;
+    plan.trigger = trigger;
+    plan.coordination = profile;
+    plan.handoffs = handoffs;
     plan.until =
-      this.t + clamp(0.88 - (pressing - 3) * 0.08, 0.58, 1.08) + this.random() * 0.28;
+      this.t +
+      clamp(0.88 - (pressing - 3) * 0.08 - (counterPress ? 0.12 : 0), 0.48, 1.08) +
+      this.random() * 0.28;
     return plan;
   }
 
@@ -2652,8 +3382,12 @@ export class SimEngine {
   _thinkDefend(a, owner) {
     const b = this.ball;
     const ownGoalY = a.team === "home" ? SIM.HOME_GOAL_Y : SIM.AWAY_GOAL_Y;
-    const plan = this._refreshDefPlan(a.team, owner);
+    const phase = this._teamShapePhase(a.team, owner?.team || this._phaseTeam);
+    const shapeProfile = this._shapeProfile(a.team);
+    const plan = this._refreshDefPlan(a.team, owner, phase);
+    const coordination = plan?.coordination || this._collectiveDefenseProfile(a.team);
     const job = plan?.jobs.get(a.id) || { type: "shape" };
+    a.shapePhase = phase;
 
     if (job.type === "press") {
       // 上抢者：站到"球→己方球门"连线上、略靠球一侧，逼停并封堵推进。
@@ -2668,14 +3402,51 @@ export class SimEngine {
       // 高压迫角色上抢略更贴身，但克制：默认角色几乎无感，只有明确指派
       // 抢球中场/压迫型前锋时才明显，避免整体提高防守强度改变传球基线。
       const rolePress = Math.max(0, this._roleBehavior(a, "press"));
+      const awareness = defensiveAwarenessProfile(a.attr);
       const standoff =
         clamp(0.8 + dBallGoal / 30 * 1.6, 0.8, 2.4) *
         clamp(1 - (pressing - 3) * 0.07, 0.78, 1.18) *
-        clamp(1 - rolePress * 0.08, 0.9, 1);
-      const offset = pitchOffsetToward(vx, vy, standoff);
-      a.tx = clamp(bx + offset.x, 3, 97);
-      a.ty = clamp(by + offset.y, 3, 97);
+        clamp(1 - rolePress * 0.08, 0.9, 1) *
+        clamp(1.06 - (Number(job.urgency) || 0.6) * 0.08, 0.97, 1.03) *
+        awareness.standoffMultiplier;
+      const goalOffset = pitchOffsetToward(vx, vy, standoff);
+      let targetOffset = goalOffset;
+      const shadow = job.shadowId ? this.agentById(job.shadowId) : null;
+      if (shadow && shadow.team !== a.team) {
+        const sx = shadow.x - bx;
+        const sy = shadow.y - by;
+        const goalLength = Math.hypot(vx, vy) || 1;
+        const shadowLength = Math.hypot(sx, sy) || 1;
+        const alignment = (vx * sx + vy * sy) / (goalLength * shadowLength);
+        if (alignment > 0.08) {
+          const shadowOffset = pitchOffsetToward(sx, sy, standoff);
+          const shadowWeight = job.trigger === PRESS_TRIGGER_KINDS.TOUCHLINE ? 0.34 : 0.24;
+          targetOffset = {
+            x: goalOffset.x * (1 - shadowWeight) + shadowOffset.x * shadowWeight,
+            y: goalOffset.y * (1 - shadowWeight) + shadowOffset.y * shadowWeight,
+          };
+        }
+      }
+      if (job.trigger === PRESS_TRIGGER_KINDS.TOUCHLINE) {
+        const inside = pitchOffsetMetres(bx < 50 ? 0.55 : -0.55, 0);
+        targetOffset.x += inside.x;
+      }
+      a.tx = clamp(bx + targetOffset.x, 3, 97);
+      a.ty = clamp(by + targetOffset.y, 3, 97);
       a.fsm = "press";
+      return;
+    }
+
+    if (job.type === "contain") {
+      const awareness = defensiveAwarenessProfile(a.attr);
+      const offset = pitchOffsetToward(
+        50 - b.x,
+        ownGoalY - b.y,
+        4.4 * awareness.standoffMultiplier
+      );
+      a.tx = clamp(b.x + offset.x, 3, 97);
+      a.ty = clamp(b.y + offset.y, 3, 97);
+      a.fsm = "cover";
       return;
     }
 
@@ -2689,16 +3460,60 @@ export class SimEngine {
         const mx = mark.x + (50 - mark.x) * 0.15;
         const my = mark.y + (ownGoalY - mark.y) * 0.22;
         const dBallGoal = Math.abs(b.y - ownGoalY) * (SIM.PITCH_H_METRES / SIM.FIELD_H);
-        const support = this._defensiveSupportTarget(
+        const awareness = defensiveAwarenessProfile(a.attr);
+        const supportDistance = (dBallGoal < 19 ? 3.5 : 5.1) * awareness.standoffMultiplier;
+        let support = this._defensiveSupportTarget(
           mx,
           my,
           ownGoalY,
-          dBallGoal < 19 ? 3.15 : 4.35,
+          supportDistance,
           mark.x <= b.x ? -1 : 1
         );
+        const crossesPressureCircle =
+          (support.x - b.x) * (a.x - b.x) +
+            (support.y - b.y) * (a.y - b.y) <
+          0;
+        if (crossesPressureCircle) {
+          const sameSide = pitchOffsetToward(a.x - b.x, a.y - b.y, supportDistance);
+          support = {
+            x: clamp(b.x + sameSide.x, 3, 97),
+            y: clamp(b.y + sameSide.y, 3, 97),
+          };
+        }
         a.tx = support.x;
         a.ty = support.y;
         a.fsm = "cover";
+        return;
+      }
+    }
+
+    if (job.type === "mark") {
+      const mark = job.markId ? this.agentById(job.markId) : null;
+      if (mark && !mark.sentOff && mark.team !== a.team) {
+        const goalDistance = pitchDistanceToGoalMetres(mark.x, mark.y, ownGoalY);
+        const markDistance = clamp(2.05 + goalDistance / 48, 2.05, 3.4);
+        const goalSide = pitchOffsetToward(50 - mark.x, ownGoalY - mark.y, markDistance);
+        const ballSide = pitchOffsetToward(b.x - mark.x, b.y - mark.y, 1.35);
+        const markX = mark.x + goalSide.x + ballSide.x;
+        const markY = mark.y + goalSide.y + ballSide.y;
+        const zoneX = weakSideTargetX({ baseX: a.baseX, ballX: b.x, profile: coordination });
+        const zoneY = this._defLineY(a);
+        const awareness = defensiveAwarenessProfile(a.attr);
+        const markWeight = clamp(
+          (goalDistance < 20 ? 0.58 : 0.38) + awareness.markWeightAdjustment,
+          0.3,
+          0.66
+        );
+        const target = this._defensiveSupportTarget(
+          zoneX * (1 - markWeight) + markX * markWeight,
+          zoneY * (1 - markWeight) + markY * markWeight,
+          ownGoalY,
+          goalDistance < 20 ? 2.8 : 3.7,
+          mark.x <= b.x ? -1 : 1
+        );
+        a.tx = target.x;
+        a.ty = target.y;
+        a.fsm = "mark";
         return;
       }
     }
@@ -2726,6 +3541,43 @@ export class SimEngine {
       }
     }
 
+    if (job.type === "wide-cover") {
+      const side = Number(job.side) || (b.x < 50 ? -1 : 1);
+      const goalDirection = ownGoalY > 50 ? 1 : -1;
+      const coverOffset = pitchOffsetMetres(
+        -side * coordination.flankCoverInsideMetres,
+        goalDirection * 4.6
+      );
+      const lineY = this._defLineY(a);
+      const target = this._defensiveSupportTarget(
+        b.x + coverOffset.x,
+        lineY * 0.58 + (b.y + coverOffset.y) * 0.42,
+        ownGoalY,
+        4.1,
+        -side
+      );
+      a.tx = target.x;
+      a.ty = target.y;
+      a.fsm = "cover";
+      return;
+    }
+
+    if (job.type === "recover") {
+      const goalDirection = ownGoalY > 50 ? 1 : -1;
+      const recovery = pitchOffsetMetres(0, goalDirection * coordination.recoveryDepthMetres);
+      const target = this._defensiveSupportTarget(
+        weakSideTargetX({ baseX: a.baseX, ballX: b.x, profile: coordination }),
+        clamp(this._defLineY(a) + recovery.y, 5, 95),
+        ownGoalY,
+        4.3,
+        (a.baseX ?? a.x) <= b.x ? -1 : 1
+      );
+      a.tx = target.x;
+      a.ty = target.y;
+      a.fsm = "recover";
+      return;
+    }
+
     // 其余：回到防线 Y；横向随球压缩，且球逼近己方球门时向中路收缩。
     // 只锚 baseX 会让边后卫在禁区外沿两侧拉成横排、中路空虚——
     // 真实防守是"球进危险区，全队向球门前中路收拢成人墙"。
@@ -2736,8 +3588,19 @@ export class SimEngine {
     const toward = 0.28 + central * 0.34;
     // 横向目标：baseX 与「球门中路和球位的混合」按 toward 插值
     const anchorX = (50 * 0.55 + b.x * 0.45);
+    const transitionProgress = phase === TEAM_SHAPE_PHASES.DEFENSIVE_TRANSITION
+      ? 0.4 + 0.6 * clamp(
+          (this.t - (this._teamLoseAt[a.team] || 0)) /
+            Math.max(0.1, shapeProfile.transition.defendSeconds),
+          0,
+          1
+        )
+      : 1;
+    const widthMul = 1 + (shapeProfile.outOfPossession.widthMul - 1) * transitionProgress;
+    const weakSideBaseX = weakSideTargetX({ baseX: a.baseX, ballX: b.x, profile: coordination });
+    const shapeBaseX = 50 + (weakSideBaseX - 50) * widthMul;
     const shape = this._defensiveSupportTarget(
-      a.baseX + (anchorX - a.baseX) * toward,
+      shapeBaseX + (anchorX - shapeBaseX) * toward,
       lineY,
       ownGoalY,
       dBallGoal < 19 ? 3.05 : 4.05,
@@ -2817,7 +3680,8 @@ export class SimEngine {
     const sign = a.team === "home" ? -1 : 1; // 朝场内为正推进方向的反向
     // 距己方球门的层次：DEF 最靠后，ATT 最靠前
     const lineLevel = this._tacticLevel(a.team, "defensiveLine");
-    const linePush = (lineLevel - 3) * (a.role === "DEF" ? 3.8 : a.role === "MID" ? 2.8 : 1.8);
+    const linePush =
+      (lineLevel - 3) * (a.role === "DEF" ? 3.8 : a.role === "MID" ? 2.8 : 1.8);
     // 角色「前插/回收」倾向极小幅修正本层防线：克制到约 1 码内，
     // 让明确指派进攻/防守职责时才可感知，默认角色基本不偏离 v208 基线。
     const roleDepth = this._roleBehavior(a, "depth") * (a.role === "DEF" ? 3.5 : a.role === "MID" ? 2 : 0);
@@ -2864,6 +3728,124 @@ export class SimEngine {
       y: a?.y,
       ...extra,
     });
+  }
+
+  _emitVarReview({ incident, onFieldDecision, team, agent = null, evidence = {} }) {
+    const review = varReviewDecision({ incident, onFieldDecision, evidence });
+    if (!review.reviewable) return review;
+    const reviewId = `var_${++this._varReviewSeq}`;
+    const common = {
+      team,
+      reviewId,
+      incident,
+      onFieldDecision,
+      evidence,
+    };
+    this._lastVarReview = {
+      reviewId,
+      incident,
+      team,
+      decision: review.decision,
+      finalDecision: review.finalDecision,
+      reason: review.reason,
+      at: this.t,
+    };
+    this._emit("var_review", agent, common);
+    this._emit("var_decision", agent, {
+      ...common,
+      decision: review.decision,
+      finalDecision: review.finalDecision,
+      reason: review.reason,
+    });
+    return review;
+  }
+
+  _inOwnFoulBox(team, x, y) {
+    return (
+      x > 22 &&
+      x < 78 &&
+      (team === "home" ? y >= 84 : y <= 16)
+    );
+  }
+
+  _tryHandball(agent, { intendedReceive = false, isCross = false, isShot = false } = {}) {
+    const b = this.ball;
+    if (!agent || agent.role === "GK" || agent.sentOff) return false;
+    const checked = b._handballChecked instanceof Set ? b._handballChecked : new Set();
+    b._handballChecked = checked;
+    if (checked.has(agent.id)) return false;
+    const incomingHeading = Math.atan2(-(b.vy || 0), -(b.vx || 0));
+    const exposure = 1 - Math.abs(Math.cos(angleDelta(agent.heading || 0, incomingHeading)));
+    const inPenaltyArea = this._inOwnFoulBox(agent.team, b.x, b.y);
+    const decision = handballContactDecision({
+      ballHeight: b.z || 0,
+      ballSpeedMps: pitchSpeedMps(b.vx || 0, b.vy || 0),
+      bodyExposure: exposure,
+      decisions: agent.attr.decisions,
+      intendedReceive,
+      isCross,
+      isShot,
+      inPenaltyArea,
+      roll: this.random(),
+    });
+    if (!decision.eligible) return false;
+    checked.add(agent.id);
+    if (!decision.handball) return false;
+    return this._commitHandball(agent, {
+      reason: decision.reason,
+      risk: decision.risk,
+      ballHeight: b.z || 0,
+      ballSpeedMps: pitchSpeedMps(b.vx || 0, b.vy || 0),
+      bodyExposure: exposure,
+      intendedReceive,
+      isCross,
+      isShot,
+      inPenaltyArea,
+    });
+  }
+
+  _commitHandball(player, evidence) {
+    const b = this.ball;
+    const restartTeam = player.team === "home" ? "away" : "home";
+    const penalty = !!evidence.inPenaltyArea;
+    const x = clamp(b.x, 4, 96);
+    const y = clamp(b.y, 4, 96);
+    this._emit("handball", player, {
+      penalty,
+      x,
+      y,
+      evidence,
+    });
+    // 纪律、统计和点球适配继续读取统一 foul 事件；handball 是可见的成因事实。
+    this._emit("foul", player, {
+      from: b.lastKicker || null,
+      card: "none",
+      penalty,
+      handball: true,
+      x,
+      y,
+      evidence,
+    });
+    if (penalty) {
+      const review = this._emitVarReview({
+        incident: VAR_INCIDENTS.PENALTY,
+        onFieldDecision: "penalty",
+        team: restartTeam,
+        agent: player,
+        evidence: {
+          inPenaltyArea: true,
+          offenceType: "handball",
+          x,
+          y,
+          source: evidence,
+        },
+      });
+      if (review.finalDecision === "penalty") this._penaltyKick(restartTeam);
+      else this._restart("freekick", restartTeam, x, y);
+    } else {
+      this._restart("freekick", restartTeam, x, y);
+    }
+    return true;
   }
 
   /**
@@ -2969,15 +3951,18 @@ export class SimEngine {
     const dx = a.tx - a.x;
     const dy = a.ty - a.y;
     const d = Math.hypot(dx, dy);
+    const movementHeading = d > 0.05 ? Math.atan2(dy, dx) : a.heading;
+    const movementTurn = Math.abs(angleDelta(a.heading, movementHeading));
+    const turnCost = 1 - (movementTurn / Math.PI) * (0.16 - (a.attr.agility || 0.55) * 0.08);
     if (d < 0.05) {
       a.vx *= 0.5;
       a.vy *= 0.5;
     } else {
       const slowR = 5;
-      const desired = speed * Math.min(1, d / slowR);
+      const desired = speed * Math.min(1, d / slowR) * clamp(turnCost, 0.82, 1);
       const dvx = (dx / d) * desired - a.vx;
       const dvy = (dy / d) * desired - a.vy;
-      const accel = speed * (2.5 + 2.5 * a.attr.accel);
+      const accel = speed * (2.5 + 2.5 * a.attr.accel) * (0.94 + (a.attr.agility || 0.55) * 0.08);
       const maxDv = accel * dt;
       const m = Math.hypot(dvx, dvy);
       if (m > maxDv) {
@@ -2999,12 +3984,16 @@ export class SimEngine {
       (1.18 - (a.attr.stamina || 0.5) * 0.35);
     a.fitness = Math.max(30, (a.fitness ?? 100) - drain);
     const vmag = Math.hypot(a.vx, a.vy);
-    if (vmag > 0.6) {
-      const target = Math.atan2(a.vy, a.vx);
-      let diff = target - a.heading;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      a.heading += diff * Math.min(1, dt * 12);
+    const turningInPlace = this.ball.owner === a.id &&
+      Number.isFinite(a.bodyTargetHeading) &&
+      (a.pendingBallAction || a.controlPhase === "first-touch");
+    if (vmag > 0.6 || turningInPlace) {
+      const velocityHeading = vmag > 0.01 ? Math.atan2(a.vy, a.vx) : a.heading;
+      const target = this.ball.owner === a.id && Number.isFinite(a.bodyTargetHeading)
+        ? a.bodyTargetHeading
+        : velocityHeading;
+      const turnRate = 4.8 + (a.attr.agility || 0.55) * 4.8;
+      a.heading = moveAngleToward(a.heading, target, turnRate * dt);
     }
   }
 
@@ -3014,9 +4003,51 @@ export class SimEngine {
     if (b.owner) {
       const o = this.agentById(b.owner);
       if (o) {
-        // 球黏在持球者身前一点（沿其朝向）
-        b.x = clamp(o.x + Math.cos(o.heading) * 1.4, 1, 99);
-        b.y = clamp(o.y + Math.sin(o.heading) * 1.4, 1, 99);
+        if (b.state === "control" && b.controlOwnerId === o.id) {
+          const controlStartAt = Number.isFinite(b.controlStartAt) ? b.controlStartAt : this.t;
+          const controlUntil = Number.isFinite(b.controlUntil) ? b.controlUntil : this.t;
+          const progress = clamp(
+            (this.t - controlStartAt) / Math.max(0.01, controlUntil - controlStartAt),
+            0,
+            1
+          );
+          const eased = progress * progress * (3 - 2 * progress);
+          const targetX = o.x + (b.controlOffsetX || 0);
+          const targetY = o.y + (b.controlOffsetY || 0);
+          const nextX = b.controlStartX + (targetX - b.controlStartX) * eased;
+          const nextY = b.controlStartY + (targetY - b.controlStartY) * eased;
+          b.vx = (nextX - b.x) / Math.max(0.01, dt);
+          b.vy = (nextY - b.y) / Math.max(0.01, dt);
+          b.x = clamp(nextX, 1, 99);
+          b.y = clamp(nextY, 1, 99);
+          b.z = Math.max(0, (b.controlStartZ || 0) * (1 - eased));
+          b.vz = 0;
+          if (progress >= 1 - 1e-9) {
+            b.state = "held";
+            b.z = 0;
+            b.vz = 0;
+            o.controlPhase = "settled";
+            o.controlUntil = this.t;
+            delete b.controlOwnerId;
+            delete b.controlKind;
+            delete b.controlStartAt;
+            delete b.controlUntil;
+            delete b.controlStartX;
+            delete b.controlStartY;
+            delete b.controlStartZ;
+            delete b.controlOffsetX;
+            delete b.controlOffsetY;
+            delete b.controlFoot;
+          }
+          return;
+        }
+        // 球黏在持球者惯用脚一侧的身前，护球时身体朝向会改变这条接触线。
+        const heading = Number.isFinite(o.heading) ? o.heading : 0;
+        const foot = o.controlFoot === "left" ? -1 : 1;
+        const rightX = -Math.sin(heading);
+        const rightY = Math.cos(heading);
+        b.x = clamp(o.x + Math.cos(heading) * 1.4 + rightX * 0.24 * foot, 1, 99);
+        b.y = clamp(o.y + Math.sin(heading) * 1.4 + rightY * 0.24 * foot, 1, 99);
         b.vx = o.vx;
         b.vy = o.vy;
         b.z = 0;
@@ -3065,6 +4096,11 @@ export class SimEngine {
    */
   _tryGoalkeeperChallenge(owner) {
     if (!owner || owner.role === "GK" || this.ball.owner !== owner.id) return false;
+    if (
+      this.ball.state === "control" ||
+      owner.controlPhase === "first-touch" ||
+      owner.pendingBallAction
+    ) return false;
     const defendingTeam = owner.team === "home" ? "away" : "home";
     const gk = this._teamGk(defendingTeam);
     const b = this.ball;
@@ -3084,9 +4120,9 @@ export class SimEngine {
     // 刚完成第一脚控制仍有很短的身体保护；门将已经贴到脚下则可直接封堵。
     if (this.t < (owner.protectUntil || 0) && dBall > 1.5) return false;
 
-    gk.challengeCdUntil = this.t + 2.4;
+    gk.challengeCdUntil = this.t + 10.5;
     gk.challengeOwnerId = owner.id;
-    gk.challengeOwnerUntil = this.t + 6;
+    gk.challengeOwnerUntil = this.t + 18;
     const claimSkill =
       (gk.attr.handling || 0.5) * 0.38 +
       (gk.attr.reflexes || 0.5) * 0.25 +
@@ -3209,6 +4245,21 @@ export class SimEngine {
    * - 无主时：控球半径内最近球员按接管概率拿球（高速球更难接）
    * 门将扑救：必须朝己方球门飞 + 在可扑半径内 + 按射门难度掷一次骰。
    */
+  _commitBackpassViolation(goalkeeper) {
+    const b = this.ball;
+    const passer = b.backpassFrom ? this.agentById(b.backpassFrom) : null;
+    const restartTeam = goalkeeper.team === "home" ? "away" : "home";
+    const x = clamp(b.x, 6, 94);
+    const y = clamp(b.y, goalkeeper.team === "home" ? 82 : 6, goalkeeper.team === "home" ? 94 : 18);
+    this._emit("backpass", goalkeeper, {
+      from: passer?.id || b.lastKicker || null,
+      restart: EDGE_RESTART_TYPES.INDIRECT_FREE_KICK,
+      x,
+      y,
+    });
+    this._restart(EDGE_RESTART_TYPES.INDIRECT_FREE_KICK, restartTeam, x, y);
+  }
+
   _resolvePossession(dt) {
     const b = this.ball;
     // 门将轨迹覆盖仍沿用既有画面标尺；控球、抢断和传球拦截统一使用米制。
@@ -3269,7 +4320,7 @@ export class SimEngine {
         const cover = clamp(1 - dPath / reach, 0, 1);
         // 路线正确：门将对射正球应有稳定基础覆盖；空门/远侧再大幅降低。
         let pSave =
-          0.32 +
+          0.29 +
           0.28 * cover +
           0.55 * ref +
           0.22 * hand -
@@ -3373,6 +4424,7 @@ export class SimEngine {
         if (o.team === b.kickTeam || o.role === "GK" || o.sentOff || checked.has(o.id)) continue;
         const d = dist(o.x, o.y, b.x, b.y);
         if (d > 3.2 + Math.min(1.2, speed * 0.018)) continue;
+        if (this._tryHandball(o, { isShot: true })) return;
         checked.add(o.id);
         const blockSkill = 0.55 * o.attr.positioning + 0.45 * o.attr.tackling;
         const pBlock = clamp(
@@ -3437,15 +4489,11 @@ export class SimEngine {
               0.68
             );
             if (this.random() < p) {
-              b.owner = o.id;
-              b.vx = 0; b.vy = 0;
-              b.state = "held";
-              this._clearBallTarget();
-              o.decisionUntil = this._nextControlDecision(o);
-              o.intent = this._forwardDribbleIntent(o);
-              o.fsm = "carry";
-              o.protectUntil = this.t + 0.7;
-              b.settleUntil = this.t + 0.45;
+              this._beginBallControl(o, {
+                kind: "intercept",
+                protectSeconds: 0.7,
+                settleSeconds: 0.45,
+              });
               this._emit("intercept", o, { from: b.lastKicker });
               return;
             }
@@ -3495,26 +4543,41 @@ export class SimEngine {
           // 单次成功率保持克制；高速带球略容易丢球。
           const ownerSpeed = Math.hypot(owner.vx, owner.vy);
           const moveVuln = clamp(ownerSpeed / SIM.MAX_PLAYER_SPEED, 0, 1) * 0.1;
+          const toDefenderX = o.x - owner.x;
+          const toDefenderY = o.y - owner.y;
+          const contactLength = Math.hypot(toDefenderX, toDefenderY) || 1;
+          const awayHeading = Math.atan2(-toDefenderY, -toDefenderX);
+          const shieldAlignment = clamp(
+            Math.cos(angleDelta(owner.heading, awayHeading)),
+            0,
+            1
+          );
+          const relativeVelocity = pitchVectorMetres(o.vx - owner.vx, o.vy - owner.vy);
+          const towardOwnerX = (owner.x - o.x) / contactLength;
+          const towardOwnerY = (owner.y - o.y) / contactLength;
+          const closingSpeedMps =
+            relativeVelocity.x * towardOwnerX * (SIM.PITCH_W_METRES / SIM.FIELD_W) +
+            relativeVelocity.y * towardOwnerY * (SIM.PITCH_H_METRES / SIM.FIELD_H);
+          const momentumAdjustment = shieldingMomentumAdjustment({
+            closingSpeedMps,
+            shieldAlignment,
+            balance: owner.attr.balance,
+          });
           const possResistance = this._teamModifier(owner.team, "poss");
           const p = clamp(
             (0.22 + (def - atk) * 0.45 + moveVuln) *
-              this._teamModifier(o.team, "def") /
+              this._teamModifier(o.team, "def") *
+              (1 + momentumAdjustment) /
               possResistance,
             0.06,
             0.52
           );
           if (this.random() < p) {
-            b.owner = o.id;
-            b.vx = 0;
-            b.vy = 0;
-            b.state = "held";
-            this._clearBallTarget();
-            b.settleUntil = this.t + 1.4;
-            // settle：抢到后先护/带一下再决策，避免抢断→立刻回传的乒乓
-            o.decisionUntil = this._nextControlDecision(o);
-            o.intent = this._forwardDribbleIntent(o);
-            o.fsm = "carry";
-            o.protectUntil = this.t + 1.6;
+            this._beginBallControl(o, {
+              kind: "tackle",
+              protectSeconds: 1.6,
+              settleSeconds: 1.4,
+            });
             // 被抢者：设追抢冷却 + 轻微后撤，避免"贴身原地互抢"的乒乓循环。
             // 真实里丢球方会先失位、退一步再重新组织逼抢，不会瞬间贴脸抢回。
             owner.tackleCdUntil = this.t + 8;
@@ -3650,37 +4713,60 @@ export class SimEngine {
       const speedScale = wasPass && b.isCrossPass ? (intendedReceive ? 180 : 135) : (intendedReceive ? 310 : 125);
       const p = clamp(ctl - speedMps / speedScale, 0.15, 0.99);
       if (this.random() < p) {
+        if (
+          this._tryHandball(best, {
+            intendedReceive,
+            isCross: !!b.isCrossPass,
+            isShot: false,
+          })
+        ) {
+          return;
+        }
+        if (
+          best.role === "GK" &&
+          b.backpassCandidate &&
+          b.backpassTargetId === best.id
+        ) {
+          const passFrom = b.lastKicker;
+          const intendedId = b.receiverId;
+          const control = goalkeeperBackpassControl({
+            pressure: this._pressureOn(best),
+            decisions: best.attr.decisions,
+            positioning: best.attr.positioning,
+            roll: this.random(),
+          });
+          if (control.useHands) {
+            this._commitBackpassViolation(best);
+          } else {
+            this._beginBallControl(best, {
+              kind: "backpass-feet",
+              passFrom,
+              intendedId,
+              emitReceive: true,
+              protectSeconds: 0.85,
+              settleSeconds: 0.5,
+              goalkeeperFeet: true,
+            });
+            this._emit("gk_backpass_control", best, {
+              from: passFrom,
+              handlingRisk: control.handlingRisk,
+            });
+          }
+          return;
+        }
         const passFrom = b.lastKicker;
         const intendedId = b.receiverId;
-        b.owner = best.id;
-        b.vx = 0;
-        b.vy = 0;
-        b.z = 0;
-        b.vz = 0;
-        b.state = "held";
-        this._clearBallTarget();
-        b._saveChecked = false;
-        best.decisionUntil = this._nextControlDecision(best);
-        best.intent = best.role === "GK" ? null : this._forwardDribbleIntent(best);
-        best.fsm = best.role === "GK" ? "home" : "carry";
-        // 门将拿球护球更长，杜绝前锋贴脸抢回造成「互传」
-        best.protectUntil = this.t + (best.role === "GK" ? 1.7 : 0.7);
-        b.settleUntil = this.t + (best.role === "GK" ? 1.05 : 0.45);
-        if (best.role === "GK") {
-          best.pose = "hold";
-          best.poseUntil = this.t + 0.7;
-        }
-        if (wasPass && best.team === b.kickTeam) {
-          this._emit("receive", best, { from: passFrom, intendedId });
-        }
+        this._beginBallControl(best, {
+          kind: wasPass ? "receive" : "loose-control",
+          passFrom,
+          intendedId,
+          emitReceive: wasPass && best.team === b.kickTeam,
+          protectSeconds: best.role === "GK" ? 1.7 : 0.7,
+          settleSeconds: best.role === "GK" ? 1.05 : 0.45,
+        });
       } else {
-        // 没控住：把球磕开，避免原地互抢
-        const away = best.role === "GK" ? 1 : -1;
-        const dir = this.attackDir(best.team);
-        b.vx = (this.random() - 0.5) * 8;
-        b.vy = dir * away * (4 + this.random() * 5);
-        b.state = "loose";
-        this._clearBallTarget();
+        // 没控住：按身体朝向和惯用脚把球磕开，避免瞬间绑定又瞬间丢失。
+        this._miscontrolBall(best);
       }
     }
   }
@@ -3740,26 +4826,7 @@ export class SimEngine {
     this._agentIndex?.set(a.id, a);
     a.player = player;
     a.num = player.number ?? a.num;
-    a.attr = {
-      pace: norm(attrs.pace),
-      accel: norm(attrs.pace) * 0.6 + norm(attrs.strength) * 0.4,
-      passing: norm(attrs.passing),
-      vision: norm(attrs.vision),
-      shooting: norm(attrs.shooting),
-      finishing: norm(attrs.finishing),
-      dribbling: norm(attrs.dribbling),
-      tackling: norm(attrs.tackling),
-      marking: norm(attrs.marking),
-      strength: norm(attrs.strength),
-      stamina: norm(attrs.stamina),
-      positioning: norm(attrs.positioning),
-      reflexes: norm(attrs.reflexes),
-      handling: norm(attrs.handling),
-      kicking: norm(attrs.kicking),
-      heading: norm(attrs.heading),
-      crossing: norm(attrs.crossing),
-      decisions: norm(attrs.decisions),
-    };
+    a.attr = normalizedAgentAttributes(attrs);
     a.heightCm = Number(player.heightCm) || 180;
     a.preferredFoot = player.preferredFoot || "right";
     a.habits = new Set(player.playingHabits || []);
@@ -3791,6 +4858,12 @@ export class SimEngine {
     a.vy = 0;
     a.intent = null;
     a.fsm = "home";
+    a.controlFoot = a.preferredFoot === "left" ? "left" : "right";
+    a.controlPhase = "settled";
+    a.controlUntil = 0;
+    a.bodyTargetHeading = a.team === "home" ? -Math.PI / 2 : Math.PI / 2;
+    a.pendingBallAction = null;
+    a.actionPreparationActive = false;
     a.decisionUntil = this.t + 0.8;
     a.protectUntil = 0;
     a.tackleCdUntil = 0;
@@ -3891,11 +4964,31 @@ export class SimEngine {
    * - 犯规概率 = f(防守者 tackling 反比, 战术压迫凶狠度)
    * - 禁区内 → 点球；其余 → 任意球（判给被侵犯方）
    * - 严重度掷黄/红：累计第二黄 → 红；小概率直红
-   * 成立返回 true（已重启死球），否则 false。
+   * 成立返回 true（已重启死球或已开启有利观察窗），否则 false。
    * @param {object} defender 犯规的防守球员
    * @param {object} victim 被侵犯的持球者
    * @param {{goalkeeperChallenge?: boolean}|null} context 对抗情境
    */
+  _rollFoulCard(defender, pressing, goalkeeperChallenge) {
+    // 卡片严重度（相对犯规数的真实比例）：黄 ~15%，直红 ~0.3%。
+    const roll = this.random();
+    let card = "none";
+    if (!goalkeeperChallenge && roll < 0.003 + (pressing - 3) * 0.0008) {
+      card = "red";
+    } else if (roll < (goalkeeperChallenge ? 0.1 : 0.15 + (pressing - 3) * 0.015)) {
+      const prev = defender._yellows || 0;
+      if (prev >= 1) {
+        // 已有黄牌者会格外谨慎、裁判对第二黄也偏宽容。
+        if (this.random() < 0.22) card = "red2";
+      } else {
+        card = "yellow";
+        defender._yellows = prev + 1;
+      }
+    }
+    if (card === "red" || card === "red2") defender.sentOff = true;
+    return card;
+  }
+
   _commitFoul(defender, victim, context = null) {
     const b = this.ball;
     // 禁区判定：犯规发生在防守方(defender)自己的禁区内 → 点球
@@ -3911,11 +5004,11 @@ export class SimEngine {
     const goalkeeperChallenge = !!context?.goalkeeperChallenge;
     let pFoul = goalkeeperChallenge
       ? clamp(
-          0.06 +
-            (1 - (defender.attr.handling || 0.5)) * 0.06 +
-            ((victim.attr.dribbling || 0.5) - (defender.attr.positioning || 0.5)) * 0.05,
-          0.04,
-          0.12
+          0.02 +
+            (1 - (defender.attr.handling || 0.5)) * 0.03 +
+            ((victim.attr.dribbling || 0.5) - (defender.attr.positioning || 0.5)) * 0.02,
+          0.015,
+          0.07
         )
       : clamp(
           0.16 + (1 - defender.attr.tackling) * 0.2 + (pressing - 3) * 0.018,
@@ -3932,32 +5025,53 @@ export class SimEngine {
     );
     pFoul *= contactSamplingScale;
     // 后卫在禁区内会收脚，但不应把点球压低两个数量级。
-    if (inBox && !goalkeeperChallenge) pFoul *= 0.11;
+    if (inBox && !goalkeeperChallenge) pFoul *= 0.04;
     if (this.random() >= pFoul) return false;
 
     // 被侵犯方获得球权重启
     const attackTeam = victim.team;
 
-    // 卡片严重度（相对犯规数的真实比例）：黄 ~15%，直红 ~0.3%。
-    const roll = this.random();
-    let card = "none";
-    // 直红（暴力/最后一人）：很小概率
-    if (!goalkeeperChallenge && roll < 0.003 + (pressing - 3) * 0.0008) {
-      card = "red";
-    } else if (roll < (goalkeeperChallenge ? 0.1 : 0.15 + (pressing - 3) * 0.015)) {
-      const prev = defender._yellows || 0;
-      if (prev >= 1) {
-        // 已有黄牌者会格外谨慎、裁判对第二黄也偏宽容：仅 ~22% 真的变红，
-        // 否则本次逃过（不吃牌）。杜绝第二黄红牌泛滥（真实红牌约每 8-10 场一张）。
-        if (this.random() < 0.22) card = "red2";
-      } else {
-        card = "yellow";
-        defender._yellows = prev + 1;
-      }
-    }
+    const card = this._rollFoulCard(defender, pressing, goalkeeperChallenge);
 
-    if (card === "red" || card === "red2") {
-      defender.sentOff = true;
+    const advantage = !inBox && !goalkeeperChallenge
+      ? advantageDecision({
+          inPenaltyArea: inBox,
+          ownerTeam: attackTeam,
+          foulTeam: defender.team,
+          forwardProgress: forwardProgress({
+            fromY: victim.y,
+            toY: victim.ty ?? victim.y,
+            attackDirection: this.attackDir(victim.team),
+          }),
+          goalDistance: pitchDistanceToGoalMetres(
+            b.x,
+            b.y,
+            this.targetGoalY(victim.team)
+          ),
+          pressure: this._pressureOn(victim),
+          touchline: b.x < 5 || b.x > 95,
+        })
+      : { play: false };
+    if (advantage.play) {
+      this._advantage = {
+        defenderId: defender.id,
+        victimId: victim.id,
+        team: attackTeam,
+        reason: advantage.reason,
+        card,
+        x: b.x,
+        y: b.y,
+        startY: b.y,
+        until: this.t + advantage.window,
+      };
+      this._emit("advantage", victim, {
+        from: defender.id,
+        reason: advantage.reason,
+        x: b.x,
+        y: b.y,
+        window: advantage.window,
+      });
+      return true;
     }
 
     this._emit("foul", defender, {
@@ -3977,7 +5091,22 @@ export class SimEngine {
     if (this.random() < pInj * injMul) this._commitInjury(victim, "contact");
 
     if (inBox) {
-      this._penaltyKick(attackTeam);
+      const review = this._emitVarReview({
+        incident: VAR_INCIDENTS.PENALTY,
+        onFieldDecision: "penalty",
+        team: attackTeam,
+        agent: victim,
+        evidence: {
+          inPenaltyArea: this._inOwnFoulBox(defender.team, b.x, b.y),
+          offenceType: "foul",
+          x: b.x,
+          y: b.y,
+          offenderId: defender.id,
+          victimId: victim.id,
+        },
+      });
+      if (review.finalDecision === "penalty") this._penaltyKick(attackTeam);
+      else this._restart("freekick", attackTeam, clamp(b.x, 4, 96), clamp(b.y, 4, 96));
     } else {
       const fx = clamp(b.x, 4, 96);
       const fy = clamp(b.y, 4, 96);
@@ -4289,7 +5418,13 @@ export class SimEngine {
         crossX > SIM.GOAL_X0 &&
         crossX < SIM.GOAL_X1 &&
         underBar
-      ) return this._goal("home");
+      ) return this._goal("home", {
+        crossedGoalLine: true,
+        insidePosts: true,
+        underBar,
+        crossX,
+        crossZ,
+      });
       // 门框外出底线：防守方(away)最后碰 = 角球给进攻方(home)；进攻方(home)碰 = 门球给 away
       if (kickTeam === "away") return this._restart("corner", "home", b.x < 50 ? 2 : 98, 4);
       return this._restart("goalkick", "away", 50, 12);
@@ -4301,7 +5436,13 @@ export class SimEngine {
         crossX > SIM.GOAL_X0 &&
         crossX < SIM.GOAL_X1 &&
         underBar
-      ) return this._goal("away");
+      ) return this._goal("away", {
+        crossedGoalLine: true,
+        insidePosts: true,
+        underBar,
+        crossX,
+        crossZ,
+      });
       // 防守方(home)最后碰 = 角球给进攻方(away)；进攻方(away)碰 = 门球给 home
       if (kickTeam === "home") return this._restart("corner", "away", b.x < 50 ? 2 : 98, 96);
       return this._restart("goalkick", "home", 50, 88);
@@ -4316,10 +5457,10 @@ export class SimEngine {
   }
 
   /**
-   * 死球重启：角球 / 门球 / 界外球。
+   * 死球重启：角球 / 门球 / 界外球 / 直接或间接任意球。
    * 把球放到重启点、交给 restartTeam 最近球员，并重置双方站位到合理形态，
    * 给足死球保护窗口——保证球真正离开门口，杜绝篮板连射。
-   * @param {"corner"|"goalkick"|"throwin"|"offside"|"freekick"} type
+   * @param {"corner"|"goalkick"|"throwin"|"offside"|"freekick"|"indirect"} type
    */
   _restart(type, restartTeam, x, y) {
     this.pendingPenalty = null;
@@ -4341,6 +5482,9 @@ export class SimEngine {
     b.offsideExemptRestart =
       type === "corner" || type === "throwin" || type === "goalkick";
     b.restartType = type;
+    b.backpassCandidate = false;
+    b.backpassFrom = null;
+    b.backpassTargetId = null;
 
     const dir = this.attackDir(restartTeam); // 重启方进攻方向
     // 角球攻的球门：主队攻 y≈0，客队攻 y≈100
@@ -4682,7 +5826,12 @@ export class SimEngine {
       this.t + (type === "corner" ? 1.8 : fkSetPiece ? 2.0 : 1.0);
     // 人墙任意球复用角球的短窗保形：开球前全员钉在摆位点，不被跑位逻辑拆散
     if (fkSetPiece) this.cornerShapeUntil = this.t + 2.6;
-    this._emit(type, taker, { x, y, setPiece: type });
+    this._emit(type, taker, {
+      x,
+      y,
+      setPiece: type,
+      indirect: type === EDGE_RESTART_TYPES.INDIRECT_FREE_KICK,
+    });
   }
 
   /**
@@ -4691,11 +5840,31 @@ export class SimEngine {
    * 乌龙：lastKicker 属于失球方（封堵折射/自摆乌龙）时标 ownGoal；
    * agentId 仍是最后触球者，team 永远是得分方（与门线归属一致）。
    */
-  _goal(scoringTeam) {
+  _goal(scoringTeam, goalEvidence = null) {
     const b = this.ball;
-    this.score[scoringTeam]++;
     const scorer = b.lastKicker ? this.agentById(b.lastKicker) : null;
     const isPenalty = !!b._penaltyGoal;
+    const review = this._emitVarReview({
+      incident: VAR_INCIDENTS.GOAL,
+      onFieldDecision: "goal",
+      team: scoringTeam,
+      agent: scorer,
+      evidence: {
+        crossedGoalLine: goalEvidence?.crossedGoalLine ?? true,
+        insidePosts: goalEvidence?.insidePosts ?? true,
+        underBar: goalEvidence?.underBar ?? true,
+        offside: goalEvidence?.offside ?? false,
+        crossX: goalEvidence?.crossX ?? b.x,
+        crossZ: goalEvidence?.crossZ ?? b.z,
+        penalty: isPenalty,
+      },
+    });
+    if (review.finalDecision === "no-goal") {
+      b._penaltyGoal = false;
+      this._restart("goalkick", scoringTeam === "home" ? "away" : "home", 50, scoringTeam === "home" ? 12 : 88);
+      return;
+    }
+    this.score[scoringTeam]++;
     b._penaltyGoal = false;
     // 最后触球方 ≠ 得分方 → 乌龙/折射入网；点球不可能乌龙
     const ownGoal = !isPenalty && !!scorer && scorer.team && scorer.team !== scoringTeam;
@@ -4905,6 +6074,9 @@ export class SimEngine {
     this._clearBallTarget();
     this.ball.offsideExemptRestart = false;
     this.ball.restartType = null;
+    this.ball.backpassCandidate = false;
+    this.ball.backpassFrom = null;
+    this.ball.backpassTargetId = null;
     // 把中圈球员拉来开球
     const near = this._nearestOf(team, 50, 50);
     if (near) {
@@ -5080,9 +6252,45 @@ export class SimEngine {
   // 快照：供 matchview 渲染 / 适配层记账
   // ——————————————————————————————————————————————
   snapshot() {
+    const defensiveCoordination = Object.fromEntries(
+      ["home", "away"].map((team) => {
+        const plan = this._defPlans[team];
+        const jobs = {};
+        for (const job of plan?.jobs?.values?.() || []) {
+          jobs[job.type] = (jobs[job.type] || 0) + 1;
+        }
+        return [team, {
+          trigger: plan?.trigger?.kind || PRESS_TRIGGER_KINDS.CONTAIN,
+          activePress: !!plan?.trigger?.active,
+          ballSide: plan?.ballSide || 0,
+          handoffs: plan?.handoffs || 0,
+          jobs,
+        }];
+      })
+    );
     return {
       t: this.t,
-      ball: { x: this.ball.x, y: this.ball.y, z: this.ball.z, owner: this.ball.owner },
+      ball: {
+        x: this.ball.x,
+        y: this.ball.y,
+        z: this.ball.z,
+        owner: this.ball.owner,
+        state: this.ball.state || "loose",
+        restartType: this.ball.restartType || null,
+        controlUntil: this.ball.controlUntil || 0,
+      },
+      edgeRules: {
+        advantage: this._advantage
+          ? {
+              team: this._advantage.team,
+              reason: this._advantage.reason,
+              until: this._advantage.until,
+            }
+          : null,
+        lastVarReview: this._lastVarReview ? { ...this._lastVarReview } : null,
+      },
+      teamPhases: { ...this.teamPhases },
+      defensiveCoordination,
       players: this.agents.map((a) => ({
         id: a.id,
         team: a.team,
@@ -5095,7 +6303,12 @@ export class SimEngine {
         vx: a.vx,
         vy: a.vy,
         heading: a.heading,
+        bodyTargetHeading: a.bodyTargetHeading,
+        controlFoot: a.controlFoot,
+        controlPhase: a.controlPhase,
         fsm: a.fsm,
+        shapePhase: a.shapePhase,
+        defensiveJob: this._defPlans[a.team]?.jobs?.get(a.id)?.type || null,
         hasBall: this.ball.owner === a.id,
       })),
     };

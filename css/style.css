@@ -1145,6 +1145,30 @@ html[data-theme="light"] .pitch {
 .tac-summary strong {
   color: var(--text);
 }
+.tac-shape-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0.1rem 0 0.2rem;
+}
+.tac-shape-fact {
+  min-width: 0;
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.48rem 0.52rem;
+  border-left: 3px solid var(--border);
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+}
+.tac-shape-fact[data-shape-phase="in-possession"] { border-left-color: var(--good); }
+.tac-shape-fact[data-shape-phase="out-of-possession"] { border-left-color: var(--primary); }
+.tac-shape-fact[data-shape-phase="transition"] { border-left-color: var(--warn); }
+.tac-shape-fact strong { font-size: 0.72rem; }
+.tac-shape-fact span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .tactics-workspace {
   grid-template-columns: minmax(27rem, 1.15fr) minmax(20rem, 0.85fr);
   align-items: start;
@@ -1247,6 +1271,7 @@ html[data-theme="light"] .pitch {
 @media (max-width: 560px) {
   .pitch { max-width: 360px; }
   .player-dot { width: 72px; }
+  .tac-shape-grid { grid-template-columns: 1fr; }
   .tac-role-list { grid-template-columns: 1fr; }
   .tac-role-badge { max-width: 70px; font-size: 0.54rem; }
 }
@@ -1972,6 +1997,32 @@ html[data-theme="light"] .fmm-match-bar {
   min-width: 1.7rem;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
+}
+.fmm-match-bar .match-camera-bar {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.1);
+}
+.fmm-match-bar .match-camera-bar .btn {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  min-width: 2.8rem;
+  padding: 0.26rem 0.42rem;
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.fmm-match-bar .match-camera-bar .btn.active {
+  color: #f8fafc;
+  background: #166534;
+  box-shadow: inset 0 0 0 1px rgba(134, 239, 172, 0.28);
 }
 
 /* 开赛后：模拟模式按钮已无意义，只留「赛后继续」，把底栏压到两行内 */
@@ -2910,12 +2961,10 @@ html[data-theme="dark"] .mp-fmm-dock {
   bottom: 6px;
   left: 6px;
 }
-/* 控球半场高亮默认更淡，减少脏感 */
-.fmm-match .mp-poss-half {
-  opacity: 0.22 !important;
-}
+/* Ball, carrier and live movement carry the hierarchy; remove duplicate direction washes. */
+.fmm-match .mp-poss-half,
 .fmm-match .mp-attack-arrow {
-  opacity: 0.35 !important;
+  display: none !important;
 }
 /* 角球状态：角旗微亮 + 禁区呼吸，让「角球」一眼可认 */
 .mp-field.mp-corner-active::before {
@@ -4103,9 +4152,9 @@ html[data-theme="light"] .mp-name {
   font-size: 0.62rem;
   padding: 0.12rem 0.32rem;
 }
-/* 镜头更稳：接近 FMM 全场观感 */
+/* JS already uses time-based interpolation; a second CSS transition adds camera lag. */
 .fmm-match .mp-camera {
-  transition: transform 0.35s ease-out;
+  transition: none;
 }
 
 @media (max-width: 520px) {
@@ -4128,6 +4177,15 @@ html[data-theme="light"] .mp-name {
     font-size: 0.68rem;
     padding: 0.24rem 0.26rem;
     min-width: 1.5rem;
+  }
+  .match-transport { flex-wrap: wrap; }
+  .fmm-match-bar .match-camera-bar {
+    flex: 1 0 100%;
+    justify-content: stretch;
+    order: 3;
+  }
+  .fmm-match-bar .match-camera-bar .btn {
+    flex: 1 1 0;
   }
   .fmm-match-bar .btn.icon-btn {
     width: 1.9rem;
