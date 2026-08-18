@@ -15,6 +15,7 @@
 import { FORMATIONS, playerDisplaySurname } from "./data.js";
 import { MatchViewFSM } from "./matchview-fsm.js";
 import { interpolateSimBall, simMinuteOf } from "./match-presentation.js";
+import { MotionIntegrityMonitor } from "./match-motion-integrity.js";
 import {
   cameraFraming,
   crowdAtmosphere,
@@ -227,6 +228,9 @@ export class MatchView {
     this._crowdReaction = { value: 0, until: 0 };
     this._crowdLastUpdate = 0;
     this._broadcastScore = { home: 0, away: 0 };
+    this.motionMonitor = new MotionIntegrityMonitor({ windowSeconds: 12 });
+    this.onMotionStatus = null;
+    this._motionStatusKey = "0:0";
     /** 事件闪卡 DOM */
     this.flashCardEl = null;
     this._flashCardToken = 0;
@@ -417,6 +421,7 @@ export class MatchView {
     const inFlight =
       ballState === "shot" ||
       ballState === "pass" ||
+      ballState === "control" ||
       ballState === "loose" ||
       ballState === "dead";
     const ownerId = !inFlight ? sim.ball?.owner || null : null;
@@ -475,6 +480,7 @@ export class MatchView {
     this._simBallTrailPhase = trailPhase;
     this._pushBallTrail();
     this._applyBall();
+    this._recordMotionDiagnostic(sim);
     // 直播用 soft follow（见 update）；非时间轴时默认 follow
     if (!this._simPlay && this.simDrive) this.camMode = this.camMode === "box" ? "box" : "follow";
     return true;
@@ -503,19 +509,33 @@ export class MatchView {
         num: a.num,
         x: a.x + (b.x - a.x) * t,
         y: a.y + (b.y - a.y) * t,
+        vx: (a.vx || 0) + ((b.vx || 0) - (a.vx || 0)) * t,
+        vy: (a.vy || 0) + ((b.vy || 0) - (a.vy || 0)) * t,
         heading: h + dh * t,
+        fsm: t < 0.5 ? a.fsm || null : b.fsm || null,
+        defensiveJob: t < 0.5 ? a.defensiveJob || null : b.defensiveJob || null,
+        sentOff: !!(t < 0.5 ? a.sentOff : b.sentOff),
+        separationContact: !!(t < 0.5 ? a.separationContact : b.separationContact),
         pose: b.pose || a.pose || null,
         poseDir: b.poseDir ?? a.poseDir ?? 0,
         hasBall: false, // 下面按 ball.owner 统一赋值
       };
     });
     const ball = interpolateSimBall(fa.ball, fb.ball, t);
+    ball.restartType = t < 0.5
+      ? fa.ball?.restartType || null
+      : fb.ball?.restartType || null;
     if (ball.owner) {
       for (const p of players) p.hasBall = p.id === ball.owner;
     }
     // 插值本身已是 60fps 平滑，不再二次 soft（双重平滑会发糊/发飘）
     return this.applySimSnapshot(
-      { t: (fa.t ?? 0) + ((fb.t ?? 0) - (fa.t ?? 0)) * t, ball, players },
+      {
+        t: (fa.t ?? 0) + ((fb.t ?? 0) - (fa.t ?? 0)) * t,
+        ball,
+        players,
+        motionContext: t < 0.5 ? fa.motionContext || null : fb.motionContext || null,
+      },
       { soft: false }
     );
   }
@@ -1003,12 +1023,19 @@ export class MatchView {
   /**
    * @param {object} home
    * @param {object} away
-   * @param {{ onPlayerClick?: (playerId, team) => void, cameraPreset?: string, broadcastContext?: object }} [opts]
+   * @param {{ onPlayerClick?: (playerId, team) => void, onMotionStatus?: (status: object) => void, cameraPreset?: string, broadcastContext?: object }} [opts]
    */
   mount(home, away, opts = {}) {
     this.home = home;
     this.away = away;
     if (opts.onPlayerClick) this.onPlayerClick = opts.onPlayerClick;
+    if (opts.onMotionStatus) this.onMotionStatus = opts.onMotionStatus;
+    this.motionMonitor.reset({
+      home: { id: home?.id || null, name: home?.name || null, color: home?.color || null },
+      away: { id: away?.id || null, name: away?.name || null, color: away?.color || null },
+    });
+    this._motionStatusKey = "0:0";
+    this._notifyMotionStatus(true);
     this.setBroadcastContext(opts.broadcastContext || {});
     let storedCamera = opts.cameraPreset;
     if (!storedCamera) {
@@ -2440,6 +2467,65 @@ export class MatchView {
 
   setOnPlayerClick(fn) {
     this.onPlayerClick = fn;
+  }
+
+  setOnMotionStatus(fn) {
+    this.onMotionStatus = typeof fn === "function" ? fn : null;
+    this._notifyMotionStatus(true);
+  }
+
+  getMotionDiagnosticStatus() {
+    return this.motionMonitor.status();
+  }
+
+  createMotionClip(options = {}) {
+    return this.motionMonitor.captureClip(options);
+  }
+
+  _notifyMotionStatus(force = false) {
+    const status = this.motionMonitor.status();
+    const key = `${status.frames}:${status.incidents}`;
+    if (!force && key === this._motionStatusKey) return;
+    this._motionStatusKey = key;
+    try {
+      this.onMotionStatus?.(status);
+    } catch (error) {
+      console.warn("motion status", error);
+    }
+  }
+
+  _recordMotionDiagnostic(engineFrame) {
+    if (!engineFrame?.players?.length || !engineFrame.ball) return;
+    const displayFrame = {
+      t: engineFrame.t,
+      ball: {
+        x: this.ball.x,
+        y: this.ball.y,
+        z: this.ball.z || 0,
+        owner: this.carrier?.id || null,
+        state: this.ballState === "flight" ? "pass" : this.ballState,
+        restartType: engineFrame.ball.restartType || null,
+      },
+      players: this.players.map((player) => ({
+        id: player.id,
+        team: player.team,
+        role: player.pos,
+        num: player.num,
+        x: player.x,
+        y: player.y,
+        vx: player.vx,
+        vy: player.vy,
+        heading: player.heading,
+        sentOff: player.el.classList.contains("sent-off"),
+      })),
+      motionContext: engineFrame.motionContext || null,
+    };
+    this.motionMonitor.record(engineFrame, displayFrame, {
+      cameraPreset: this.cameraPreset,
+      replay: !!(this._fmmReplay?.active || this._simPlay?.label === "replay"),
+      label: this._simPlay?.label || null,
+    });
+    this._notifyMotionStatus();
   }
 
   _spawnTeam(actors, club, isHome, color, numColor) {

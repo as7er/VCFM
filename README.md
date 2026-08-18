@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v228** · 阶段阵型证据链 |
+| 当前版本 | **v229** · 2D 比赛运动完整性 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `IndexedDB` 耐久存储，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -25,14 +25,15 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 仓库：https://github.com/as7er/vcfm
 
-### v228 更新亮点
+### v229 更新亮点
 
-- 空间引擎以 1 秒分辨率累计双方持球、无球和两类转换阶段的真实用时、实际阵型及球员平均站位，不增加随机调用或结果修正。
-- 战报持久化赛前、中场及 60/75 分钟阶段阵型方案、来源、比分与公开触发原因；后台 Worker 继续传递相同时间线，并省略不会展示的球员位置明细。
-- 赛后战术分析新增“阵型”页，比较双方阶段用时、真实平均位置与调整时间线；旧战报没有证据时保持兼容。
-- 新增完整赛季方案扫描和同种子配对审计，覆盖确定性、移动幅度、比赛数据影响、Worker 传输及后台积分预算。
+- 直播画面持续检查非法坐标、球员或球的瞬移、无缘由急停反向、持续重叠、持球脱节及引擎/渲染坐标偏差，并保留最近 12 秒的双轨运动片段。
+- 比赛底栏新增“保存运动片段”入口；诊断界面可逐帧比较引擎坐标与实际渲染坐标、跳转自动标记并导出可复现 JSON，不修改比赛随机流或结果。
+- 门将接高速度来球改为连续减速收球，渲染层在第一脚控制完成前不再提前吸球；扑救不再叠加隐藏坐标侧移，球员碰撞纠正按时间步连续释放。
+- 固定种子完整比赛门禁覆盖 2 场标准直播档与 6 场后台档：标准档零严重异常、零警告，后台档零严重异常，仅保留 4 次粗步长快速反向警告。
+- 24 场真实性样本中，标准档 3.21 球/场、81.1% 传球成功率，后台档 2.92 球/场、81.0% 传球成功率，两档均零停滞。
 
-前序版本（v199–v227）已覆盖球员属性原型、习惯与角色、发展队、长期阵容规划、AI 主教练生态、后台空间 Worker、耐久存档、比赛规则、连续触球、集体防守、球队阶段形态、转播和 AI 双阶段阵型。完整条目见 [CHANGELOG.md](./CHANGELOG.md) 与 [AGENTS.md](./AGENTS.md)。
+前序版本（v199–v228）已覆盖球员属性原型、习惯与角色、发展队、长期阵容规划、AI 主教练生态、后台空间 Worker、耐久存档、比赛规则、连续触球、集体防守、球队阶段形态、转播和阶段阵型证据链。完整条目见 [CHANGELOG.md](./CHANGELOG.md) 与 [AGENTS.md](./AGENTS.md)。
 
 ### 快速开始
 
@@ -154,7 +155,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v228** · Phase-shape evidence |
+| Current version | **v229** · 2D match motion integrity |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Durable browser `IndexedDB`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -163,14 +164,15 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 Repository: https://github.com/as7er/vcfm
 
-### What's new in v228
+### What's new in v229
 
-- The spatial engine now samples both teams once per second, accumulating actual time in possession, out of possession, and both transitions together with the formation used and each player's average position. It adds no random calls or result modifier.
-- Match reports persist the pre-match, half-time, and 60/75-minute shape decisions, their source, score context, and public reason. Background workers retain the same timeline while omitting player-position detail they do not display.
-- Post-match tactical analysis adds a Shapes view comparing phase usage, real average positions, and the decision timeline for both teams, while old reports remain compatible.
-- A full-season planner scan and same-seed paired audit now cover determinism, movement, match-data impact, worker transfer, and the background integration budget.
+- Live matches now check invalid coordinates, player and ball teleports, unexplained rapid reversals, persistent overlaps, owner/ball separation, and engine/render divergence while retaining the latest 12 seconds of dual-track motion frames.
+- A new match-toolbar action saves the current motion clip. Its diagnostic view compares engine and rendered coordinates frame by frame, jumps to automatic markers, and exports deterministic JSON without consuming randomness or changing results.
+- Goalkeepers now decelerate incoming balls through a continuous catch phase, the renderer no longer attaches a ball before first-touch control completes, saves no longer add a hidden position jump, and collision corrections are released over consecutive frames.
+- Seeded full-match gates cover two standard live-profile matches and six background matches: the standard profile has zero severe incidents and zero warnings; the background profile has zero severe incidents and four coarse-step reversal warnings.
+- Across 24-match realism samples, the standard profile averages 3.21 goals with 81.1% pass completion, while the background profile averages 2.92 goals with 81.0% pass completion; neither profile stalls.
 
-Earlier releases (v199–v227) cover player attribute archetypes, habits and roles, development football, long-term squad planning, the AI head-coach ecosystem, background spatial workers, durable saves, edge rules, continuous control, collective defending, team phases, broadcast presentation, and AI dual shapes. See [CHANGELOG.md](./CHANGELOG.md) and [AGENTS.md](./AGENTS.md).
+Earlier releases (v199–v228) cover player attribute archetypes, habits and roles, development football, long-term squad planning, the AI head-coach ecosystem, background spatial workers, durable saves, edge rules, continuous control, collective defending, team phases, broadcast presentation, and phase-shape evidence. See [CHANGELOG.md](./CHANGELOG.md) and [AGENTS.md](./AGENTS.md).
 
 ### Quick start
 

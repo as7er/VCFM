@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v228";
+const CACHE = "vcfm-v229";
 const ASSETS = [
   "./",
   "./index.html",
@@ -30,6 +30,7 @@ const ASSETS = [
   "./js/club-debt.js",
   "./js/injuries.js",
   "./js/matchview.js",
+  "./js/match-motion-integrity.js",
   // matchview 静态子模块（漏登记会导致离线直播层加载失败）
   "./js/matchview-fsm.js",
   "./js/matchview-coords.js",

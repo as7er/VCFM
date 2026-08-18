@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=228";
-import { clubCrestHtml } from "./club-crest.js?v=228";
+import { nationFlagHtml } from "./flags.js?v=229";
+import { clubCrestHtml } from "./club-crest.js?v=229";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -316,7 +316,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=228";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=229";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -383,7 +383,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=228";
+} from "./avatar.js?v=229";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
@@ -476,7 +476,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=228").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=229").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -869,6 +869,261 @@ const screens = {
 function showScreen(name) {
   Object.values(screens).forEach((el) => el.classList.remove("active"));
   screens[name].classList.add("active");
+}
+
+const motionReviewState = {
+  clip: null,
+  index: 0,
+  timer: 0,
+  resumePlayback: false,
+  returnFocus: null,
+};
+
+function safeMotionColor(value, fallback) {
+  return /^#[0-9a-f]{3,8}$/i.test(String(value || "")) ? value : fallback;
+}
+
+function motionIncidentLabel(type, en = getLang() === "en") {
+  const labels = en
+    ? {
+        "invalid-coordinate": "Invalid coordinate",
+        "player-teleport": "Player displacement",
+        "player-acceleration": "Acceleration spike",
+        "player-oscillation": "Direction oscillation",
+        "player-overlap": "Persistent overlap",
+        "owner-ball-gap": "Owner/ball separation",
+        "ball-teleport": "Ball displacement",
+        "display-divergence": "Engine/display divergence",
+      }
+    : {
+        "invalid-coordinate": "坐标越界",
+        "player-teleport": "球员异常位移",
+        "player-acceleration": "加速度突变",
+        "player-oscillation": "方向反复切换",
+        "player-overlap": "持续重叠",
+        "owner-ball-gap": "持球人与球分离",
+        "ball-teleport": "球异常位移",
+        "display-divergence": "引擎与画面偏离",
+      };
+  return labels[type] || type || (en ? "Motion incident" : "运动异常");
+}
+
+function motionIncidentValue(incident, en = getLang() === "en") {
+  if (Number.isFinite(Number(incident.speedMps))) return `${Number(incident.speedMps).toFixed(1)} m/s`;
+  if (Number.isFinite(Number(incident.accelerationMps2))) return `${Number(incident.accelerationMps2).toFixed(1)} m/s²`;
+  if (Number.isFinite(Number(incident.gapMetres))) return `${Number(incident.gapMetres).toFixed(2)} m`;
+  if (Number.isFinite(Number(incident.distanceMetres))) return `${Number(incident.distanceMetres).toFixed(2)} m`;
+  if (Number.isFinite(Number(incident.turns))) return en ? `${incident.turns} turns` : `${incident.turns} 次转向`;
+  return incident.entityId || "";
+}
+
+function motionPitchSvg(frame, metadata = {}) {
+  const homeColor = safeMotionColor(metadata.home?.color, "#22c55e");
+  const awayColor = safeMotionColor(metadata.away?.color, "#ef4444");
+  const players = (frame?.players || []).map((player) => {
+    const x = Math.max(1, Math.min(99, Number(player.x) || 0));
+    const y = Math.max(1, Math.min(99, Number(player.y) || 0));
+    const color = player.team === "home" ? homeColor : awayColor;
+    const number = Number.isFinite(Number(player.num)) ? String(player.num) : "";
+    const opacity = player.sentOff ? 0.28 : 1;
+    return `<g opacity="${opacity}"><circle cx="${x}" cy="${y}" r="2.45" fill="${color}" stroke="#f8fafc" stroke-width="0.55"/><text x="${x}" y="${y + 0.78}" text-anchor="middle" fill="#fff" font-size="2.15" font-weight="800">${escapeHtml(number)}</text></g>`;
+  }).join("");
+  const ballX = Math.max(0.7, Math.min(99.3, Number(frame?.ball?.x) || 0));
+  const ballY = Math.max(0.7, Math.min(99.3, Number(frame?.ball?.y) || 0));
+  const ball = `<circle cx="${ballX}" cy="${ballY}" r="1.15" fill="#fff" stroke="#111827" stroke-width="0.65"/>`;
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+    <rect x="1" y="1" width="98" height="98" fill="#17633a" stroke="rgba(255,255,255,.82)" stroke-width=".55"/>
+    <line x1="1" y1="50" x2="99" y2="50" stroke="rgba(255,255,255,.72)" stroke-width=".45"/>
+    <circle cx="50" cy="50" r="9.15" fill="none" stroke="rgba(255,255,255,.72)" stroke-width=".45"/>
+    <rect x="20" y="1" width="60" height="16" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
+    <rect x="35" y="1" width="30" height="6" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
+    <rect x="20" y="83" width="60" height="16" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
+    <rect x="35" y="93" width="30" height="6" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
+    ${players}${ball}
+  </svg>`;
+}
+
+function stopMotionReviewPlayback() {
+  if (motionReviewState.timer) window.clearInterval(motionReviewState.timer);
+  motionReviewState.timer = 0;
+  const button = $("#btn-motion-review-play");
+  if (button) {
+    button.innerHTML = '<span aria-hidden="true">▶</span>';
+    button.title = getLang() === "en" ? "Play" : "播放";
+    button.setAttribute("aria-label", button.title);
+  }
+}
+
+function renderMotionReviewFrame(index = motionReviewState.index) {
+  const clip = motionReviewState.clip;
+  if (!clip?.frames?.length) return;
+  const frameIndex = Math.max(0, Math.min(clip.frames.length - 1, Number(index) || 0));
+  motionReviewState.index = frameIndex;
+  const frame = clip.frames[frameIndex];
+  const enginePitch = $("#match-motion-engine-pitch");
+  const displayPitch = $("#match-motion-display-pitch");
+  if (enginePitch) enginePitch.innerHTML = motionPitchSvg(frame.engine, clip.metadata);
+  if (displayPitch) displayPitch.innerHTML = motionPitchSvg(frame.display, clip.metadata);
+  const range = $("#match-motion-review-range");
+  if (range) {
+    range.max = String(Math.max(0, clip.frames.length - 1));
+    range.value = String(frameIndex);
+  }
+  const time = $("#match-motion-review-time");
+  if (time) time.textContent = `${Number(frame.t || 0).toFixed(2)}s`;
+  const count = $("#match-motion-review-frame");
+  if (count) count.textContent = `${frameIndex + 1} / ${clip.frames.length}`;
+
+  const incidentsRoot = $("#match-motion-review-incidents");
+  if (incidentsRoot) {
+    const incidents = clip.incidents || [];
+    const en = getLang() === "en";
+    incidentsRoot.innerHTML = incidents.length
+      ? incidents.map((incident) => {
+          const nearest = clip.frames.reduce((best, candidate, candidateIndex) =>
+            Math.abs(Number(candidate.t) - Number(incident.t)) < best.distance
+              ? { index: candidateIndex, distance: Math.abs(Number(candidate.t) - Number(incident.t)) }
+              : best,
+          { index: 0, distance: Infinity });
+          const active = nearest.index === frameIndex;
+          return `<button type="button" class="motion-review-incident${active ? " active" : ""}" data-motion-frame="${nearest.index}" data-severity="${escapeHtml(incident.severity || "warning")}">
+            <time>${Number(incident.t || 0).toFixed(2)}s</time>
+            <strong>${escapeHtml(motionIncidentLabel(incident.type, en))}</strong>
+            <span>${escapeHtml(motionIncidentValue(incident, en))}</span>
+          </button>`;
+        }).join("")
+      : `<div class="motion-review-empty">${en ? "No automatic incident in this clip" : "该片段没有自动异常标记"}</div>`;
+  }
+}
+
+function toggleMotionReviewPlayback() {
+  const clip = motionReviewState.clip;
+  if (!clip?.frames?.length) return;
+  if (motionReviewState.timer) {
+    stopMotionReviewPlayback();
+    return;
+  }
+  const button = $("#btn-motion-review-play");
+  if (button) {
+    button.innerHTML = '<span aria-hidden="true">⏸</span>';
+    button.title = getLang() === "en" ? "Pause" : "暂停";
+    button.setAttribute("aria-label", button.title);
+  }
+  if (motionReviewState.index >= clip.frames.length - 1) motionReviewState.index = 0;
+  motionReviewState.timer = window.setInterval(() => {
+    if (motionReviewState.index >= clip.frames.length - 1) {
+      stopMotionReviewPlayback();
+      return;
+    }
+    renderMotionReviewFrame(motionReviewState.index + 1);
+  }, 80);
+}
+
+function motionClipFileName(clip) {
+  const fixture = String(clip?.metadata?.fixtureId || "match").replace(/[^a-z0-9_-]+/gi, "-");
+  const at = Number(clip?.range?.to);
+  return `vcfm-motion-${fixture}-${Number.isFinite(at) ? at.toFixed(1) : "clip"}.json`;
+}
+
+function downloadMotionClip(clip) {
+  if (!clip?.frames?.length) return false;
+  const blob = new Blob([JSON.stringify(clip, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = motionClipFileName(clip);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
+}
+
+export function showMotionDiagnostic(clip, options = {}) {
+  if (!clip?.frames?.length) return false;
+  stopMotionReviewPlayback();
+  motionReviewState.clip = clip;
+  motionReviewState.index = Math.max(0, clip.frames.length - 1);
+  motionReviewState.returnFocus = document.activeElement;
+  motionReviewState.resumePlayback = !!(matchPlayback.controlsEnabled && !matchPlayback.paused);
+  if (motionReviewState.resumePlayback) {
+    matchPlayback.paused = true;
+    matchView?.setFrozen?.(true);
+    updateMatchPlaybackUI();
+  }
+  const en = getLang() === "en";
+  const root = $("#match-motion-review");
+  root?.classList.remove("hidden");
+  const title = $("#match-motion-review-title");
+  if (title) title.textContent = en ? "Motion clip diagnostics" : "运动片段诊断";
+  const meta = $("#match-motion-review-meta");
+  if (meta) {
+    const home = clip.metadata?.home?.name || clip.metadata?.home?.id || (en ? "Home" : "主队");
+    const away = clip.metadata?.away?.name || clip.metadata?.away?.id || (en ? "Away" : "客队");
+    meta.textContent = `${home} - ${away} · seed ${clip.metadata?.matchSeed ?? "—"}`;
+  }
+  const engineLabel = $("#motion-engine-label");
+  const displayLabel = $("#motion-display-label");
+  if (engineLabel) engineLabel.textContent = en ? "Engine coordinates" : "引擎坐标";
+  if (displayLabel) displayLabel.textContent = en ? "Rendered coordinates" : "画面坐标";
+  const summary = $("#match-motion-review-summary");
+  if (summary) {
+    summary.innerHTML = en
+      ? `<span><strong>${clip.frames.length}</strong> frames</span><span><strong>${Number(clip.range?.durationSeconds || 0).toFixed(2)}s</strong></span><span><strong>${clip.incidents?.length || 0}</strong> incidents</span>`
+      : `<span><strong>${clip.frames.length}</strong> 帧</span><span><strong>${Number(clip.range?.durationSeconds || 0).toFixed(2)} 秒</strong></span><span><strong>${clip.incidents?.length || 0}</strong> 个自动标记</span>`;
+  }
+  renderMotionReviewFrame(motionReviewState.index);
+  $("#btn-motion-review-close")?.focus();
+  if (options.download) downloadMotionClip(clip);
+  return true;
+}
+
+export function closeMotionDiagnostic() {
+  const root = $("#match-motion-review");
+  if (!root || root.classList.contains("hidden")) return;
+  stopMotionReviewPlayback();
+  root.classList.add("hidden");
+  if (motionReviewState.resumePlayback) {
+    matchPlayback.paused = false;
+    matchView?.setFrozen?.(false);
+    updateMatchPlaybackUI();
+  }
+  motionReviewState.resumePlayback = false;
+  motionReviewState.returnFocus?.focus?.();
+}
+
+function updateMotionCaptureUI(status = null) {
+  const button = $("#btn-match-motion-capture");
+  if (!button) return;
+  const frames = Number(status?.frames) || 0;
+  const incidents = Number(status?.incidents) || 0;
+  const base = t("match.motionCaptureHint");
+  const detail = incidents
+    ? getLang() === "en" ? ` · ${incidents} marked` : ` · ${incidents} 个标记`
+    : "";
+  button.disabled = frames < 2;
+  button.dataset.motionIncidents = String(Math.min(99, incidents));
+  button.title = `${base}${detail}`;
+  button.setAttribute("aria-label", button.title);
+}
+
+function captureCurrentMotionClip() {
+  const clip = matchView?.createMotionClip?.({
+    reason: "manual",
+    metadata: {
+      fixtureId: pendingMatch?.id || null,
+      matchSeed: matchState?.matchSeed ?? pendingMatch?.matchSeed ?? null,
+      minute: displayedMatchMinute,
+      score: `${matchState?.hg ?? pendingMatch?.homeGoals ?? 0}-${matchState?.ag ?? pendingMatch?.awayGoals ?? 0}`,
+      cameraPreset: matchCamera,
+    },
+  });
+  if (!clip?.frames?.length || clip.frames.length < 2) {
+    toast(getLang() === "en" ? "No motion frames to save yet" : "当前还没有可保存的比赛帧");
+    return;
+  }
+  showMotionDiagnostic(clip, { download: true });
+  toast(getLang() === "en" ? "Motion clip saved" : "比赛片段已保存");
 }
 
 // ---------- Start ----------
@@ -1501,6 +1756,35 @@ function bindMainOnce() {
   $("#btn-match-sfx")?.addEventListener("click", () => toggleMatchSfx());
   $("#btn-match-step")?.addEventListener("click", () => requestMatchStep());
   $("#btn-match-step-mode")?.addEventListener("click", () => toggleMatchStepMode());
+  $("#btn-match-motion-capture")?.addEventListener("click", () => captureCurrentMotionClip());
+  $("#btn-motion-review-close")?.addEventListener("click", () => closeMotionDiagnostic());
+  $("#btn-motion-review-play")?.addEventListener("click", () => toggleMotionReviewPlayback());
+  $("#btn-motion-review-prev")?.addEventListener("click", () => {
+    stopMotionReviewPlayback();
+    renderMotionReviewFrame(motionReviewState.index - 1);
+  });
+  $("#btn-motion-review-next")?.addEventListener("click", () => {
+    stopMotionReviewPlayback();
+    renderMotionReviewFrame(motionReviewState.index + 1);
+  });
+  $("#btn-motion-review-export")?.addEventListener("click", () => {
+    if (downloadMotionClip(motionReviewState.clip)) {
+      toast(getLang() === "en" ? "Motion clip saved" : "比赛片段已保存");
+    }
+  });
+  $("#match-motion-review-range")?.addEventListener("input", (event) => {
+    stopMotionReviewPlayback();
+    renderMotionReviewFrame(Number(event.currentTarget.value));
+  });
+  $("#match-motion-review-incidents")?.addEventListener("click", (event) => {
+    const incident = event.target.closest("[data-motion-frame]");
+    if (!incident) return;
+    stopMotionReviewPlayback();
+    renderMotionReviewFrame(Number(incident.dataset.motionFrame));
+  });
+  $("#match-motion-review")?.addEventListener("click", (event) => {
+    if (event.target.id === "match-motion-review") closeMotionDiagnostic();
+  });
   // FMM 顶栏「跳过」重播
   $("#btn-match-fmm-skip")?.addEventListener("click", () => {
     if (!matchView) return;
@@ -1848,6 +2132,38 @@ function bindMainOnce() {
     if (e.target.id === "modal") closeModal();
   };
   document.addEventListener("keydown", (e) => {
+    const motionReviewOpen = !$("#match-motion-review")?.classList.contains("hidden");
+    if (motionReviewOpen && e.key === "Escape") {
+      e.preventDefault();
+      closeMotionDiagnostic();
+      return;
+    }
+    if (motionReviewOpen && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      const tag = e.target?.tagName?.toLowerCase();
+      if (tag !== "input") {
+        e.preventDefault();
+        stopMotionReviewPlayback();
+        renderMotionReviewFrame(motionReviewState.index + (e.key === "ArrowLeft" ? -1 : 1));
+        return;
+      }
+    }
+    if (motionReviewOpen && e.key === "Tab") {
+      const focusable = [...$("#match-motion-review")?.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ) || []].filter((element) => element.offsetParent !== null);
+      if (focusable.length) {
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
     const modalOpen = !$("#modal")?.classList.contains("hidden");
     if (e.key === "Escape" && modalOpen) {
       e.preventDefault();
@@ -1899,6 +2215,7 @@ function bindMainOnce() {
   $("#btn-sim-instant").onclick = () => runMatch("instant");
   $("#btn-match-continue").onclick = () => {
     const wasReview = !!matchPlayback.reviewMode;
+    closeMotionDiagnostic();
     if (!wasReview) autosave("after-match");
     destroyLoadedMatchView();
     matchView = null;
@@ -1910,6 +2227,7 @@ function bindMainOnce() {
     pendingMatch = null;
     matchState = null;
     pendingSubs = [];
+    updateMotionCaptureUI(null);
     refreshAll();
     if (wasReview) {
       // 回到赛程页，方便连续回看
@@ -9624,6 +9942,7 @@ async function ensureMatchPitch(remount = false) {
     // 完整资料弹窗（暂停时最合适，进行中也可点）
     showPlayerModal(playerId);
   };
+  const onMotionStatus = (status) => updateMotionCaptureUI(status);
   const report = pendingMatch.matchReport || matchState?.report || null;
   const broadcastContext = {
     derby: !!(matchState?.derby ?? pendingMatch.derby),
@@ -9639,9 +9958,15 @@ async function ensureMatchPitch(remount = false) {
   };
   if (!matchView || remount || !matchView._built) {
     matchView = getMatchView(pitchRoot);
-    matchView.mount(home, away, { onPlayerClick, cameraPreset: matchCamera, broadcastContext });
+    matchView.mount(home, away, {
+      onPlayerClick,
+      onMotionStatus,
+      cameraPreset: matchCamera,
+      broadcastContext,
+    });
   } else {
     matchView.setOnPlayerClick(onPlayerClick);
+    matchView.setOnMotionStatus?.(onMotionStatus);
     matchView.setBroadcastContext?.(broadcastContext);
     matchView.setCameraPreset?.(matchCamera, { persist: false });
   }
@@ -9651,6 +9976,7 @@ async function ensureMatchPitch(remount = false) {
     awayGoals: matchState?.ag ?? pendingMatch.awayGoals ?? 0,
   });
   matchView?.refreshLayout?.();
+  updateMotionCaptureUI(matchView?.getMotionDiagnosticStatus?.());
 }
 
 function hideHtPanel() {
@@ -11471,6 +11797,14 @@ function toast(msg) {
   if (hint && screens.start.classList.contains("active")) {
     hint.textContent = msg;
   }
+}
+
+if (typeof window !== "undefined") {
+  window.vcfmMainApi = {
+    showMatchReport,
+    showMotionDiagnostic,
+    closeMotionDiagnostic,
+  };
 }
 
 // ---------- Boot ----------

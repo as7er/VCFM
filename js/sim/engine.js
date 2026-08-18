@@ -153,6 +153,27 @@ function pitchVelocityForMps(dx, dy, metresPerSecond) {
     vy: offset.y,
   };
 }
+function applyBoundedSeparationCorrection(agent, nextX, nextY, limitMetres, epoch) {
+  if (agent._separationStartEpoch !== epoch) {
+    agent._separationStartEpoch = epoch;
+    agent._separationStartX = agent.x;
+    agent._separationStartY = agent.y;
+  }
+  const startX = agent._separationStartX;
+  const startY = agent._separationStartY;
+  if (Number.isFinite(limitMetres)) {
+    const dx = nextX - startX;
+    const dy = nextY - startY;
+    const distanceMetres = pitchDistanceMetres(dx, dy);
+    if (distanceMetres > limitMetres) {
+      const scale = limitMetres / distanceMetres;
+      nextX = startX + dx * scale;
+      nextY = startY + dy * scale;
+    }
+  }
+  agent.x = nextX;
+  agent.y = nextY;
+}
 function applyFreeBallForces(ball, dt) {
   const airborne = (ball.z || 0) > 0 || (ball.vz || 0) > 0;
   if (airborne) {
@@ -1031,7 +1052,7 @@ export class SimEngine {
     b.vx = 0;
     b.vy = 0;
     b.vz = 0;
-    b.state = usesHands ? "held" : "control";
+    b.state = "control";
     this._clearBallTarget();
     b._saveChecked = false;
     a.controlFoot = plan.foot;
@@ -1042,10 +1063,22 @@ export class SimEngine {
     a.fsm = usesHands ? "home" : "receive";
     a.decisionUntil = this._nextControlDecision(a);
     if (usesHands) {
-      a.controlPhase = "settled";
-      a.controlUntil = this.t;
+      const catchDistance = pitchDistanceBetween(startX, startY, a.x, a.y);
+      const catchDuration = clamp(catchDistance / 26, 0.12, 0.26);
+      a.controlPhase = "first-touch";
+      a.controlUntil = this.t + catchDuration;
       a.protectUntil = this.t + protectSeconds;
-      b.settleUntil = this.t + settleSeconds;
+      b.settleUntil = Math.max(this.t + settleSeconds, a.controlUntil + 0.08);
+      b.controlOwnerId = a.id;
+      b.controlKind = kind;
+      b.controlStartAt = this.t;
+      b.controlUntil = a.controlUntil;
+      b.controlStartX = startX;
+      b.controlStartY = startY;
+      b.controlStartZ = startZ;
+      b.controlOffsetX = 0;
+      b.controlOffsetY = 0;
+      b.controlFoot = plan.foot;
       a.pose = "hold";
       a.poseUntil = this.t + 0.7;
     } else {
@@ -1387,6 +1420,7 @@ export class SimEngine {
 
   _stepOnce(dt) {
     this._activeStepDt = dt;
+    this._motionStepEpoch = (this._motionStepEpoch || 0) + 1;
     // 进球庆祝段：球钉在网里，队友聚拢，结束后再中圈开球
     if (this.celebrateUntil && this.t < this.celebrateUntil) {
       this._tickCelebrate(dt);
@@ -1465,7 +1499,7 @@ export class SimEngine {
     }
     // 2b) 近距离约束求解，避免禁区争抢时球员互相穿透或叠成一团。
     // 阵型分散的帧首轮即退出，只有真正的禁区混战才用满迭代预算。
-    this._separateAgents(this.separationPasses);
+    this._separateAgents(this.separationPasses, dt, this._motionStepEpoch);
     // 3-5) 无风险跑位仍使用粗步；只有未来一个粗步内会接触球员、门将或边界的
     // 球路才细分球物理与接管。全队决策/跑位不会重复计算。
     const physicsReason = this._ballPhysicsFineReason(dt);
@@ -2983,6 +3017,7 @@ export class SimEngine {
         ? opportunity.laneDistance
         : null,
       goalkeeperReach: opportunity.keeperReach,
+      targetX: aimX,
       targetZ,
       flightTime,
       ...(extraMeta || {}),
@@ -4210,10 +4245,16 @@ export class SimEngine {
    * 每人按自身机动权重分担修正量，门将权重极低因此几乎不被推离球门。
    * 根治「小禁区十余个圆点糊成一团」与前锋和门将占据同一坐标。
    */
-  _separateAgents(iterations = 1) {
+  _separateAgents(iterations = 1, dt = null, epoch = null) {
     const n = this.agents.length;
     const minD = 2.85;
     const maxPasses = Math.max(1, iterations);
+    const separationEpoch = Number.isFinite(epoch)
+      ? epoch
+      : (this._motionStepEpoch = (this._motionStepEpoch || 0) + 1);
+    const correctionLimitMetres = Number.isFinite(dt)
+      ? 3.2 * clamp(dt, SIM.DT, 0.5)
+      : Infinity;
     for (let pass = 0; pass < maxPasses; pass++) {
       let resolved = true;
       for (let i = 0; i < n; i++) {
@@ -4250,6 +4291,8 @@ export class SimEngine {
           const need = inBox ? 3.35 : minD;
           if (d >= need) continue;
           resolved = false;
+          a.separationContactEpoch = separationEpoch;
+          b.separationContactEpoch = separationEpoch;
           // 一次投影就补足整段重叠：留下残差会让多人堆叠始终收敛不到最小间距。
           const push = need - d;
           const ux = dx / d;
@@ -4261,10 +4304,20 @@ export class SimEngine {
           const den = aw + bw || 1;
           const aShare = aw / den;
           const bShare = bw / den;
-          a.x = clamp(a.x - ux * push * aShare, 2, 98);
-          a.y = clamp(a.y - uy * push * aShare, 2, 98);
-          b.x = clamp(b.x + ux * push * bShare, 2, 98);
-          b.y = clamp(b.y + uy * push * bShare, 2, 98);
+          applyBoundedSeparationCorrection(
+            a,
+            clamp(a.x - ux * push * aShare, 2, 98),
+            clamp(a.y - uy * push * aShare, 2, 98),
+            correctionLimitMetres,
+            separationEpoch
+          );
+          applyBoundedSeparationCorrection(
+            b,
+            clamp(b.x + ux * push * bShare, 2, 98),
+            clamp(b.y + uy * push * bShare, 2, 98),
+            correctionLimitMetres,
+            separationEpoch
+          );
 
           // 去掉相向速度的法向分量，防止下一步立刻再次穿回彼此身体。
           const closing = (b.vx - a.vx) * ux + (b.vy - a.vy) * uy;
@@ -4714,14 +4767,12 @@ export class SimEngine {
         pSave *= baseSaveCalibration * stepCorrection;
         pSave = clamp(pSave, 0.04, 0.93);
 
-        // 扑救姿态：短促侧扑（画面仍画成圆点+残影，勿拉成胶囊）
+        // 扑救姿态：门将已在本步按连续速度向预测落点移动；这里不再额外改写
+        // 坐标，否则一次结算会叠加一段不可见的瞬移。侧扑幅度由姿态动画表达。
         const diveDir = cx >= gk.x ? 1 : -1;
         gk.pose = "dive";
         gk.poseDir = diveDir;
         gk.poseUntil = this.t + 0.55;
-        // 身体朝球微移（不像瞬移）
-        gk.x = clamp(gk.x + (cx - gk.x) * 0.55, 36, 64);
-        gk.y = clamp(gk.y + (cy - gk.y) * 0.4, 2, 98);
         gk.heading = Math.atan2(cy - gk.y, cx - gk.x);
 
         if (this.random() < pSave) {
@@ -4730,8 +4781,8 @@ export class SimEngine {
           const hold = this.random() < holdP;
           if (hold) {
             b.owner = gk.id;
-            b.x = cx;
-            b.y = cy;
+            b.x = gk.x;
+            b.y = gk.y;
             b.vx = 0;
             b.vy = 0;
             b.z = 0;
@@ -6743,6 +6794,21 @@ export class SimEngine {
         restartType: this.ball.restartType || null,
         controlUntil: this.ball.controlUntil || 0,
       },
+      motionContext: {
+        discontinuity: !!(
+          (this.deadBallUntil && this.t <= this.deadBallUntil + 1e-6) ||
+          (this.celebrateUntil && this.t <= this.celebrateUntil + 1e-6) ||
+          this.pendingPenalty
+        ),
+        reason: this.pendingPenalty
+          ? "penalty"
+          : this.celebrateUntil && this.t <= this.celebrateUntil + 1e-6
+            ? "celebration"
+            : this.deadBallUntil && this.t <= this.deadBallUntil + 1e-6
+              ? "dead-ball"
+              : null,
+        restartType: this.ball.restartType || null,
+      },
       edgeRules: {
         advantage: this._advantage
           ? {
@@ -6774,6 +6840,8 @@ export class SimEngine {
         shapePhase: a.shapePhase,
         defensiveJob: this._defPlans[a.team]?.jobs?.get(a.id)?.type || null,
         hasBall: this.ball.owner === a.id,
+        sentOff: !!a.sentOff,
+        separationContact: a.separationContactEpoch === this._motionStepEpoch,
       })),
     };
   }

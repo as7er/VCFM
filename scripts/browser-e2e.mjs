@@ -48,7 +48,7 @@ async function assertCrestLoaded(locator, label) {
 
 async function assertStraightPassRendering(page) {
   const result = await page.evaluate(async () => {
-    const { MatchView } = await import("./js/matchview.js?v=216");
+    const { MatchView } = await import("./js/matchview.js?v=229");
     const positions = ["GK", "DEF", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT", "ATT"];
     const makeClub = (id, color) => {
       const players = positions.map((pos, index) => ({
@@ -109,7 +109,13 @@ async function assertStraightPassRendering(page) {
     const view = new MatchView(root);
     const home = makeClub("trail-home", "#2563eb");
     const away = makeClub("trail-away", "#dc2626");
-    view.mount(home, away);
+    const motionStatusUpdates = [];
+    view.mount(home, away, {
+      onMotionStatus: (status) => motionStatusUpdates.push({
+        frames: status.frames,
+        incidents: status.incidents,
+      }),
+    });
     view.stopLoop();
     view.setSimDrive(true);
     view.refreshLayout();
@@ -178,6 +184,12 @@ async function assertStraightPassRendering(page) {
     const receiveSamples = samples.filter((sample) => sample.frameIndex === 2);
     const flightTrail = view._ballTrail.slice();
     const recordedFinalCarrierId = view.carrier?.id || null;
+    const motionClip = view.createMotionClip({
+      reason: "browser-audit",
+      createdAt: "2026-08-18T00:00:00.000Z",
+      metadata: { fixtureId: "browser-motion", matchSeed: 229 },
+    });
+    const motionStatus = view.getMotionDiagnosticStatus();
     const context = view.canvas.getContext("2d");
     const pixels = context.getImageData(0, 0, view.canvas.width, view.canvas.height).data;
     let nonBlankPixels = 0;
@@ -320,6 +332,15 @@ async function assertStraightPassRendering(page) {
       scale: view.cam.tScale,
       classApplied: view.fieldEl.classList.contains("mp-camera-tactical"),
     };
+    const motionReviewOpened = window.vcfmMainApi?.showMotionDiagnostic(motionClip) || false;
+    const motionReview = {
+      visible: !document.querySelector("#match-motion-review")?.classList.contains("hidden"),
+      enginePlayers: document.querySelectorAll("#match-motion-engine-pitch svg g").length,
+      displayPlayers: document.querySelectorAll("#match-motion-display-pitch svg g").length,
+      incidentRows: document.querySelectorAll("#match-motion-review-incidents [data-motion-frame]").length,
+      rangeMax: Number(document.querySelector("#match-motion-review-range")?.max || 0),
+    };
+    window.vcfmMainApi?.closeMotionDiagnostic();
     view.destroy();
     root.remove();
     return {
@@ -349,6 +370,16 @@ async function assertStraightPassRendering(page) {
       fullCamera,
       tvCamera,
       tacticalCamera,
+      motionClip: {
+        kind: motionClip.kind,
+        frames: motionClip.frames.length,
+        incidents: motionClip.incidents.length,
+        seed: motionClip.metadata.matchSeed,
+      },
+      motionStatus,
+      motionStatusUpdates,
+      motionReviewOpened,
+      motionReview,
     };
   });
 
@@ -410,6 +441,17 @@ async function assertStraightPassRendering(page) {
     { x: 0, y: 0, scale: 1, classApplied: true },
     "tactical camera was not fixed or did not enable live structure rendering"
   );
+  assert.equal(result.motionClip.kind, "vcfm-motion-clip");
+  assert.ok(result.motionClip.frames >= 4, "motion clip did not retain the rendered pass frames");
+  assert.ok(result.motionClip.incidents >= 1, "synthetic high-speed pass did not receive an automatic marker");
+  assert.equal(result.motionClip.seed, 229);
+  assert.ok(result.motionStatusUpdates.some((status) => status.frames >= 2), "motion status callback never enabled capture");
+  assert.equal(result.motionReviewOpened, true);
+  assert.equal(result.motionReview.visible, true);
+  assert.equal(result.motionReview.enginePlayers, 22);
+  assert.equal(result.motionReview.displayPlayers, 22);
+  assert.ok(result.motionReview.incidentRows >= 1);
+  assert.equal(result.motionReview.rangeMax, result.motionClip.frames - 1);
 }
 
 const navGroupByTab = {
@@ -435,7 +477,8 @@ async function openTab(page, tab) {
 
 async function assertPhaseShapeReport(page) {
   await page.evaluate(async () => {
-    const main = await import("./js/main.js?v=228");
+    const main = window.vcfmMainApi;
+    if (!main) throw new Error("main page test API is unavailable");
     const positions = [
       [50, 8], [18, 28], [40, 24], [60, 24], [82, 28],
       [28, 48], [50, 52], [72, 48], [20, 72], [50, 78], [80, 72],
@@ -514,6 +557,12 @@ try {
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForFunction(() => (
+    !("serviceWorker" in navigator)
+      || sessionStorage.getItem("vcfm-sw-reloaded-v229") === "1"
+  ));
+  await page.waitForLoadState("networkidle");
+  await page.waitForFunction(() => !!window.vcfmMainApi);
   await assertStraightPassRendering(page);
   await assertCrestLoaded(page.locator("#start-club-preview .club-crest"), "career setup crest");
   await assertNoHorizontalOverflow(page, "desktop start screen");
@@ -695,7 +744,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: broadcast cameras, spatial goal replay, straight-pass rendering, nonblank match canvas, phase-shape evidence, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: broadcast cameras, motion clip diagnostics, spatial goal replay, straight-pass rendering, nonblank match canvas, phase-shape evidence, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

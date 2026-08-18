@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=228" />
+  <link rel="stylesheet" href="css/style.css?v=229" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -1404,6 +1404,9 @@
               <button type="button" id="btn-match-sfx" class="btn small icon-btn" data-i18n-title="match.sfxHint" title="音效" aria-label="音效" aria-pressed="false">
                 <span class="mtb-glyph" aria-hidden="true">🔊</span>
               </button>
+              <button type="button" id="btn-match-motion-capture" class="btn small icon-btn" disabled data-i18n-title="match.motionCaptureHint" title="保存并检查最近比赛片段" aria-label="保存并检查最近比赛片段" data-motion-incidents="0">
+                <span class="mtb-glyph" aria-hidden="true">↓</span>
+              </button>
             </div>
             <div class="match-speed-bar" role="group" aria-label="match speed">
               <button type="button" class="btn small" data-match-speed="0.5" title="慢放 ×0.5" aria-label="×0.5">.5</button>
@@ -1425,6 +1428,41 @@
             <button id="btn-match-continue" class="btn" disabled data-i18n="match.continue">赛后继续</button>
           </div>
         </footer>
+
+        <div id="match-motion-review" class="match-motion-review hidden" role="dialog" aria-modal="true" aria-labelledby="match-motion-review-title">
+          <div class="motion-review-surface">
+            <header class="motion-review-head">
+              <div>
+                <h2 id="match-motion-review-title">运动片段诊断</h2>
+                <p id="match-motion-review-meta"></p>
+              </div>
+              <div class="motion-review-actions">
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-play" title="播放" aria-label="播放"><span aria-hidden="true">▶</span></button>
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-prev" title="上一帧" aria-label="上一帧"><span aria-hidden="true">←</span></button>
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-next" title="下一帧" aria-label="下一帧"><span aria-hidden="true">→</span></button>
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-export" title="导出 JSON" aria-label="导出 JSON"><span aria-hidden="true">↓</span></button>
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-close" title="关闭" aria-label="关闭"><span aria-hidden="true">×</span></button>
+              </div>
+            </header>
+            <div class="motion-review-summary" id="match-motion-review-summary"></div>
+            <div class="motion-review-pitches">
+              <figure>
+                <figcaption id="motion-engine-label">引擎坐标</figcaption>
+                <div class="motion-review-pitch" id="match-motion-engine-pitch"></div>
+              </figure>
+              <figure>
+                <figcaption id="motion-display-label">画面坐标</figcaption>
+                <div class="motion-review-pitch" id="match-motion-display-pitch"></div>
+              </figure>
+            </div>
+            <div class="motion-review-timeline">
+              <output id="match-motion-review-time">0.00s</output>
+              <input type="range" id="match-motion-review-range" min="0" max="0" step="1" value="0" aria-label="片段帧" />
+              <output id="match-motion-review-frame">0 / 0</output>
+            </div>
+            <div class="motion-review-incidents" id="match-motion-review-incidents"></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1460,12 +1498,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=228"></script>
+  <script type="module" src="js/main.js?v=229"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v228";
+        var CURRENT_CACHE = "vcfm-v229";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1476,7 +1514,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=228").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=229").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1485,8 +1523,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v228")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v228", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v229")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v229", "1");
               location.reload();
             }
           } catch (e) {
