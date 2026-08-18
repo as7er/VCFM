@@ -4,7 +4,16 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v227**（AI 持球/无球阶段阵型）
+> 缓存：**vcfm-v228**（阶段阵型证据链）
+
+## v228 阶段阵型证据链（2026-08-18）
+
+- 空间引擎以 1 秒分辨率累计双方持球、无球、进攻转换和防守转换的真实用时、实际阵型及球员平均站位；不调用额外随机数，不修改能力、成功率或赛果
+- 战报持久化赛前、中场及 60/75 分钟阶段阵型方案、来源、比分与公开原因；同步、拆分 Worker 和历史战报读取同一事实，后台档省略球员位置明细
+- 赛后战术分析新增“阵型”标签，比较双方阶段占比、真实平均站位与调整时间线；桌面和移动端使用同一报告数据
+- 新增 `scripts/phase-shape-evidence-audit.mjs`，扫描完整赛季 4,590 场方案并运行同种子配对；高应变方案平均移动 9.6、最大 13.8，配对样本每场进球相同、射门差 2、传球差 2.5
+- 审计世界同时固定随机流、模型 ID 计数器和职员时间戳；缓存 `vcfm-v228`
+- 已验证：`node scripts/verify.mjs`、`node js/sim/_p5_integration.mjs`、标准与后台档各 8 场真实性审计、`node scripts/background-spatial-worker-audit.mjs`、`npm run test:browser`、`npm run test:save-browser` 与 `git diff --check`；标准档 2.63 球/场、81.8% 传球成功率，后台档 2.75 球/场、82.8% 传球成功率，两档均零停滞
 
 ## v227 AI 持球/无球阶段阵型（2026-08-18）
 

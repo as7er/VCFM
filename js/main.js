@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=227";
-import { clubCrestHtml } from "./club-crest.js?v=227";
+import { nationFlagHtml } from "./flags.js?v=228";
+import { clubCrestHtml } from "./club-crest.js?v=228";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -316,7 +316,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=227";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=228";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -383,7 +383,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=227";
+} from "./avatar.js?v=228";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
@@ -476,7 +476,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=227").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=228").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -10400,6 +10400,7 @@ function reportAnalysisLabels() {
         pressing: "Pressing",
         heatmap: "Action zones",
         network: "Pass network",
+        shapes: "Shapes",
         xg: "xG",
         openPlayXg: "Open-play xG",
         avgXg: "xG / shot",
@@ -10423,6 +10424,29 @@ function reportAnalysisLabels() {
         offTarget: "Off target",
         noShots: "No shots",
         noNetwork: "No completed passing links",
+        noPositions: "No spatial position sample",
+        actualUsage: "Actual phase usage",
+        averagePositions: "Average positions",
+        baseShape: "Base",
+        possessionShape: "In possession",
+        outOfPossessionShape: "Out of possession",
+        transitionAttack: "Attacking transition",
+        transitionDefend: "Defensive transition",
+        phaseTimeline: "Decision timeline",
+        preMatch: "Pre-match",
+        halfTime: "Half-time",
+        review: "Match review",
+        live: "Touchline",
+        coach: "Coach",
+        player: "Player",
+        manualPlan: "Player plan",
+        manualAdjustment: "Player adjustment",
+        coachStable: "Coach kept the base shape",
+        preMatchGuard: "Pre-match movement guard",
+        chasingGame: "Chasing the game",
+        protectingLead: "Protecting the lead",
+        structuralReview: "Structural review",
+        shapeMaintained: "Shape maintained",
       }
     : {
         title: "战术分析",
@@ -10432,6 +10456,7 @@ function reportAnalysisLabels() {
         pressing: "压迫",
         heatmap: "行动热区",
         network: "传球网络",
+        shapes: "阵型",
         xg: "期望进球",
         openPlayXg: "运动战 xG",
         avgXg: "每次射门 xG",
@@ -10455,7 +10480,97 @@ function reportAnalysisLabels() {
         offTarget: "偏出",
         noShots: "没有射门",
         noNetwork: "没有完成传球线路",
+        noPositions: "没有空间站位样本",
+        actualUsage: "实际阶段用时",
+        averagePositions: "真实平均站位",
+        baseShape: "基础",
+        possessionShape: "持球",
+        outOfPossessionShape: "无球",
+        transitionAttack: "进攻转换",
+        transitionDefend: "防守转换",
+        phaseTimeline: "调整时间线",
+        preMatch: "赛前",
+        halfTime: "中场",
+        review: "临场复核",
+        live: "场边调整",
+        coach: "主教练",
+        player: "玩家",
+        manualPlan: "玩家方案",
+        manualAdjustment: "玩家调整",
+        coachStable: "主教练保持基础阵型",
+        preMatchGuard: "赛前限制大幅移动",
+        chasingGame: "比分落后加强进攻",
+        protectingLead: "比分领先加强保护",
+        structuralReview: "结构性复核",
+        shapeMaintained: "维持阶段阵型",
       };
+}
+
+function phaseShapeReasonLabel(reason, labels) {
+  return labels[reason] || reason || labels.shapeMaintained;
+}
+
+function phaseShapeTriggerLabel(trigger, labels) {
+  return labels[
+    trigger === "half-time"
+      ? "halfTime"
+      : trigger === "review"
+        ? "review"
+        : trigger === "live"
+          ? "live"
+          : "preMatch"
+  ];
+}
+
+function shapeUsageSummary(usage, labels) {
+  if (!usage) return `<p class="muted analysis-empty">${escapeHtml(labels.noPositions)}</p>`;
+  const pct = usage.phasePct || {};
+  const rows = [
+    [labels.possessionShape, pct["in-possession"]],
+    [labels.outOfPossessionShape, pct["out-of-possession"]],
+    [labels.transitionAttack, pct["attacking-transition"]],
+    [labels.transitionDefend, pct["defensive-transition"]],
+  ];
+  const body = rows
+    .map(([label, value]) => `<div class="shape-usage-row"><span>${escapeHtml(label)}</span><strong>${Number(value || 0).toFixed(1)}%</strong></div>`)
+    .join("");
+  return `<div class="shape-usage"><div class="shape-usage-total">${escapeHtml(labels.actualUsage)} · ${(Number(usage.totalSeconds || 0) / 60).toFixed(1)} min</div>${body}</div>`;
+}
+
+function averagePositionsSvg(side, labels) {
+  const positions = side?.averagePositions || [];
+  if (!positions.length) return `<p class="muted analysis-empty">${escapeHtml(labels.noPositions)}</p>`;
+  const dots = positions
+    .map((position) => {
+      const cx = Math.max(5, Math.min(95, Number(position.x) || 50));
+      const cy = 105 - Math.max(5, Math.min(95, Number(position.y) || 50));
+      const number = position.number == null ? "?" : String(position.number);
+      const title = `${position.name || position.playerId || "?"} · ${number} · ${cx.toFixed(1)}, ${position.y?.toFixed?.(1) || "0.0"}`;
+      return `<g class="analysis-average-position"><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.2" /><text x="${cx.toFixed(1)}" y="${(cy + 1.1).toFixed(1)}" text-anchor="middle">${escapeHtml(number)}</text><title>${escapeHtml(title)}</title></g>`;
+    })
+    .join("");
+  return `<svg class="analysis-pitch analysis-average-pitch" viewBox="0 0 100 110" role="img" aria-label="${escapeHtml(labels.averagePositions)}">${analysisPitchBase()}${dots}</svg>`;
+}
+
+function phaseShapeTimelineHtml(phaseShapes, report, labels) {
+  const timeline = Array.isArray(phaseShapes?.timeline) ? phaseShapes.timeline : [];
+  if (!timeline.length) return `<p class="muted analysis-empty">${escapeHtml(labels.noPositions)}</p>`;
+  const names = {
+    home: report.home.short || report.home.name,
+    away: report.away.short || report.away.name,
+  };
+  const rows = timeline
+    .slice()
+    .sort((left, right) => Number(left.minute) - Number(right.minute) || String(left.team).localeCompare(String(right.team)))
+    .map((entry) => {
+      const teamName = names[entry.team] || entry.team || "?";
+      const source = labels[entry.source] || entry.source || labels.coach;
+      const scoreGap = Number(entry.scoreGap) || 0;
+      const scoreText = scoreGap === 0 ? "0" : scoreGap > 0 ? `+${scoreGap}` : String(scoreGap);
+      return `<div class="shape-timeline-row"><time>${Number(entry.minute) || 0}'</time><strong>${escapeHtml(teamName)}</strong><span>${escapeHtml(phaseShapeTriggerLabel(entry.trigger, labels))} · ${escapeHtml(source)}</span><span class="shape-timeline-forms">${escapeHtml(`${entry.baseFormation || "4-3-3"} → ${entry.possessionFormation || entry.baseFormation || "4-3-3"} / ${entry.outOfPossessionFormation || entry.baseFormation || "4-3-3"}`)}</span><small>${escapeHtml(phaseShapeReasonLabel(entry.reason, labels))} · ${escapeHtml(scoreText)}</small></div>`;
+    })
+    .join("");
+  return `<div class="shape-timeline">${rows}</div>`;
 }
 
 function analysisCompareRow(label, homeValue, awayValue, suffix = "") {
@@ -10618,8 +10733,10 @@ function tacticalInsights(analysis, report, labels) {
     lines.push(en ? "Neither side produced a high regain." : "双方都没有形成前场夺回球权。 ");
   }
 
-  const hubSide = (home.network.hub?.passes || 0) + (home.network.hub?.received || 0) >=
-    (away.network.hub?.passes || 0) + (away.network.hub?.received || 0) ? [hn, home.network.hub] : [an, away.network.hub];
+  const homeHub = home.network?.hub || null;
+  const awayHub = away.network?.hub || null;
+  const hubSide = (homeHub?.passes || 0) + (homeHub?.received || 0) >=
+    (awayHub?.passes || 0) + (awayHub?.received || 0) ? [hn, homeHub] : [an, awayHub];
   if (hubSide[1]) {
     lines.push(en
       ? `${hubSide[1].name} was ${hubSide[0]}'s main passing hub (${hubSide[1].passes} completed passes, ${hubSide[1].received} received).`
@@ -10640,6 +10757,7 @@ function matchAnalysisHtml(analysis, report) {
     <section><h5>${escapeHtml(awayName)}</h5>${render(away)}</section>
   </div>`;
   const tabs = ["overview", "shots", "progression", "pressing", "heatmap", "network"];
+  if (report.phaseShapes) tabs.push("shapes");
   const tabHtml = tabs.map((key, index) => `<button type="button" class="analysis-tab${index ? "" : " active"}" role="tab" aria-selected="${index ? "false" : "true"}" data-analysis-tab="${key}">${escapeHtml(labels[key])}</button>`).join("");
   const overviewRows = [
     analysisCompareRow(labels.xg, Number(home.xg).toFixed(2), Number(away.xg).toFixed(2)),
@@ -10663,6 +10781,16 @@ function matchAnalysisHtml(analysis, report) {
   ].join("");
   const insights = tacticalInsights(analysis, report, labels).map((line) => `<li>${escapeHtml(line)}</li>`).join("");
   const shotLegend = ["goal", "saved", "blocked", "offTarget"].map((key) => `<span><i class="analysis-legend-dot ${key}"></i>${escapeHtml(labels[key])}</span>`).join("");
+  const phaseShapes = report.phaseShapes || null;
+  const shapeSidePlots = phaseShapes?.usage
+    ? `<div class="analysis-side-grid shape-position-grid">
+        <section><h5>${escapeHtml(homeName)} · ${escapeHtml(labels.averagePositions)}</h5>${averagePositionsSvg(phaseShapes.usage.home, labels)}</section>
+        <section><h5>${escapeHtml(awayName)} · ${escapeHtml(labels.averagePositions)}</h5>${averagePositionsSvg(phaseShapes.usage.away, labels)}</section>
+      </div>`
+    : `<p class="muted analysis-empty">${escapeHtml(labels.noPositions)}</p>`;
+  const shapeUsage = phaseShapes?.usage
+    ? `<div class="analysis-side-grid shape-usage-grid"><section><h5>${escapeHtml(homeName)}</h5>${shapeUsageSummary(phaseShapes.usage.home, labels)}</section><section><h5>${escapeHtml(awayName)}</h5>${shapeUsageSummary(phaseShapes.usage.away, labels)}</section></div>`
+    : "";
 
   return `<section class="match-analysis">
     <div class="analysis-heading"><h4>${escapeHtml(labels.title)}</h4><div class="analysis-tabs" role="tablist">${tabHtml}</div></div>
@@ -10672,6 +10800,7 @@ function matchAnalysisHtml(analysis, report) {
     <div class="analysis-panel hidden" data-analysis-panel="pressing"><div class="analysis-compare">${pressingRows}</div></div>
     <div class="analysis-panel hidden" data-analysis-panel="heatmap">${sidePlots((side) => heatmapSvg(side, labels))}</div>
     <div class="analysis-panel hidden" data-analysis-panel="network">${sidePlots((side) => passNetworkSvg(side, labels))}</div>
+    ${phaseShapes ? `<div class="analysis-panel hidden" data-analysis-panel="shapes"><div class="shape-panel-heading"><h5>${escapeHtml(labels.actualUsage)}</h5>${shapeUsage}</div>${shapeSidePlots}<h5 class="shape-timeline-heading">${escapeHtml(labels.phaseTimeline)}</h5>${phaseShapeTimelineHtml(phaseShapes, report, labels)}</div>` : ""}
   </section>`;
 }
 
@@ -10679,7 +10808,7 @@ function matchAnalysisHtml(analysis, report) {
  * @param {object} report
  * @param {{ review?: boolean }} [opts]
  */
-function showMatchReport(report, opts = {}) {
+export function showMatchReport(report, opts = {}) {
   const el = $("#match-report");
   if (!el || !report) return;
   const review = !!opts.review || !!matchPlayback.reviewMode;

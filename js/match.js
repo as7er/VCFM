@@ -107,6 +107,71 @@ function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
 
+function effectivePhaseFormation(tactics, key) {
+  const base = FORMATIONS[tactics?.formation] ? tactics.formation : "4-3-3";
+  return FORMATIONS[tactics?.[key]] ? tactics[key] : base;
+}
+
+function phaseShapeReason(source, plan, minute, scoreGap, changed) {
+  if (source === "player") return changed ? "manual-adjustment" : "manual-plan";
+  if (Number(plan?.facts?.adaptability || 0) < 5) return "coach-stable";
+  if (minute === 0 && plan?.selectionSuppressed) return "pre-match-guard";
+  if (scoreGap < 0) return "chasing-game";
+  if (scoreGap > 0) return "protecting-lead";
+  return changed ? "structural-review" : "shape-maintained";
+}
+
+function phaseShapeDecision(club, opponent, plan, options = {}) {
+  const tactics = club?.tactics || {};
+  const baseFormation = FORMATIONS[plan?.baseFormation]
+    ? plan.baseFormation
+    : (FORMATIONS[tactics.formation] ? tactics.formation : "4-3-3");
+  const possessionFormation = FORMATIONS[plan?.effectivePossessionFormation]
+    ? plan.effectivePossessionFormation
+    : effectivePhaseFormation(tactics, "possessionFormation");
+  const outOfPossessionFormation = FORMATIONS[plan?.effectiveOutOfPossessionFormation]
+    ? plan.effectiveOutOfPossessionFormation
+    : effectivePhaseFormation(tactics, "outOfPossessionFormation");
+  const minute = clamp(Math.round(Number(options.minute) || 0), 0, 90);
+  const scoreGap = Number(options.scoreGap) || 0;
+  const source = options.source === "player" ? "player" : "coach";
+  const changed = !!plan?.changed || !!options.changed;
+  return {
+    minute,
+    team: options.team || null,
+    teamId: club?.id || null,
+    trigger: options.trigger || (minute ? "review" : "pre-match"),
+    source,
+    reason: phaseShapeReason(source, plan, minute, scoreGap, changed),
+    changed,
+    selectionSuppressed: !!plan?.selectionSuppressed,
+    baseFormation,
+    possessionFormation,
+    outOfPossessionFormation,
+    scoreGap,
+    coachId: source === "coach" ? club?.staff?.coach?.id || null : null,
+    facts: plan?.facts || {
+      opponent: {
+        formation: opponent?.tactics?.formation || null,
+        possessionFormation: opponent?.tactics?.possessionFormation || null,
+        outOfPossessionFormation: opponent?.tactics?.outOfPossessionFormation || null,
+        width: Number(opponent?.tactics?.width) || 3,
+      },
+    },
+  };
+}
+
+function recordPhaseShapeDecision(state, club, opponent, plan, options = {}) {
+  if (!state || !club) return null;
+  if (!Array.isArray(state.phaseShapeTimeline)) state.phaseShapeTimeline = [];
+  const entry = phaseShapeDecision(club, opponent, plan, {
+    ...options,
+    team: club === state.home ? "home" : "away",
+  });
+  state.phaseShapeTimeline.push(entry);
+  return entry;
+}
+
 // ---------- 情境 ----------
 
 export const WEATHERS = [
@@ -667,12 +732,12 @@ export function createMatchSession(world, fixture, opts = {}) {
   const awayCoachShapes = away.id !== world.userClubId || isFullyDelegated(world, away, "tactics");
   const homeOpponentSnapshot = { id: away.id, power: away.power, tactics: { ...away.tactics } };
   const awayOpponentSnapshot = { id: home.id, power: home.power, tactics: { ...home.tactics } };
-  if (homeCoachShapes) {
-    applyCoachPhaseFormations(home, home.staff?.coach, { opponent: homeOpponentSnapshot });
-  }
-  if (awayCoachShapes) {
-    applyCoachPhaseFormations(away, away.staff?.coach, { opponent: awayOpponentSnapshot });
-  }
+  const homePhasePlan = homeCoachShapes
+    ? applyCoachPhaseFormations(home, home.staff?.coach, { opponent: homeOpponentSnapshot })
+    : null;
+  const awayPhasePlan = awayCoachShapes
+    ? applyCoachPhaseFormations(away, away.staff?.coach, { opponent: awayOpponentSnapshot })
+    : null;
   // 主客都保证有核心（用户已指定则保留；AI / 未指定则自动选进攻最强的）
   // 避免「只有用户队会回撤内切/绝对进攻权」的单方面表现
   ensureCorePlayer(home);
@@ -754,6 +819,20 @@ export function createMatchSession(world, fixture, opts = {}) {
       home: [...(home.tactics.lineup || [])],
       away: [...(away.tactics.lineup || [])],
     },
+    phaseShapeTimeline: [
+      phaseShapeDecision(home, awayOpponentSnapshot, homePhasePlan, {
+        team: "home",
+        minute: 0,
+        trigger: "pre-match",
+        source: homeCoachShapes ? "coach" : "player",
+      }),
+      phaseShapeDecision(away, homeOpponentSnapshot, awayPhasePlan, {
+        team: "away",
+        minute: 0,
+        trigger: "pre-match",
+        source: awayCoachShapes ? "coach" : "player",
+      }),
+    ],
   };
 
   recomputeSides(state);
@@ -2071,6 +2150,12 @@ export function aiHalfTime(state) {
       scoreGap: myG - opG,
       minute: 45,
     });
+    recordPhaseShapeDecision(state, club, opponent, phasePlan, {
+      minute: 45,
+      trigger: "half-time",
+      source: "coach",
+      scoreGap: myG - opG,
+    });
     // 换下疲劳/受伤
     const sk = sideKey(state, club);
     const xi = activeXi(state, club);
@@ -2131,6 +2216,12 @@ function coachInMatchReview(state, minute) {
       opponent,
       scoreGap,
       minute,
+    });
+    recordPhaseShapeDecision(state, club, opponent, phasePlan, {
+      minute,
+      trigger: "review",
+      source: "coach",
+      scoreGap,
     });
     if (phasePlan.changed) {
       decisions.push(`调整阶段阵型为持球 ${phasePlan.effectivePossessionFormation}、无球 ${phasePlan.effectiveOutOfPossessionFormation}`);
@@ -2268,6 +2359,14 @@ export function applyUserHalfTime(state, orders = {}) {
       }
     );
     msgs.push(formChanged ? "阵型与战术已更新" : "战术已更新");
+    const opponent = club === state.home ? state.away : state.home;
+    recordPhaseShapeDecision(state, club, opponent, null, {
+      minute: 45,
+      trigger: "half-time",
+      source: "player",
+      changed: true,
+      scoreGap: club === state.home ? state.hg - state.ag : state.ag - state.hg,
+    });
   }
   for (const s of orders.subs || []) {
     const res = applySubstitution(state, club, s.outId, s.inId, 46);
@@ -2441,6 +2540,14 @@ export function applyLiveTactics(state, orders = {}) {
       formationChanged: formChanged,
     }
   );
+  const opponent = club === state.home ? state.away : state.home;
+  recordPhaseShapeDecision(state, club, opponent, null, {
+    minute,
+    trigger: "live",
+    source: "player",
+    changed: true,
+    scoreGap: club === state.home ? state.hg - state.ag : state.ag - state.hg,
+  });
   recomputeSides(state);
   return {
     ok: true,
@@ -2710,6 +2817,10 @@ function buildReport(state, { compactAnalysis = false } = {}) {
         compact: compactAnalysis,
       })
     : null;
+  const spatialShapeEvidence = state.spatialShapeEvidence
+    || (typeof state.simEng?.tacticalShapeEvidence === "function"
+      ? state.simEng.tacticalShapeEvidence({ compact: compactAnalysis })
+      : null);
   return {
     matchSeed: state.matchSeed,
     engine: state.simEng ? "spatial-v2" : "probability-v1",
@@ -2773,6 +2884,11 @@ function buildReport(state, { compactAnalysis = false } = {}) {
       })),
     ratings: state.matchRatings || null,
     analysis,
+    phaseShapes: {
+      version: 1,
+      timeline: Array.isArray(state.phaseShapeTimeline) ? state.phaseShapeTimeline : [],
+      usage: spatialShapeEvidence,
+    },
     narrative,
     ticketIncome: state.ticketIncome != null ? state.ticketIncome : null,
     matchdayRetailIncome: state.matchdayRetailIncome || 0,
@@ -3371,6 +3487,8 @@ const PREPARED_MATCH_STATE_FIELDS = Object.freeze([
   "teamTalkMods",
   "teamTalks",
   "startingLineups",
+  "phaseShapeTimeline",
+  "spatialShapeEvidence",
   "minute",
   "preMatchStrength",
   "homeAtk",
@@ -3454,6 +3572,11 @@ function runMatchSimulationSync(state, opts = {}) {
 }
 
 function serializePreparedMatch(state, { completed = false } = {}) {
+  if (completed && typeof state.simEng?.tacticalShapeEvidence === "function") {
+    state.spatialShapeEvidence = state.simEng.tacticalShapeEvidence({
+      compact: state.simulationProfile === "background",
+    });
+  }
   const fields = {};
   for (const key of PREPARED_MATCH_STATE_FIELDS) {
     if (state[key] !== undefined) fields[key] = state[key];
@@ -3507,6 +3630,25 @@ function compactBackgroundAnalysis(analysis) {
 function compactBackgroundReport(report) {
   if (!report) return report;
   report.analysis = compactBackgroundAnalysis(report.analysis);
+  if (report.phaseShapes) {
+    report.phaseShapes.timeline = (report.phaseShapes.timeline || []).map((entry) => ({
+      minute: entry.minute,
+      team: entry.team,
+      trigger: entry.trigger,
+      source: entry.source,
+      reason: entry.reason,
+      changed: !!entry.changed,
+      selectionSuppressed: !!entry.selectionSuppressed,
+      baseFormation: entry.baseFormation,
+      possessionFormation: entry.possessionFormation,
+      outOfPossessionFormation: entry.outOfPossessionFormation,
+      scoreGap: entry.scoreGap || 0,
+    }));
+    for (const side of [report.phaseShapes.usage?.home, report.phaseShapes.usage?.away]) {
+      if (side) delete side.averagePositions;
+    }
+    if (report.phaseShapes.usage) report.phaseShapes.usage.compact = true;
+  }
   if (report.ratings) {
     report.ratings = { motm: report.ratings.motm || null, compact: true };
   }

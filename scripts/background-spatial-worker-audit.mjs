@@ -8,7 +8,7 @@ import {
   runPreparedMatchSimulation,
   simulateMatchSync,
 } from "../js/match.js";
-import { createWorld } from "../js/models.js";
+import { createWorld, resetIdCounter } from "../js/models.js";
 import { ensureWorldStaff } from "../js/staff.js";
 
 const clone = (value) => structuredClone(value);
@@ -23,10 +23,18 @@ function seededRandom(seed) {
 
 const start = CLUB_TEMPLATES.find((club) => club.division === 3);
 const originalRandom = Math.random;
+const originalNow = Date.now;
 Math.random = seededRandom(0xabcdef01);
-const source = createWorld(start.id, "Background Spatial Worker Audit");
-Math.random = originalRandom;
-ensureWorldStaff(source);
+Date.now = () => 1787061720042;
+let source;
+try {
+  resetIdCounter(1);
+  source = createWorld(start.id, "Background Spatial Worker Audit");
+  ensureWorldStaff(source);
+} finally {
+  Math.random = originalRandom;
+  Date.now = originalNow;
+}
 const sourceFixture = source.fixtures.find(
   (fixture) => fixture.home !== source.userClubId && fixture.away !== source.userClubId
 );

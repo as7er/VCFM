@@ -433,6 +433,79 @@ async function openTab(page, tab) {
   await page.locator(`[data-tab="${tab}"]:visible`).click();
 }
 
+async function assertPhaseShapeReport(page) {
+  await page.evaluate(async () => {
+    const main = await import("./js/main.js?v=228");
+    const positions = [
+      [50, 8], [18, 28], [40, 24], [60, 24], [82, 28],
+      [28, 48], [50, 52], [72, 48], [20, 72], [50, 78], [80, 72],
+    ];
+    const analysisSide = {
+      xg: 1.1,
+      openPlayXg: 0.9,
+      shots: [{ minute: 32, playerName: "Audit Forward", x: 50, y: 88, xg: 0.2, outcome: "saved" }],
+      progression: { passCompletionPct: 82, progressivePasses: 17, finalThirdEntries: 29, boxEntries: 8 },
+      pressing: { pressures: 32, pressureSuccessPct: 28, highPressures: 7, regains: 12, highRegains: 2 },
+      shape: { averageActionHeight: 54 },
+      heatmap: { cols: 6, rows: 10, max: 1, cells: Array(60).fill(0) },
+      network: { nodes: [], edges: [], hub: null },
+    };
+    const usageSide = (prefix) => ({
+      totalSeconds: 5400,
+      phasePct: {
+        "in-possession": 38.5,
+        "out-of-possession": 43.5,
+        "attacking-transition": 9.5,
+        "defensive-transition": 8.5,
+      },
+      averagePositions: positions.map(([x, y], index) => ({
+        playerId: `${prefix}-${index}`,
+        name: `${prefix} Player ${index + 1}`,
+        number: index + 1,
+        role: index ? "MID" : "GK",
+        x,
+        y,
+        samples: 5000,
+      })),
+    });
+    main.showMatchReport({
+      score: "1 - 1",
+      weather: { icon: "", name: "Clear" },
+      home: { name: "Audit Home", short: "Home", xg: 1.1, shots: 10, shotsOn: 4, possession: 52, corners: 4, fouls: 11, yellows: 2, reds: 0, saves: 3, woodwork: 0 },
+      away: { name: "Audit Away", short: "Away", xg: 1.0, shots: 9, shotsOn: 4, possession: 48, corners: 3, fouls: 12, yellows: 1, reds: 0, saves: 3, woodwork: 0 },
+      scorers: [],
+      ratings: null,
+      narrative: [],
+      analysis: { home: structuredClone(analysisSide), away: structuredClone(analysisSide) },
+      phaseShapes: {
+        version: 1,
+        usage: { home: usageSide("Home"), away: usageSide("Away") },
+        timeline: [
+          { minute: 0, team: "home", trigger: "pre-match", source: "player", reason: "manual-plan", baseFormation: "4-3-3", possessionFormation: "3-4-3", outOfPossessionFormation: "5-3-2", scoreGap: 0 },
+          { minute: 0, team: "away", trigger: "pre-match", source: "coach", reason: "pre-match-guard", baseFormation: "4-2-3-1", possessionFormation: "4-2-3-1", outOfPossessionFormation: "4-4-2", scoreGap: 0 },
+          { minute: 45, team: "away", trigger: "half-time", source: "coach", reason: "chasing-game", baseFormation: "4-2-3-1", possessionFormation: "3-4-3", outOfPossessionFormation: "4-4-2", scoreGap: -1 },
+          { minute: 75, team: "away", trigger: "review", source: "coach", reason: "protecting-lead", baseFormation: "4-2-3-1", possessionFormation: "4-2-3-1", outOfPossessionFormation: "5-3-2", scoreGap: 1 },
+        ],
+      },
+    }, { review: true });
+    document.querySelector("#screen-main")?.classList.remove("active");
+    document.querySelector("#screen-match")?.classList.add("active");
+  });
+  await page.locator('[data-analysis-tab="shapes"]').click();
+  assert.equal(await page.locator(".analysis-average-position").count(), 22);
+  assert.equal(await page.locator(".shape-timeline-row").count(), 4);
+  assert.match(await page.locator('[data-analysis-panel="shapes"]').innerText(), /3-4-3.*5-3-2/s);
+  await assertNoHorizontalOverflow(page, "desktop phase-shape report");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertNoHorizontalOverflow(page, "mobile phase-shape report");
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(() => {
+    document.querySelector("#screen-match")?.classList.remove("active");
+    document.querySelector("#screen-main")?.classList.add("active");
+    document.querySelector("#match-report")?.classList.add("hidden");
+  });
+}
+
 let browser;
 try {
   await waitForServer();
@@ -594,6 +667,8 @@ try {
   assert.match(await externalPlayerAbility.innerText(), /^\d+-\d+$/);
   await page.keyboard.press("Escape");
 
+  await assertPhaseShapeReport(page);
+
   await page.setViewportSize({ width: 390, height: 844 });
   await openTab(page, "transfer");
   await assertNoHorizontalOverflow(page, "mobile scouting mission");
@@ -620,7 +695,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: broadcast cameras, spatial goal replay, straight-pass rendering, nonblank match canvas, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: broadcast cameras, spatial goal replay, straight-pass rendering, nonblank match canvas, phase-shape evidence, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

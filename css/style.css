@@ -4509,6 +4509,61 @@ html[data-theme="light"] .fm-com-log .event.ft {
   font-weight: 700;
   letter-spacing: 0;
 }
+.shape-usage-grid {
+  max-width: 40rem;
+  margin: 0 auto 0.9rem;
+}
+.shape-usage {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.shape-usage-total {
+  padding: 0.4rem 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+.shape-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 1.8rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.76rem;
+}
+.shape-usage-row span { color: var(--muted); }
+.shape-usage-row strong { font-variant-numeric: tabular-nums; }
+.shape-position-grid { margin-top: 0.25rem; }
+.analysis-average-position circle {
+  fill: #f8fafc;
+  stroke: #111827;
+  stroke-width: 0.7;
+}
+.analysis-average-position text {
+  fill: #111827;
+  font-size: 2.8px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+.shape-timeline-heading {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.8rem;
+}
+.shape-timeline { border-bottom: 1px solid var(--border); }
+.shape-timeline-row {
+  display: grid;
+  grid-template-columns: 2.8rem minmax(5rem, 0.7fr) minmax(7rem, 0.9fr) minmax(11rem, 1.4fr) minmax(9rem, 1.2fr);
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.35rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.74rem;
+}
+.shape-timeline-row time { font-variant-numeric: tabular-nums; color: var(--muted); }
+.shape-timeline-row span,
+.shape-timeline-row small { color: var(--muted); }
+.shape-timeline-forms { color: var(--text) !important; font-variant-numeric: tabular-nums; }
 .analysis-empty {
   display: grid;
   place-items: center;
@@ -4522,6 +4577,15 @@ html[data-theme="light"] .fm-com-log .event.ft {
   .analysis-tabs { width: 100%; }
   .analysis-side-grid { gap: 0.5rem; }
   .analysis-compare-row { grid-template-columns: minmax(3.5rem, 1fr) minmax(7.5rem, 1.8fr) minmax(3.5rem, 1fr); }
+  .shape-timeline-row {
+    grid-template-columns: 2.6rem minmax(0, 1fr);
+    gap: 0.2rem 0.55rem;
+    padding: 0.45rem 0;
+  }
+  .shape-timeline-row time { grid-row: 1 / span 4; align-self: start; }
+  .shape-timeline-row strong,
+  .shape-timeline-row span,
+  .shape-timeline-row small { grid-column: 2; }
 }
 
 /* Modal */

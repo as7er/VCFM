@@ -281,7 +281,7 @@ function phaseLineupFit(club, baseFormationId, targetFormationId) {
   return count ? total / count : 10;
 }
 
-function phaseMovementDistance(baseFormationId, targetFormationId) {
+export function phaseFormationMovementDistance(baseFormationId, targetFormationId) {
   const baseSlots = FORMATIONS[baseFormationId]?.slots || [];
   const targetSlots = FORMATIONS[targetFormationId]?.slots || [];
   const slotMap = shapeFormationSlotMap(baseFormationId, targetFormationId);
@@ -326,7 +326,7 @@ function phaseFormationScore(club, identity, formationId, phase, context) {
   let score = preferenceIndex >= 0 ? 20 - preferenceIndex * 6 : -7;
   score += (phaseLineupFit(club, baseFormationId, formationId) - 10) * 0.8;
   // 阶段阵型是连续站位目标；过大的整队换位会制造不真实的追球和门将威胁窗口。
-  score -= phaseMovementDistance(baseFormationId, formationId) * 0.22;
+  score -= phaseFormationMovementDistance(baseFormationId, formationId) * 0.22;
   if (formationId === baseFormationId) score += Math.max(0, 4 - adaptability) * 4;
 
   if (phase === "possession") {
@@ -375,6 +375,7 @@ export function coachPhaseFormationPlan(club, coach, options = {}) {
     .sort((left, right) => right.score - left.score || left.formationId.localeCompare(right.formationId))[0]?.formationId || baseFormationId;
   const effectivePossessionFormation = choose("possession");
   const effectiveOutOfPossessionFormation = choose("outOfPossession");
+  const round = (value) => Math.round((Number(value) || 0) * 10) / 10;
   return {
     ok: true,
     identity,
@@ -383,6 +384,24 @@ export function coachPhaseFormationPlan(club, coach, options = {}) {
     outOfPossessionFormation: effectiveOutOfPossessionFormation === baseFormationId ? null : effectiveOutOfPossessionFormation,
     effectivePossessionFormation,
     effectiveOutOfPossessionFormation,
+    facts: {
+      lineupFit: {
+        possession: round(phaseLineupFit(club, baseFormationId, effectivePossessionFormation)),
+        outOfPossession: round(phaseLineupFit(club, baseFormationId, effectiveOutOfPossessionFormation)),
+      },
+      movement: {
+        possession: round(phaseFormationMovementDistance(baseFormationId, effectivePossessionFormation)),
+        outOfPossession: round(phaseFormationMovementDistance(baseFormationId, effectiveOutOfPossessionFormation)),
+      },
+      opponent: {
+        formation: context.opponent?.tactics?.formation || null,
+        possessionFormation: context.opponent?.tactics?.possessionFormation || null,
+        outOfPossessionFormation: context.opponent?.tactics?.outOfPossessionFormation || null,
+        width: Number(context.opponent?.tactics?.width) || 3,
+      },
+      strengthGap: round((Number(club?.power) || 50) - (Number(context.opponent?.power) || 50)),
+      adaptability: Number(identity.adaptability) || 3,
+    },
     context: {
       opponentId: context.opponent?.id || null,
       scoreGap: context.scoreGap,
@@ -400,7 +419,7 @@ export function applyCoachPhaseFormations(club, coach, options = {}) {
     || Number(plan.context?.minute) >= 45;
   const possessionMoveAllowed = matchContextActive;
   const outOfPossessionMoveAllowed = matchContextActive
-    || phaseMovementDistance(plan.baseFormation, plan.effectiveOutOfPossessionFormation) <= PRE_MATCH_PHASE_MOVE_LIMIT;
+    || phaseFormationMovementDistance(plan.baseFormation, plan.effectiveOutOfPossessionFormation) <= PRE_MATCH_PHASE_MOVE_LIMIT;
   const appliedPlan = usePhaseShapes
     ? {
       ...plan,

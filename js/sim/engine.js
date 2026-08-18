@@ -33,6 +33,7 @@ import { roleBehavior } from "../player-roles.js";
 import {
   TEAM_SHAPE_PHASES,
   explicitShapeFormationId,
+  shapeFormationId,
   shapeFormationSlotMap,
   teamShapePhase,
   teamShapeProfile,
@@ -381,6 +382,12 @@ export class SimEngine {
       home: TEAM_SHAPE_PHASES.OUT_OF_POSSESSION,
       away: TEAM_SHAPE_PHASES.OUT_OF_POSSESSION,
     };
+    this._shapeEvidence = {
+      home: this._emptyShapeEvidenceSide(),
+      away: this._emptyShapeEvidenceSide(),
+    };
+    this._pendingShapeEvidenceSeconds = 0;
+    this._nextShapeEvidenceSampleAt = 1;
     this._shapeProfileCache = { home: null, away: null };
     this._collectiveDefenseProfileCache = { home: null, away: null };
     this._stepPressing = { home: 3, away: 3 };
@@ -875,6 +882,62 @@ export class SimEngine {
     return this.teamPhases;
   }
 
+  _emptyShapeEvidenceSide() {
+    return {
+      totalSeconds: 0,
+      phaseSeconds: {
+        [TEAM_SHAPE_PHASES.IN_POSSESSION]: 0,
+        [TEAM_SHAPE_PHASES.OUT_OF_POSSESSION]: 0,
+        [TEAM_SHAPE_PHASES.ATTACKING_TRANSITION]: 0,
+        [TEAM_SHAPE_PHASES.DEFENSIVE_TRANSITION]: 0,
+      },
+      phaseFormations: new Map(),
+      positions: new Map(),
+    };
+  }
+
+  _recordTeamShapeEvidence(dt) {
+    const seconds = Math.max(0, Number(dt) || 0);
+    this._pendingShapeEvidenceSeconds += seconds;
+    if (this.t + seconds < this._nextShapeEvidenceSampleAt - 1e-9) return;
+    const sampledSeconds = this._pendingShapeEvidenceSeconds;
+    this._pendingShapeEvidenceSeconds = 0;
+    for (const team of ["home", "away"]) {
+      const side = this._shapeEvidence[team];
+      const phase = this.teamPhases[team] || TEAM_SHAPE_PHASES.OUT_OF_POSSESSION;
+      const formation = shapeFormationId(this._teamTactics(team), phase);
+      side.totalSeconds += sampledSeconds;
+      side.phaseSeconds[phase] = (side.phaseSeconds[phase] || 0) + sampledSeconds;
+      const formationKey = `${phase}:${formation}`;
+      side.phaseFormations.set(
+        formationKey,
+        (side.phaseFormations.get(formationKey) || 0) + sampledSeconds
+      );
+      for (const agent of this.agents) {
+        if (agent.team !== team || agent.sentOff) continue;
+        const position = team === "home"
+          ? { x: agent.x, y: 100 - agent.y }
+          : { x: 100 - agent.x, y: agent.y };
+        const current = side.positions.get(agent.id) || {
+          playerId: agent.id,
+          name: agent.player?.name || String(agent.id),
+          number: agent.num ?? null,
+          role: agent.role || null,
+          x: 0,
+          y: 0,
+          samples: 0,
+        };
+        current.x += clamp(position.x, 0, 100);
+        current.y += clamp(position.y, 0, 100);
+        current.samples++;
+        side.positions.set(agent.id, current);
+      }
+    }
+    while (this._nextShapeEvidenceSampleAt <= this.t + seconds + 1e-9) {
+      this._nextShapeEvidenceSampleAt += 1;
+    }
+  }
+
   /** 由 match.js 注入的额外比赛情境修正；阵型/风格本身仍直接读取球队战术。 */
   _teamModifier(team, key, fallback = 1) {
     const value = Number(this.matchModifiers?.[team]?.[key]);
@@ -1327,6 +1390,7 @@ export class SimEngine {
     // 进球庆祝段：球钉在网里，队友聚拢，结束后再中圈开球
     if (this.celebrateUntil && this.t < this.celebrateUntil) {
       this._tickCelebrate(dt);
+      this._recordTeamShapeEvidence(dt);
       this.t += dt;
       if (this.t >= this.celebrateUntil - 1e-9) {
         this.celebrateUntil = 0;
@@ -1343,6 +1407,7 @@ export class SimEngine {
     // 这段时间不运行普通决策/抢球，确保直播与回放能实际录到点球过程。
     if (this.pendingPenalty) {
       this._tickPenalty(dt);
+      this._recordTeamShapeEvidence(dt);
       this.t += dt;
       return;
     }
@@ -1372,6 +1437,7 @@ export class SimEngine {
       for (const a of this.agents) a.attackThinkUntil = 0;
     }
     this._refreshTeamShapePhases(controlTeam || this._phaseTeam || this.possession);
+    this._recordTeamShapeEvidence(dt);
     this._stepPressing.home = this._tacticLevel("home", "pressing");
     this._stepPressing.away = this._tacticLevel("away", "pressing");
     this._stepDefContext = null;
@@ -6583,6 +6649,66 @@ export class SimEngine {
         (extraSteps * 100 / Math.max(1, stats.outerSteps || 0)).toFixed(1)
       ),
       reasons: { ...(stats.reasons || {}) },
+    };
+  }
+
+  tacticalShapeEvidence({ compact = false } = {}) {
+    const round = (value, digits = 1) => {
+      const scale = 10 ** digits;
+      return Math.round((Number(value) || 0) * scale) / scale;
+    };
+    const summarize = (side) => {
+      const totalSeconds = Math.max(SIM.DT, Number(side.totalSeconds) || 0);
+      const phaseSeconds = Object.fromEntries(
+        Object.entries(side.phaseSeconds).map(([phase, seconds]) => [phase, round(seconds)])
+      );
+      const phasePct = Object.fromEntries(
+        Object.entries(side.phaseSeconds).map(([phase, seconds]) => [
+          phase,
+          round(seconds * 100 / totalSeconds),
+        ])
+      );
+      const phaseFormations = [...side.phaseFormations.entries()]
+        .map(([key, seconds]) => {
+          const separator = key.indexOf(":");
+          return {
+            phase: key.slice(0, separator),
+            formation: key.slice(separator + 1),
+            seconds: round(seconds),
+            pct: round(seconds * 100 / totalSeconds),
+          };
+        })
+        .sort((left, right) => right.seconds - left.seconds || left.phase.localeCompare(right.phase));
+      const summary = {
+        totalSeconds: round(totalSeconds),
+        phaseSeconds,
+        phasePct,
+        phaseFormations,
+      };
+      if (!compact) {
+        summary.averagePositions = [...side.positions.values()]
+          .filter((position) => position.samples > 0)
+          .sort((left, right) => right.samples - left.samples || String(left.playerId).localeCompare(String(right.playerId)))
+          .slice(0, 11)
+          .map((position) => ({
+            playerId: position.playerId,
+            name: position.name,
+            number: position.number,
+            role: position.role,
+            x: round(position.x / position.samples),
+            y: round(position.y / position.samples),
+            samples: position.samples,
+          }));
+      }
+      return summary;
+    };
+    return {
+      version: 1,
+      source: "spatial-samples",
+      sampleIntervalSeconds: 1,
+      compact: !!compact,
+      home: summarize(this._shapeEvidence.home),
+      away: summarize(this._shapeEvidence.away),
     };
   }
 
