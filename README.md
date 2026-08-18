@@ -16,7 +16,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v229** · 2D 比赛运动完整性 |
+| 当前版本 | **v230** · 2D 无球跑位连续性 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
 | 存档 | 当前浏览器 `IndexedDB` 耐久存储，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
@@ -24,6 +24,13 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 | 语言与主题 | 中文 / English · 日间 / 夜间 |
 
 仓库：https://github.com/as7er/vcfm
+
+### v230 更新亮点
+
+- 无球跑位目标引入约 1.5 秒路线租约，同一持球人和阶段内不再因相邻决策反复折返；传球换人、阶段切换和首次二过一仍能立即改跑。
+- 接应目标继续以战术几何为基础，只对相距不足 1.8 米的同队预留目标做横向分层；目标坐标、来源和路线租约进入空间快照与运动片段。
+- 运动诊断新增“跑位目标反复”和“接应目标拥挤”，双轨回放球场绘制引擎与显示层实际跑位目标线。
+- 24 场固定种子真实性样本中，标准档 3.17 球/场、81.7% 传球成功率，后台档 2.71 球/场、81.0% 传球成功率，两档均零停滞；强队分别取得 2.08 与 1.92 分/场。
 
 ### v229 更新亮点
 
@@ -155,7 +162,7 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v229** · 2D match motion integrity |
+| Current version | **v230** · 2D off-ball run continuity |
 | Devices | Phone, tablet, or desktop browser |
 | Saves | Durable browser `IndexedDB`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
@@ -163,6 +170,13 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 | Language and theme | Chinese / English · day / night |
 
 Repository: https://github.com/as7er/vcfm
+
+### What's new in v230
+
+- Off-ball movement targets now use roughly 1.5-second route leases. Players avoid reversals between adjacent decisions within the same carrier and team phase, while a possession change, phase change, or the first explicit one-two can still establish a new route immediately.
+- Support targets retain their tactical geometry and are only layered horizontally when same-team reservations for the same carrier and phase are less than 1.8 metres apart. Target coordinates, provenance, route kind, lease, carrier, and phase are retained in spatial snapshots and motion clips.
+- Motion diagnostics add run-target churn and support-target crowding markers, with target lines drawn in both engine and rendered replay pitches.
+- Seeded full-match motion gates cover two standard and six background matches with zero severe incidents. Across 24-match realism samples, the standard profile averages 3.17 goals with 81.7% pass completion and the background profile averages 2.71 goals with 81.0% pass completion; neither profile stalls.
 
 ### What's new in v229
 

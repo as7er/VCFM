@@ -134,7 +134,14 @@ async function assertStraightPassRendering(page) {
     const receiverId = home.players[7].id;
     const withActors = (passer, receiver) => playerFrames.map((player) => {
       if (player.id === passerId) return { ...player, x: passer.x, y: passer.y };
-      if (player.id === receiverId) return { ...player, x: receiver.x, y: receiver.y };
+      if (player.id === receiverId) return {
+        ...player,
+        x: receiver.x,
+        y: receiver.y,
+        fsm: "support",
+        shapePhase: "in-possession",
+        movementTarget: { x: 58, y: 48, source: "layered", setAt: 0, until: 1.5, phase: "in-possession", ownerId: passerId },
+      };
       return player;
     });
     const frames = [
@@ -335,8 +342,10 @@ async function assertStraightPassRendering(page) {
     const motionReviewOpened = window.vcfmMainApi?.showMotionDiagnostic(motionClip) || false;
     const motionReview = {
       visible: !document.querySelector("#match-motion-review")?.classList.contains("hidden"),
-      enginePlayers: document.querySelectorAll("#match-motion-engine-pitch svg g").length,
-      displayPlayers: document.querySelectorAll("#match-motion-display-pitch svg g").length,
+      enginePlayers: document.querySelectorAll("#match-motion-engine-pitch svg g:not(.motion-target)").length,
+      displayPlayers: document.querySelectorAll("#match-motion-display-pitch svg g:not(.motion-target)").length,
+      engineTargets: document.querySelectorAll("#match-motion-engine-pitch .motion-target").length,
+      displayTargets: document.querySelectorAll("#match-motion-display-pitch .motion-target").length,
       incidentRows: document.querySelectorAll("#match-motion-review-incidents [data-motion-frame]").length,
       rangeMax: Number(document.querySelector("#match-motion-review-range")?.max || 0),
     };
@@ -450,6 +459,8 @@ async function assertStraightPassRendering(page) {
   assert.equal(result.motionReview.visible, true);
   assert.equal(result.motionReview.enginePlayers, 22);
   assert.equal(result.motionReview.displayPlayers, 22);
+  assert.ok(result.motionReview.engineTargets >= 1);
+  assert.ok(result.motionReview.displayTargets >= 1);
   assert.ok(result.motionReview.incidentRows >= 1);
   assert.equal(result.motionReview.rangeMax, result.motionClip.frames - 1);
 }
@@ -559,7 +570,7 @@ try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForFunction(() => (
     !("serviceWorker" in navigator)
-      || sessionStorage.getItem("vcfm-sw-reloaded-v229") === "1"
+      || sessionStorage.getItem("vcfm-sw-reloaded-v230") === "1"
   ));
   await page.waitForLoadState("networkidle");
   await page.waitForFunction(() => !!window.vcfmMainApi);

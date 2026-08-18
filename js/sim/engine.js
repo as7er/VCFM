@@ -65,6 +65,7 @@ import {
   shouldHandoffMark,
   weakSideTargetX,
 } from "../collective-defense.js";
+import { resolveOffBallTarget } from "../off-ball-movement.js";
 import { estimateShotXg } from "./../match-analysis.js";
 import {
   PENALTY_RUN_SEC,
@@ -1233,6 +1234,46 @@ export class SimEngine {
     this._clampOffside(a);
   }
 
+  _commitOffBallTarget(a, phaseActor) {
+    const phase = this._teamShapePhase(a.team);
+    const ownerId = this.ball.owner || this.ball.receiverId || phaseActor?.id || null;
+    const reservations = [];
+    for (const teammate of this.agents) {
+      if (
+        teammate.team === a.team &&
+        teammate.id !== a.id &&
+        teammate.offBallTarget
+      ) {
+        reservations.push(teammate.offBallTarget);
+      }
+    }
+    const urgent = a.offBallTargetKind === "one-two" && a.offBallTarget?.kind !== "one-two";
+    let target = resolveOffBallTarget({
+      now: this.t,
+      player: a,
+      candidate: { x: a.tx, y: a.ty, fsm: a.fsm, kind: a.offBallTargetKind },
+      previous: a.offBallTarget,
+      reservations,
+      ball: this.ball,
+      phase,
+      ownerId,
+      attackDirection: this.attackDir(a.team),
+      urgent,
+      lateralOnly: true,
+    });
+    a.tx = target.x;
+    a.ty = target.y;
+    a.fsm = target.fsm;
+    this._clampOffside(a);
+    a.offBallTarget = {
+      ...target,
+      x: a.tx,
+      y: a.ty,
+      playerId: a.id,
+      team: a.team,
+    };
+  }
+
   // ——————————————————————————————————————————————
   // 推进一步（dt 秒）
   // ——————————————————————————————————————————————
@@ -1576,6 +1617,7 @@ export class SimEngine {
       a.ty = clamp(a.y, 4, 96);
       a.fsm = "off";
       a.intent = null;
+      a.offBallTarget = null;
       return;
     }
     if (a.role === "GK") return this._thinkGK(a, owner);
@@ -1602,6 +1644,7 @@ export class SimEngine {
       a.tx = a.x;
       a.ty = a.y;
       a.fsm = a.team === b.kickTeam ? "support" : "cover";
+      a.offBallTarget = null;
       return;
     }
 
@@ -1625,11 +1668,13 @@ export class SimEngine {
       );
       a.intent = { type: "receive", tx: a.tx, ty: a.ty, targetId: a.id };
       a.fsm = "receive";
+      a.offBallTarget = null;
       return;
     }
 
     // 只有真正失去控制的 loose ball 才进入争抢；传球飞行仍保持原攻防结构。
     if (!controlTeam && !owner && this.t >= (this.deadBallUntil || 0)) {
+      a.offBallTarget = null;
       return this._thinkLoose(a);
     }
 
@@ -1641,6 +1686,7 @@ export class SimEngine {
     }
 
     if (hasBall) {
+      a.offBallTarget = null;
       if (b.state === "control" && this.t < (a.controlUntil || 0)) {
         a.tx = a.x;
         a.ty = a.y;
@@ -1702,9 +1748,11 @@ export class SimEngine {
           this.random() * 0.5;
         this._thinkAttackOffBall(a, phaseActor);
         this._applyAttackTactics(a, phaseActor);
+        this._commitOffBallTarget(a, phaseActor);
       }
       return;
     }
+    a.offBallTarget = null;
     return this._thinkDefend(a, phaseActor);
   }
 
@@ -3027,6 +3075,7 @@ export class SimEngine {
 
   /** 无球进攻：前锋回撤、中场前插、边后卫套边；核心自由靠球 */
   _thinkAttackOffBall(a, owner) {
+    a.offBallTargetKind = null;
     const dir = this.attackDir(a.team);
     const b = this.ball;
     const ownGoalY = a.team === "home" ? SIM.HOME_GOAL_Y : SIM.AWAY_GOAL_Y;
@@ -3059,6 +3108,7 @@ export class SimEngine {
       a.tx = clamp(owner.x + side * (5 + this.random() * 3), 6, 94);
       a.ty = clamp(owner.y + dir * (5 + this.random() * 5), 5, 95);
       a.fsm = "support";
+      a.offBallTargetKind = "one-two";
       this._clampOffside(a);
       return;
     }
@@ -6793,6 +6843,7 @@ export class SimEngine {
         state: this.ball.state || "loose",
         restartType: this.ball.restartType || null,
         controlUntil: this.ball.controlUntil || 0,
+        shotAt: Number.isFinite(this.ball.shotAt) ? this.ball.shotAt : null,
       },
       motionContext: {
         discontinuity: !!(
@@ -6838,6 +6889,20 @@ export class SimEngine {
         controlPhase: a.controlPhase,
         fsm: a.fsm,
         shapePhase: a.shapePhase,
+        movementTarget: a.offBallTarget
+          ? {
+              x: a.offBallTarget.x,
+              y: a.offBallTarget.y,
+              source: a.offBallTarget.decision,
+              kind: a.offBallTarget.kind,
+              setAt: a.offBallTarget.setAt,
+              until: a.offBallTarget.until,
+              ownerId: a.offBallTarget.ownerId,
+              ball: a.offBallTarget.ball
+                ? { x: a.offBallTarget.ball.x, y: a.offBallTarget.ball.y }
+                : null,
+            }
+          : null,
         defensiveJob: this._defPlans[a.team]?.jobs?.get(a.id)?.type || null,
         hasBall: this.ball.owner === a.id,
         sentOff: !!a.sentOff,

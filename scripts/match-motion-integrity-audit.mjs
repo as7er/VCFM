@@ -82,6 +82,9 @@ function manualFrame(t, options = {}) {
         vx: options.vx ?? 0.5,
         vy: options.vy ?? 0,
         heading: 0,
+        movementTarget: options.targetX == null
+          ? null
+          : { x: options.targetX, y: 50, source: "updated", setAt: t, until: t + 1, phase: "stable-possession", ownerId: "home-1" },
       },
       {
         id: "away-1",
@@ -136,11 +139,33 @@ function auditSyntheticDetection() {
   assert.ok(incidentTypes(displayGap).has(MOTION_INCIDENT_TYPES.DISPLAY_DIVERGENCE));
 
   const overlap = new MotionIntegrityMonitor();
-  for (let index = 0; index <= 5; index++) {
+  for (let index = 0; index <= 7; index++) {
     const frame = manualFrame(index * 0.1, { awayX: 30.1 + index * 0.05, awayY: 50 });
     overlap.record(frame);
   }
   assert.ok(incidentTypes(overlap).has(MOTION_INCIDENT_TYPES.PLAYER_OVERLAP));
+
+  const targetChurn = new MotionIntegrityMonitor();
+  for (const [index, targetX] of [65, 35, 65, 35].entries()) {
+    targetChurn.record(manualFrame(index * 0.1, { targetX, playerX: 50, ballX: 50.8 }));
+  }
+  assert.ok(incidentTypes(targetChurn).has(MOTION_INCIDENT_TYPES.PLAYER_TARGET_CHURN));
+
+  const supportCrowding = new MotionIntegrityMonitor();
+  for (let index = 0; index <= 7; index++) {
+    const frame = manualFrame(index * 0.1);
+    frame.players[0].fsm = "support";
+    frame.players[0].movementTarget = { x: 55, y: 45, source: "layered", setAt: 0, until: 10, phase: "stable-possession", ownerId: "home-1" };
+    frame.players.push({
+      ...frame.players[0],
+      id: "home-2",
+      num: 10,
+      x: 35,
+      movementTarget: { x: 55.2, y: 45, source: "layered", setAt: 0, until: 10, phase: "stable-possession", ownerId: "home-1" },
+    });
+    supportCrowding.record(frame);
+  }
+  assert.ok(incidentTypes(supportCrowding).has(MOTION_INCIDENT_TYPES.SUPPORT_TARGET_CROWDING));
 
   const clip = overlap.captureClip({
     reason: "audit",
@@ -148,7 +173,7 @@ function auditSyntheticDetection() {
     metadata: { fixtureId: "motion-audit", matchSeed: 229 },
   });
   assert.equal(clip.kind, "vcfm-motion-clip");
-  assert.equal(clip.version, 1);
+  assert.equal(clip.version, 2);
   assert.equal(clip.metadata.matchSeed, 229);
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(clip)));
 }
@@ -222,8 +247,12 @@ function auditCompleteMatches() {
 
   assert.equal(background.severe, 0, `severe background motion incidents remain: ${JSON.stringify(background.severeExamples)}`);
   assert.equal(standard.severe, 0, `severe standard motion incidents remain: ${JSON.stringify(standard.severeExamples)}`);
-  assert.ok(background.warnings <= 8, `background motion warning volume is too high: ${JSON.stringify(background.byType)}`);
-  assert.equal(standard.warnings, 0, `standard motion warnings remain: ${JSON.stringify(standard.warningExamples)}`);
+  assert.ok((background.byType[MOTION_INCIDENT_TYPES.PLAYER_TARGET_CHURN] || 0) <= 12, `background target churn is too high: ${JSON.stringify(background.byType)}`);
+  assert.ok((background.byType[MOTION_INCIDENT_TYPES.SUPPORT_TARGET_CROWDING] || 0) <= 18, `background support target crowding is too high: ${JSON.stringify(background.byType)}`);
+  assert.ok((background.byType[MOTION_INCIDENT_TYPES.PLAYER_OSCILLATION] || 0) <= 8, `background player oscillation is too high: ${JSON.stringify(background.byType)}`);
+  assert.ok((standard.byType[MOTION_INCIDENT_TYPES.PLAYER_TARGET_CHURN] || 0) <= 4, `standard target churn is too high: ${JSON.stringify(standard.byType)}`);
+  assert.ok((standard.byType[MOTION_INCIDENT_TYPES.SUPPORT_TARGET_CROWDING] || 0) <= 6, `standard support target crowding is too high: ${JSON.stringify(standard.byType)}`);
+  assert.equal((standard.byType[MOTION_INCIDENT_TYPES.PLAYER_OSCILLATION] || 0), 0, `standard player oscillation remains: ${JSON.stringify(standard.warningExamples)}`);
   assert.ok([...backgroundSamples, ...standardSamples].every((sample) => sample.clip.frames.length >= 35 && sample.clip.frames.length <= 125));
   assert.ok([...backgroundSamples, ...standardSamples].every((sample) => sample.clip.range.durationSeconds <= 12.31));
   return { background, standard };

@@ -1,4 +1,4 @@
-export const MOTION_DIAGNOSTIC_VERSION = 1;
+export const MOTION_DIAGNOSTIC_VERSION = 2;
 
 const PITCH_WIDTH_METRES = 68;
 const PITCH_LENGTH_METRES = 105;
@@ -9,7 +9,9 @@ export const MOTION_INCIDENT_TYPES = Object.freeze({
   PLAYER_TELEPORT: "player-teleport",
   PLAYER_ACCELERATION: "player-acceleration",
   PLAYER_OSCILLATION: "player-oscillation",
+  PLAYER_TARGET_CHURN: "player-target-churn",
   PLAYER_OVERLAP: "player-overlap",
+  SUPPORT_TARGET_CROWDING: "support-target-crowding",
   OWNER_BALL_GAP: "owner-ball-gap",
   BALL_TELEPORT: "ball-teleport",
   DISPLAY_DIVERGENCE: "display-divergence",
@@ -29,6 +31,14 @@ export const DEFAULT_MOTION_THRESHOLDS = Object.freeze({
   oscillationSpeedMps: 2.2,
   oscillationWindowSeconds: 1.2,
   oscillationCount: 3,
+  targetChangeMetres: 5.5,
+  targetRemainingMetres: 2.4,
+  targetReversalAngleRadians: Math.PI * 0.72,
+  targetChurnWindowSeconds: 4,
+  targetChurnCount: 3,
+  targetBallMoveMetres: 7,
+  supportTargetGapMetres: 1.6,
+  supportTargetCrowdingSeconds: 0.6,
 });
 
 function clamp(value, min, max) {
@@ -67,6 +77,7 @@ function angleBetween(a, b) {
 }
 
 function compactPlayer(player = {}) {
+  const movementTarget = player.movementTarget;
   return {
     id: player.id ?? null,
     team: player.team || null,
@@ -78,6 +89,22 @@ function compactPlayer(player = {}) {
     vy: round(player.vy),
     heading: round(player.heading),
     fsm: player.fsm || null,
+    shapePhase: player.shapePhase || null,
+    movementTarget: movementTarget
+      ? {
+          x: round(movementTarget.x),
+          y: round(movementTarget.y),
+          source: movementTarget.source || null,
+          kind: movementTarget.kind || null,
+          setAt: round(movementTarget.setAt, 4),
+          until: round(movementTarget.until, 4),
+          phase: movementTarget.phase || player.shapePhase || null,
+          ownerId: movementTarget.ownerId ?? null,
+          ball: movementTarget.ball
+            ? { x: round(movementTarget.ball.x), y: round(movementTarget.ball.y) }
+            : null,
+        }
+      : null,
     defensiveJob: player.defensiveJob || null,
     sentOff: !!player.sentOff,
     separationContact: !!player.separationContact,
@@ -92,6 +119,7 @@ function compactBall(ball = {}) {
     owner: ball.owner ?? null,
     state: ball.state || "loose",
     restartType: ball.restartType || null,
+    shotAt: Number.isFinite(Number(ball.shotAt)) ? round(ball.shotAt, 4) : null,
   };
 }
 
@@ -166,6 +194,9 @@ export class MotionIntegrityMonitor {
     this._overlapSince = new Map();
     this._overlapReportedAt = new Map();
     this._turns = new Map();
+    this._targetTurns = new Map();
+    this._supportCrowdingSince = new Map();
+    this._supportCrowdingReportedAt = new Map();
     return this.status();
   }
 
@@ -195,6 +226,8 @@ export class MotionIntegrityMonitor {
       this.frames = [];
       this._overlapSince.clear();
       this._turns.clear();
+      this._targetTurns.clear();
+      this._supportCrowdingSince.clear();
     } else if (
       Number.isFinite(lastTime) &&
       engine.t - lastTime < this.sampleIntervalSeconds &&
@@ -340,11 +373,14 @@ export class MotionIntegrityMonitor {
             this._turns.set(id, []);
           }
         }
+
+        this._analyzeTargetChange(before, player, current.t, id);
       }
 
       const ballDistance = pointDistanceMetres(previous.ball, current.ball);
       const ballSpeed = ballDistance / dt;
-      const ballSpeedLimit = previous.ball.state === "shot" || current.ball.state === "shot"
+      const recentShot = Number.isFinite(current.ball.shotAt) && current.t - current.ball.shotAt <= 0.5;
+      const ballSpeedLimit = previous.ball.state === "shot" || current.ball.state === "shot" || recentShot
         ? this.thresholds.shotBallSpeedMps
         : this.thresholds.ballSpeedMps;
       if (ballSpeed > ballSpeedLimit) {
@@ -365,11 +401,136 @@ export class MotionIntegrityMonitor {
           "ball"
         );
       }
+    } else {
+      this._turns.clear();
+      this._targetTurns.clear();
     }
 
     this._analyzeOwnerGap(current, currentPlayers, boundary);
     this._analyzeOverlaps(current, boundary);
+    this._analyzeSupportTargets(current, boundary);
     this._analyzeDisplay(currentRecord);
+  }
+
+  _analyzeTargetChange(before, player, time, id) {
+    const previousTarget = before.movementTarget;
+    const currentTarget = player.movementTarget;
+    if (!previousTarget || !currentTarget) {
+      this._targetTurns.delete(id);
+      return;
+    }
+    if (
+      previousTarget.phase !== currentTarget.phase ||
+      previousTarget.ownerId !== currentTarget.ownerId
+    ) {
+      this._targetTurns.delete(id);
+      return;
+    }
+    if (previousTarget.setAt === currentTarget.setAt) return;
+    if (
+      previousTarget.ball &&
+      currentTarget.ball &&
+      pointDistanceMetres(previousTarget.ball, currentTarget.ball) >= this.thresholds.targetBallMoveMetres
+    ) {
+      this._targetTurns.delete(id);
+      return;
+    }
+    const change = pointDistanceMetres(previousTarget, currentTarget);
+    const remaining = pointDistanceMetres(player, previousTarget);
+    const previousVector = {
+      x: (previousTarget.x - player.x) * (PITCH_WIDTH_METRES / FIELD_UNITS),
+      y: (previousTarget.y - player.y) * (PITCH_LENGTH_METRES / FIELD_UNITS),
+    };
+    const currentVector = {
+      x: (currentTarget.x - player.x) * (PITCH_WIDTH_METRES / FIELD_UNITS),
+      y: (currentTarget.y - player.y) * (PITCH_LENGTH_METRES / FIELD_UNITS),
+    };
+    if (
+      change < this.thresholds.targetChangeMetres ||
+      remaining < this.thresholds.targetRemainingMetres ||
+      angleBetween(previousVector, currentVector) < this.thresholds.targetReversalAngleRadians
+    ) return;
+    const turns = (this._targetTurns.get(id) || []).filter(
+      (turn) => time - turn.t <= this.thresholds.targetChurnWindowSeconds
+    );
+    turns.push({ t: time, from: previousTarget, to: currentTarget });
+    this._targetTurns.set(id, turns);
+    if (turns.length < this.thresholds.targetChurnCount) return;
+    this._addIncident(
+      MOTION_INCIDENT_TYPES.PLAYER_TARGET_CHURN,
+      "warning",
+      time,
+      {
+        entityId: id,
+        team: player.team,
+        changes: turns.length,
+        windowSeconds: this.thresholds.targetChurnWindowSeconds,
+        from: { x: previousTarget.x, y: previousTarget.y },
+        to: { x: currentTarget.x, y: currentTarget.y },
+        fromSource: previousTarget.source,
+        toSource: currentTarget.source,
+        changeTimes: turns.map((turn) => round(turn.t, 2)),
+      },
+      id,
+      this.thresholds.targetChurnWindowSeconds
+    );
+    this._targetTurns.set(id, []);
+  }
+
+  _analyzeSupportTargets(frame, boundary) {
+    if (boundary) {
+      this._supportCrowdingSince.clear();
+      return;
+    }
+    const players = frame.players.filter((player) =>
+      !player.sentOff &&
+      player.fsm === "support" &&
+      player.movementTarget &&
+      player.movementTarget.ownerId
+    );
+    const active = new Set();
+    for (let left = 0; left < players.length; left++) {
+      for (let right = left + 1; right < players.length; right++) {
+        const a = players[left];
+        const b = players[right];
+        if (
+          a.team !== b.team ||
+          a.movementTarget.ownerId !== b.movementTarget.ownerId
+        ) continue;
+        const gap = pointDistanceMetres(a.movementTarget, b.movementTarget);
+        if (gap >= this.thresholds.supportTargetGapMetres) continue;
+        const pair = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
+        const key = `${a.movementTarget.ownerId}:${a.shapePhase || "phase"}:${pair}`;
+        active.add(key);
+        const since = this._supportCrowdingSince.get(key) ?? frame.t;
+        this._supportCrowdingSince.set(key, since);
+        const lastReported = this._supportCrowdingReportedAt.get(key) ?? -Infinity;
+        if (
+          frame.t - since >= this.thresholds.supportTargetCrowdingSeconds &&
+          frame.t - lastReported >= 1.5
+        ) {
+          this._addIncident(
+            MOTION_INCIDENT_TYPES.SUPPORT_TARGET_CROWDING,
+            "warning",
+            frame.t,
+            {
+              entityId: pair,
+              playerIds: [a.id, b.id],
+              ownerId: a.movementTarget.ownerId,
+              gapMetres: round(gap, 2),
+              durationSeconds: round(frame.t - since, 2),
+              sources: [a.movementTarget.source, b.movementTarget.source],
+            },
+            key,
+            1.5
+          );
+          this._supportCrowdingReportedAt.set(key, frame.t);
+        }
+      }
+    }
+    for (const key of this._supportCrowdingSince.keys()) {
+      if (!active.has(key)) this._supportCrowdingSince.delete(key);
+    }
   }
 
   _analyzeOwnerGap(frame, players, boundary) {

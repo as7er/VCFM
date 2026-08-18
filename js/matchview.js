@@ -355,6 +355,10 @@ export class MatchView {
       // 速度用于朝向箭头 / 冲刺残影
       pl.vx = pl.x - ox;
       pl.vy = pl.y - oy;
+      pl.movementTarget = s.movementTarget || null;
+      pl.shapePhase = s.shapePhase || null;
+      pl.fsm = s.fsm || null;
+      pl.defensiveJob = s.defensiveJob || null;
       if (s.heading != null && Number.isFinite(s.heading)) {
         pl.heading = s.heading;
       } else if (Math.hypot(pl.vx, pl.vy) > 0.08) {
@@ -513,6 +517,8 @@ export class MatchView {
         vy: (a.vy || 0) + ((b.vy || 0) - (a.vy || 0)) * t,
         heading: h + dh * t,
         fsm: t < 0.5 ? a.fsm || null : b.fsm || null,
+        shapePhase: t < 0.5 ? a.shapePhase || null : b.shapePhase || null,
+        movementTarget: t < 0.5 ? a.movementTarget || null : b.movementTarget || null,
         defensiveJob: t < 0.5 ? a.defensiveJob || null : b.defensiveJob || null,
         sentOff: !!(t < 0.5 ? a.sentOff : b.sentOff),
         separationContact: !!(t < 0.5 ? a.separationContact : b.separationContact),
@@ -2505,6 +2511,7 @@ export class MatchView {
         owner: this.carrier?.id || null,
         state: this.ballState === "flight" ? "pass" : this.ballState,
         restartType: engineFrame.ball.restartType || null,
+        shotAt: engineFrame.ball.shotAt ?? null,
       },
       players: this.players.map((player) => ({
         id: player.id,
@@ -2516,6 +2523,10 @@ export class MatchView {
         vx: player.vx,
         vy: player.vy,
         heading: player.heading,
+        fsm: player.fsm || null,
+        shapePhase: player.shapePhase || null,
+        movementTarget: player.movementTarget || null,
+        defensiveJob: player.defensiveJob || null,
         sentOff: player.el.classList.contains("sent-off"),
       })),
       motionContext: engineFrame.motionContext || null,

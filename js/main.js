@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=229";
-import { clubCrestHtml } from "./club-crest.js?v=229";
+import { nationFlagHtml } from "./flags.js?v=230";
+import { clubCrestHtml } from "./club-crest.js?v=230";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -316,7 +316,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=229";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=230";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -383,7 +383,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=229";
+} from "./avatar.js?v=230";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
@@ -476,7 +476,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=229").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=230").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -890,7 +890,9 @@ function motionIncidentLabel(type, en = getLang() === "en") {
         "player-teleport": "Player displacement",
         "player-acceleration": "Acceleration spike",
         "player-oscillation": "Direction oscillation",
+        "player-target-churn": "Run target churn",
         "player-overlap": "Persistent overlap",
+        "support-target-crowding": "Support target crowding",
         "owner-ball-gap": "Owner/ball separation",
         "ball-teleport": "Ball displacement",
         "display-divergence": "Engine/display divergence",
@@ -900,7 +902,9 @@ function motionIncidentLabel(type, en = getLang() === "en") {
         "player-teleport": "球员异常位移",
         "player-acceleration": "加速度突变",
         "player-oscillation": "方向反复切换",
+        "player-target-churn": "跑位目标反复",
         "player-overlap": "持续重叠",
+        "support-target-crowding": "接应目标拥挤",
         "owner-ball-gap": "持球人与球分离",
         "ball-teleport": "球异常位移",
         "display-divergence": "引擎与画面偏离",
@@ -914,12 +918,22 @@ function motionIncidentValue(incident, en = getLang() === "en") {
   if (Number.isFinite(Number(incident.gapMetres))) return `${Number(incident.gapMetres).toFixed(2)} m`;
   if (Number.isFinite(Number(incident.distanceMetres))) return `${Number(incident.distanceMetres).toFixed(2)} m`;
   if (Number.isFinite(Number(incident.turns))) return en ? `${incident.turns} turns` : `${incident.turns} 次转向`;
+  if (Number.isFinite(Number(incident.changes))) return en ? `${incident.changes} changes` : `${incident.changes} 次改跑`;
   return incident.entityId || "";
 }
 
 function motionPitchSvg(frame, metadata = {}) {
   const homeColor = safeMotionColor(metadata.home?.color, "#22c55e");
   const awayColor = safeMotionColor(metadata.away?.color, "#ef4444");
+  const targets = (frame?.players || []).map((player) => {
+    if (!player.movementTarget || player.sentOff) return "";
+    const x = Math.max(1, Math.min(99, Number(player.x) || 0));
+    const y = Math.max(1, Math.min(99, Number(player.y) || 0));
+    const tx = Math.max(1, Math.min(99, Number(player.movementTarget.x) || 0));
+    const ty = Math.max(1, Math.min(99, Number(player.movementTarget.y) || 0));
+    const color = player.team === "home" ? homeColor : awayColor;
+    return `<g class="motion-target"><line x1="${x}" y1="${y}" x2="${tx}" y2="${ty}" stroke="${color}" stroke-width=".42" stroke-dasharray="1.5 1.2" opacity=".72"/><circle cx="${tx}" cy="${ty}" r=".72" fill="none" stroke="${color}" stroke-width=".42" opacity=".9"/></g>`;
+  }).join("");
   const players = (frame?.players || []).map((player) => {
     const x = Math.max(1, Math.min(99, Number(player.x) || 0));
     const y = Math.max(1, Math.min(99, Number(player.y) || 0));
@@ -939,7 +953,7 @@ function motionPitchSvg(frame, metadata = {}) {
     <rect x="35" y="1" width="30" height="6" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
     <rect x="20" y="83" width="60" height="16" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
     <rect x="35" y="93" width="30" height="6" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
-    ${players}${ball}
+    ${targets}${players}${ball}
   </svg>`;
 }
 
