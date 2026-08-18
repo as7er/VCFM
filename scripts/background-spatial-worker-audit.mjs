@@ -13,8 +13,19 @@ import { ensureWorldStaff } from "../js/staff.js";
 
 const clone = (value) => structuredClone(value);
 
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
 const start = CLUB_TEMPLATES.find((club) => club.division === 3);
+const originalRandom = Math.random;
+Math.random = seededRandom(0xabcdef01);
 const source = createWorld(start.id, "Background Spatial Worker Audit");
+Math.random = originalRandom;
 ensureWorldStaff(source);
 const sourceFixture = source.fixtures.find(
   (fixture) => fixture.home !== source.userClubId && fixture.away !== source.userClubId

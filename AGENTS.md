@@ -4,7 +4,16 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v226**（可编辑持球/无球双阵型）
+> 缓存：**vcfm-v227**（AI 持球/无球阶段阵型）
+
+## v227 AI 持球/无球阶段阵型（2026-08-18）
+
+- 主教练理念新增稳定、持久化的持球与无球阵型偏好；职员资料公开展示偏好，旧档按既有理念稳定补齐
+- AI 赛前计划读取基础阵型、当前首发位置适配、阵型移动距离、对手锋线人数、宽度与实力差；相同公开事实确定性地产生相同阶段方案。只有应变 5/5 的主教练会自动采用分离结构，上半场持球结构默认跟随基础阵型，只允许接近基础阵型的无球块，避免整队瞬移
+- 中场和 60/75 分钟复核按真实比分与比赛阶段启用阶段阵型；AI、完全委托与俱乐部经营模式共用同一逻辑
+- 阶段阵型只写入 `tactics.possessionFormation` / `tactics.outOfPossessionFormation` 并改变空间站位，不修改基础阵型、首发、能力、动作成功率或赛果
+- 俱乐部资料展示实际基础、持球与无球阵型；新增 `scripts/manager-phase-shapes-audit.mjs`，缓存 `vcfm-v227`
+- 已验证：`node scripts/verify.mjs`、`node js/sim/_p5_integration.mjs`、标准与后台档各 8 场真实性审计、`npm run test:browser`、`npm run test:save-browser` 与 `git diff --check`；标准档 2.63 球/场、81.8% 传球成功率，后台档 2.75 球/场、82.8% 传球成功率，两档均零停滞
 
 ## v226 可编辑持球/无球双阵型（2026-08-18）
 
@@ -706,5 +715,5 @@
 
 - 勿用 PowerShell `Set-Content` 写中文源码
 - 主目录 `F:\VCFM`；说推 GitHub 再 push
-- 用户场使用 0.1 秒标准档；AI 后台使用可审计的 0.2 秒无画面档并移入 Worker。修改性能档后必须分别重跑标准与 background 真实性审计
+- 用户场使用 0.1 秒标准档；AI 后台普通决策使用 0.3 秒步长，关键球路与门将威胁窗口局部使用 0.1 秒自适应积分并移入 Worker。修改性能档后必须分别重跑标准与 background 真实性审计
 - **头像**：全场景统一热血程序脸 2.1（`js/avatar.js`）；正式肖像资产池已弃用删除，同队球衣色由 kit 直接绘制。

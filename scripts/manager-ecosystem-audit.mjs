@@ -39,6 +39,8 @@ try {
     assert.ok(identity.label && identity.labelEn, `${coach.id} identity should be bilingual`);
     assert.ok(identity.preferredFormations.length >= 2, `${coach.id} should prefer multiple shapes`);
     assert.ok(identity.preferredFormations.every((formation) => FORMATIONS[formation]));
+    assert.ok(identity.phaseFormations.possession.every((formation) => FORMATIONS[formation]));
+    assert.ok(identity.phaseFormations.outOfPossession.every((formation) => FORMATIONS[formation]));
     for (const field of ["pressing", "tempo", "width", "defensiveLine", "youthTrust", "rotation", "adaptability"]) {
       assert.ok(identity[field] >= 1 && identity[field] <= 5, `${coach.id} ${field} should use the visible 1-5 scale`);
     }
@@ -84,6 +86,8 @@ try {
   assert.equal(user.tactics.style, "counter", "delegated tactics should read the coach's real style");
   assert.equal(user.tactics.pressing, 2);
   assert.ok(userCoach.footballIdentity.preferredFormations.includes(user.tactics.formation));
+  assert.ok(FORMATIONS[user.tactics.possessionFormation || user.tactics.formation]);
+  assert.ok(FORMATIONS[user.tactics.outOfPossessionFormation || user.tactics.formation]);
 
   const aiIdentityClub = world.clubs.find((club) => club.id !== world.userClubId);
   const aiOpponent = world.clubs.find(

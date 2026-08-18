@@ -820,7 +820,11 @@ export class SimEngine {
     if (!targetSlot) return false;
     const targetX = a.isHome ? targetSlot.x : 100 - targetSlot.x;
     const targetY = a.isHome ? targetSlot.y : 100 - targetSlot.y;
-    const blend = clamp(Number(weight) || 0, 0, 0.65);
+    const club = a.team === "home" ? this.home : this.away;
+    const coachPlanned = !!tactics.coachPhaseIdentityId
+      && tactics.coachPhaseIdentityId === club?.staff?.coach?.id;
+    const resolvedWeight = coachPlanned ? Math.min(Number(weight) || 0, 0.18) : weight;
+    const blend = clamp(Number(resolvedWeight) || 0, 0, 0.65);
     if (blend <= 0) return false;
     a.tx = clamp(a.tx * (1 - blend) + targetX * blend, 3, 97);
     a.ty = clamp(a.ty * (1 - blend) + targetY * blend, 3, 97);

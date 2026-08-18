@@ -88,6 +88,7 @@ import {
   shouldStaffHandleMatchday,
 } from "./delegation.js";
 import {
+  applyCoachPhaseFormations,
   applyCoachTacticalIdentity,
   ensureCoachIdentity,
 } from "./manager-ecosystem.js";
@@ -662,6 +663,16 @@ export function createMatchSession(world, fixture, opts = {}) {
   // 用户保留手动/上次首发；AI 强制重排
   ensureMatchLineup(home, { forceAuto: home.id !== world.userClubId, day: world.day, importance, eligibleIds: homeEligibleIds });
   ensureMatchLineup(away, { forceAuto: away.id !== world.userClubId, day: world.day, importance, eligibleIds: awayEligibleIds });
+  const homeCoachShapes = home.id !== world.userClubId || isFullyDelegated(world, home, "tactics");
+  const awayCoachShapes = away.id !== world.userClubId || isFullyDelegated(world, away, "tactics");
+  const homeOpponentSnapshot = { id: away.id, power: away.power, tactics: { ...away.tactics } };
+  const awayOpponentSnapshot = { id: home.id, power: home.power, tactics: { ...home.tactics } };
+  if (homeCoachShapes) {
+    applyCoachPhaseFormations(home, home.staff?.coach, { opponent: homeOpponentSnapshot });
+  }
+  if (awayCoachShapes) {
+    applyCoachPhaseFormations(away, away.staff?.coach, { opponent: awayOpponentSnapshot });
+  }
   // 主客都保证有核心（用户已指定则保留；AI / 未指定则自动选进攻最强的）
   // 避免「只有用户队会回撤内切/绝对进攻权」的单方面表现
   ensureCorePlayer(home);
@@ -2036,6 +2047,8 @@ export function aiHalfTime(state) {
       tempo: t.tempo,
       width: t.width,
       defensiveLine: t.defensiveLine,
+      possessionFormation: t.possessionFormation ?? null,
+      outOfPossessionFormation: t.outOfPossessionFormation ?? null,
     };
     let reason = "比分与场上结构稳定，保持原计划";
     if (myG < opG) {
@@ -2052,6 +2065,12 @@ export function aiHalfTime(state) {
       t.tempo = Math.max(1, (t.tempo || 3) - 1);
       reason = "两球以上领先，降低比赛风险并保护体能";
     }
+    const opponent = club === state.home ? state.away : state.home;
+    const phasePlan = applyCoachPhaseFormations(club, club.staff?.coach, {
+      opponent,
+      scoreGap: myG - opG,
+      minute: 45,
+    });
     // 换下疲劳/受伤
     const sk = sideKey(state, club);
     const xi = activeXi(state, club);
@@ -2065,13 +2084,17 @@ export function aiHalfTime(state) {
         state,
         45,
         "coach",
-        `🧠 主教练中场决定：${changed ? `${t.formation} · ${styleLabel(t.style)} · 压迫 ${t.pressing} · 节奏 ${t.tempo}` : "维持现有战术"}。${reason}`,
+        `🧠 主教练中场决定：${changed ? `${t.formation} · 持球 ${phasePlan.effectivePossessionFormation} · 无球 ${phasePlan.effectiveOutOfPossessionFormation} · ${styleLabel(t.style)} · 压迫 ${t.pressing} · 节奏 ${t.tempo}` : "维持现有战术"}。${reason}`,
         {
           teamId: club.id,
           managedDecision: true,
           phase: "ht",
           reason,
           tactics: { ...t },
+          phaseShapes: {
+            possession: phasePlan.effectivePossessionFormation,
+            outOfPossession: phasePlan.effectiveOutOfPossessionFormation,
+          },
         }
       );
     }
@@ -2101,6 +2124,16 @@ function coachInMatchReview(state, minute) {
       club.tactics.pressing = Math.max(1, (club.tactics.pressing || 3) - 1);
       club.tactics.tempo = Math.max(1, (club.tactics.tempo || 3) - 1);
       decisions.push("比分领先，降低风险并保护体能");
+    }
+
+    const opponent = club === state.home ? state.away : state.home;
+    const phasePlan = applyCoachPhaseFormations(club, club.staff?.coach, {
+      opponent,
+      scoreGap,
+      minute,
+    });
+    if (phasePlan.changed) {
+      decisions.push(`调整阶段阵型为持球 ${phasePlan.effectivePossessionFormation}、无球 ${phasePlan.effectiveOutOfPossessionFormation}`);
     }
 
     const targetCount = aiSubTargetCount(state, club, minute, scoreGap);

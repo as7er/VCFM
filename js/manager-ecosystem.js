@@ -3,6 +3,7 @@
 import { DIVISIONS, FORMATIONS } from "./data.js";
 import { autoLineup, ensureLineupRoles, ensureTactics } from "./models.js";
 import { positionFitForSlot, positionGroup, slotPositionCode } from "./player-positions.js";
+import { shapeFormationSlotMap } from "./team-shapes.js";
 import {
   roleDetail,
   roleIdentityFit,
@@ -12,8 +13,10 @@ import {
 } from "./player-roles.js";
 import { generateBoardObjective } from "./board.js";
 
-export const COACH_IDENTITY_VERSION = 1;
+export const COACH_IDENTITY_VERSION = 2;
 export const MANAGER_REVIEW_VERSION = 1;
+const ACTIVE_PHASE_SHAPE_ADAPTABILITY = 5;
+const PRE_MATCH_PHASE_MOVE_LIMIT = 8;
 
 const ARCHETYPES = Object.freeze({
   controlled: Object.freeze({
@@ -21,6 +24,8 @@ const ARCHETYPES = Object.freeze({
     label: "控球组织",
     labelEn: "Controlled possession",
     formations: ["4-2-3-1", "4-3-3", "3-5-2"],
+    possessionFormations: ["3-4-3", "4-2-3-1", "3-5-2"],
+    outOfPossessionFormations: ["4-1-4-1", "4-3-3", "4-5-1"],
     style: "possession",
     pressing: 4,
     tempo: 2,
@@ -33,6 +38,8 @@ const ARCHETYPES = Object.freeze({
     label: "主动压迫",
     labelEn: "Front-foot pressing",
     formations: ["4-3-3", "3-4-3", "4-2-3-1"],
+    possessionFormations: ["3-4-3", "4-3-3", "4-2-3-1"],
+    outOfPossessionFormations: ["4-1-4-1", "4-3-3", "4-4-2"],
     style: "attack",
     pressing: 5,
     tempo: 4,
@@ -45,6 +52,8 @@ const ARCHETYPES = Object.freeze({
     label: "快速反击",
     labelEn: "Direct counterattack",
     formations: ["4-2-3-1", "4-5-1", "5-3-2"],
+    possessionFormations: ["3-5-2", "4-2-3-1", "4-3-3"],
+    outOfPossessionFormations: ["5-3-2", "4-5-1", "4-1-4-1"],
     style: "counter",
     pressing: 2,
     tempo: 4,
@@ -57,6 +66,8 @@ const ARCHETYPES = Object.freeze({
     label: "紧凑防守",
     labelEn: "Compact defending",
     formations: ["4-1-4-1", "5-3-2", "4-4-2"],
+    possessionFormations: ["3-5-2", "4-4-2", "4-2-3-1"],
+    outOfPossessionFormations: ["5-3-2", "4-5-1", "4-1-4-1"],
     style: "defend",
     pressing: 2,
     tempo: 2,
@@ -69,6 +80,8 @@ const ARCHETYPES = Object.freeze({
     label: "直接进攻",
     labelEn: "Direct attacking",
     formations: ["4-4-2", "3-5-2", "4-3-3"],
+    possessionFormations: ["3-4-3", "3-5-2", "4-4-2"],
+    outOfPossessionFormations: ["4-4-2", "5-3-2", "4-5-1"],
     style: "attack",
     pressing: 3,
     tempo: 5,
@@ -81,6 +94,8 @@ const ARCHETYPES = Object.freeze({
     label: "均衡应变",
     labelEn: "Balanced adaptation",
     formations: ["4-2-3-1", "4-3-3", "4-4-2"],
+    possessionFormations: ["4-2-3-1", "4-3-3", "3-5-2"],
+    outOfPossessionFormations: ["4-1-4-1", "4-4-2", "4-5-1"],
     style: "balanced",
     pressing: 3,
     tempo: 3,
@@ -134,6 +149,16 @@ export function ensureCoachIdentity(coach) {
     label: archetype.label,
     labelEn: archetype.labelEn,
     preferredFormations: validFormationList(existing.preferredFormations, archetype.formations),
+    phaseFormations: {
+      possession: validFormationList(
+        existing.phaseFormations?.possession,
+        archetype.possessionFormations
+      ),
+      outOfPossession: validFormationList(
+        existing.phaseFormations?.outOfPossession,
+        archetype.outOfPossessionFormations
+      ),
+    },
     style: archetype.style,
     pressing: clamp(existing.pressing ?? archetype.pressing, 1, 5),
     tempo: clamp(existing.tempo ?? archetype.tempo, 1, 5),
@@ -163,6 +188,7 @@ export function coachIdentityFacts(coach, lang = "zh") {
     return [
       `Identity: ${identity.labelEn}`,
       `Preferred shapes: ${identity.preferredFormations.join(" / ")}`,
+      `Phase shapes: ${identity.phaseFormations.possession.join(" / ")} in possession · ${identity.phaseFormations.outOfPossession.join(" / ")} without the ball`,
       `Base instructions: press ${identity.pressing}, tempo ${identity.tempo}, width ${identity.width}, line ${identity.defensiveLine}`,
       `Youth trust ${identity.youthTrust}/5 · rotation ${identity.rotation}/5 · adaptability ${identity.adaptability}/5`,
     ];
@@ -170,6 +196,7 @@ export function coachIdentityFacts(coach, lang = "zh") {
   return [
     `足球理念：${identity.label}`,
     `偏好阵型：${identity.preferredFormations.join(" / ")}`,
+    `阶段阵型：持球 ${identity.phaseFormations.possession.join(" / ")} · 无球 ${identity.phaseFormations.outOfPossession.join(" / ")}`,
     `基础指令：压迫 ${identity.pressing}、节奏 ${identity.tempo}、宽度 ${identity.width}、防线 ${identity.defensiveLine}`,
     `青训信任 ${identity.youthTrust}/5 · 轮换倾向 ${identity.rotation}/5 · 应变 ${identity.adaptability}/5`,
   ];
@@ -221,6 +248,190 @@ export function preferredCoachFormation(coach, club) {
       score: formationSquadFit(club, formation) + Math.max(0, 12 - index * 4),
     }))
     .sort((a, b) => b.score - a.score)[0]?.formation || identity.preferredFormations[0] || "4-3-3";
+}
+
+function phaseFormationFacts(formationId) {
+  const slots = FORMATIONS[formationId]?.slots || [];
+  const outfield = slots.filter((slot) => slot.pos !== "GK");
+  return {
+    defenders: outfield.filter((slot) => slot.pos === "DEF").length,
+    midfielders: outfield.filter((slot) => slot.pos === "MID").length,
+    attackers: outfield.filter((slot) => slot.pos === "ATT").length,
+    widePlayers: outfield.filter((slot) => Number(slot.x) <= 20 || Number(slot.x) >= 80).length,
+    averageDepth: outfield.length
+      ? outfield.reduce((sum, slot) => sum + Number(slot.y || 50), 0) / outfield.length
+      : 50,
+  };
+}
+
+function phaseLineupFit(club, baseFormationId, targetFormationId) {
+  const baseSlots = FORMATIONS[baseFormationId]?.slots || [];
+  const targetSlots = FORMATIONS[targetFormationId]?.slots || [];
+  const slotMap = shapeFormationSlotMap(baseFormationId, targetFormationId);
+  const playerById = new Map((club?.players || []).map((player) => [player.id, player]));
+  let total = 0;
+  let count = 0;
+  for (let baseIndex = 1; baseIndex < baseSlots.length; baseIndex++) {
+    const player = playerById.get(club?.tactics?.lineup?.[baseIndex]);
+    const targetSlot = targetSlots[slotMap[baseIndex]];
+    if (!player || !targetSlot) continue;
+    total += positionFitForSlot(player, targetSlot, targetSlots).rating;
+    count++;
+  }
+  return count ? total / count : 10;
+}
+
+function phaseMovementDistance(baseFormationId, targetFormationId) {
+  const baseSlots = FORMATIONS[baseFormationId]?.slots || [];
+  const targetSlots = FORMATIONS[targetFormationId]?.slots || [];
+  const slotMap = shapeFormationSlotMap(baseFormationId, targetFormationId);
+  let total = 0;
+  let count = 0;
+  for (let baseIndex = 1; baseIndex < baseSlots.length; baseIndex++) {
+    const source = baseSlots[baseIndex];
+    const target = targetSlots[slotMap[baseIndex]];
+    if (!source || !target) continue;
+    total += Math.hypot(Number(source.x) - Number(target.x), Number(source.y) - Number(target.y));
+    count++;
+  }
+  return count ? total / count : 0;
+}
+
+function phaseFormationCandidates(identity, baseFormationId, phase) {
+  const preferences = identity?.phaseFormations?.[phase] || [];
+  const candidates = new Set([baseFormationId, ...preferences, ...(identity?.preferredFormations || [])]);
+  if (Number(identity?.adaptability || 3) >= 4) {
+    for (const formationId of Object.keys(FORMATIONS)) candidates.add(formationId);
+  }
+  return [...candidates].filter((formationId) => FORMATIONS[formationId]);
+}
+
+function phaseFormationScore(club, identity, formationId, phase, context) {
+  const baseFormationId = context.baseFormationId;
+  const preferences = identity?.phaseFormations?.[phase] || [];
+  const preferenceIndex = preferences.indexOf(formationId);
+  const facts = phaseFormationFacts(formationId);
+  const opponentTactics = context.opponent?.tactics || {};
+  const opponentFormationId = phase === "possession"
+    ? (opponentTactics.outOfPossessionFormation || opponentTactics.formation)
+    : (opponentTactics.possessionFormation || opponentTactics.formation);
+  const opponentFacts = phaseFormationFacts(opponentFormationId);
+  const style = club?.tactics?.style || identity?.style || "balanced";
+  const adaptability = Number(identity?.adaptability || 3);
+  const scoreGap = Number(context.scoreGap) || 0;
+  const scoreUrgency = Math.min(3, Math.abs(scoreGap));
+  const minute = Number(context.minute) || 0;
+  const strengthGap = (Number(club?.power) || 50) - (Number(context.opponent?.power) || 50);
+
+  let score = preferenceIndex >= 0 ? 20 - preferenceIndex * 6 : -7;
+  score += (phaseLineupFit(club, baseFormationId, formationId) - 10) * 0.8;
+  // 阶段阵型是连续站位目标；过大的整队换位会制造不真实的追球和门将威胁窗口。
+  score -= phaseMovementDistance(baseFormationId, formationId) * 0.22;
+  if (formationId === baseFormationId) score += Math.max(0, 4 - adaptability) * 4;
+
+  if (phase === "possession") {
+    const attackingIntent = style === "attack" ? 2.2 : style === "counter" ? 1.5 : style === "possession" ? 1.1 : style === "defend" ? 0.2 : 0.8;
+    score += facts.attackers * attackingIntent;
+    if (style === "possession") score += facts.midfielders * 0.8;
+    if (scoreGap < 0) score += facts.attackers * (minute >= 60 ? 3.2 : 1.8) * scoreUrgency;
+    if (strengthGap >= 12) score += facts.attackers * 0.7;
+    if (opponentFacts.defenders >= 5) score += facts.midfielders * 0.45 + facts.attackers * 0.35;
+    score += Math.max(0, 50 - facts.averageDepth) * 0.04;
+  } else {
+    const defensiveIntent = style === "defend" ? 2.2 : style === "counter" ? 1.7 : 1.0;
+    score += facts.defenders * defensiveIntent + facts.midfielders * 0.3;
+    if (scoreGap > 0) score += facts.defenders * (minute >= 60 ? 3.2 : 1.8) * scoreUrgency;
+    if (strengthGap <= -12) score += facts.defenders * 0.75;
+    if (opponentFacts.attackers >= 3) score += Math.min(facts.defenders, opponentFacts.attackers + 1) * 0.75;
+    if (Number(opponentTactics.width || 3) >= 4) score += facts.widePlayers * 0.55;
+    if (scoreGap < 0 && minute >= 60) score -= facts.defenders * 1.4 * scoreUrgency;
+    score += Math.max(0, facts.averageDepth - 50) * 0.03;
+  }
+  return score;
+}
+
+/**
+ * Select phase formations from public coach, lineup, opponent and score facts.
+ * The selected values only drive team-shape geometry in the spatial engine.
+ */
+export function coachPhaseFormationPlan(club, coach, options = {}) {
+  const identity = ensureCoachIdentity(coach);
+  if (!club || !identity) return { ok: false, msg: "missing coach identity" };
+  ensureTactics(club);
+  const baseFormationId = FORMATIONS[options.baseFormation || club.tactics.formation]
+    ? (options.baseFormation || club.tactics.formation)
+    : "4-3-3";
+  const context = {
+    baseFormationId,
+    opponent: options.opponent || null,
+    scoreGap: Number(options.scoreGap) || 0,
+    minute: Number(options.minute) || 0,
+  };
+  const choose = (phase) => phaseFormationCandidates(identity, baseFormationId, phase)
+    .map((formationId) => ({
+      formationId,
+      score: phaseFormationScore(club, identity, formationId, phase, context),
+    }))
+    .sort((left, right) => right.score - left.score || left.formationId.localeCompare(right.formationId))[0]?.formationId || baseFormationId;
+  const effectivePossessionFormation = choose("possession");
+  const effectiveOutOfPossessionFormation = choose("outOfPossession");
+  return {
+    ok: true,
+    identity,
+    baseFormation: baseFormationId,
+    possessionFormation: effectivePossessionFormation === baseFormationId ? null : effectivePossessionFormation,
+    outOfPossessionFormation: effectiveOutOfPossessionFormation === baseFormationId ? null : effectiveOutOfPossessionFormation,
+    effectivePossessionFormation,
+    effectiveOutOfPossessionFormation,
+    context: {
+      opponentId: context.opponent?.id || null,
+      scoreGap: context.scoreGap,
+      minute: context.minute,
+    },
+  };
+}
+
+export function applyCoachPhaseFormations(club, coach, options = {}) {
+  const plan = coachPhaseFormationPlan(club, coach, options);
+  if (!plan.ok) return plan;
+  // 分离的阶段阵型要求最高应变能力；其余教练继续使用更稳定的基础阵型。
+  const usePhaseShapes = Number(plan.identity?.adaptability || 3) >= ACTIVE_PHASE_SHAPE_ADAPTABILITY;
+  const matchContextActive = Math.abs(Number(plan.context?.scoreGap) || 0) > 0
+    || Number(plan.context?.minute) >= 45;
+  const possessionMoveAllowed = matchContextActive;
+  const outOfPossessionMoveAllowed = matchContextActive
+    || phaseMovementDistance(plan.baseFormation, plan.effectiveOutOfPossessionFormation) <= PRE_MATCH_PHASE_MOVE_LIMIT;
+  const appliedPlan = usePhaseShapes
+    ? {
+      ...plan,
+      possessionFormation: possessionMoveAllowed ? plan.possessionFormation : null,
+      outOfPossessionFormation: outOfPossessionMoveAllowed ? plan.outOfPossessionFormation : null,
+      effectivePossessionFormation: possessionMoveAllowed ? plan.effectivePossessionFormation : plan.baseFormation,
+      effectiveOutOfPossessionFormation: outOfPossessionMoveAllowed ? plan.effectiveOutOfPossessionFormation : plan.baseFormation,
+      selectionSuppressed: !possessionMoveAllowed || !outOfPossessionMoveAllowed,
+    }
+    : {
+      ...plan,
+      possessionFormation: null,
+      outOfPossessionFormation: null,
+      effectivePossessionFormation: plan.baseFormation,
+      effectiveOutOfPossessionFormation: plan.baseFormation,
+      selectionSuppressed: true,
+    };
+  const before = {
+    possessionFormation: club.tactics.possessionFormation ?? null,
+    outOfPossessionFormation: club.tactics.outOfPossessionFormation ?? null,
+  };
+  club.tactics.possessionFormation = appliedPlan.possessionFormation;
+  club.tactics.outOfPossessionFormation = appliedPlan.outOfPossessionFormation;
+  club.tactics.coachPhaseIdentityId = coach.id;
+  club.tactics.coachPhaseIdentityVersion = plan.identity.version;
+  return {
+    ...appliedPlan,
+    changed:
+      before.possessionFormation !== appliedPlan.possessionFormation
+      || before.outOfPossessionFormation !== appliedPlan.outOfPossessionFormation,
+  };
 }
 
 function dutyPreference(identity, roleId, dutyId) {
@@ -295,7 +506,8 @@ export function applyCoachTacticalIdentity(club, coach, options = {}) {
     && club.tactics.coachIdentityId === coach.id
     && club.tactics.coachIdentityVersion === COACH_IDENTITY_VERSION
   ) {
-    return { ok: true, unchanged: true, identity, formation: club.tactics.formation };
+    const phasePlan = applyCoachPhaseFormations(club, coach, options);
+    return { ok: true, unchanged: !phasePlan.changed, identity, formation: club.tactics.formation, phasePlan };
   }
   const formation = preferredCoachFormation(coach, club);
   club.tactics.formation = formation;
@@ -309,7 +521,8 @@ export function applyCoachTacticalIdentity(club, coach, options = {}) {
   ensureLineupRoles(club, { reset: true });
   if (options.rebuildLineup !== false) autoLineup(club);
   assignCoachLineupRoles(club, coach, { force: true });
-  return { ok: true, identity, formation };
+  const phasePlan = applyCoachPhaseFormations(club, coach, options);
+  return { ok: true, identity, formation, phasePlan };
 }
 
 const PLAN_ARCHETYPE_FIT = Object.freeze({

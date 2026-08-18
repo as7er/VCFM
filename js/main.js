@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=226";
-import { clubCrestHtml } from "./club-crest.js?v=226";
+import { nationFlagHtml } from "./flags.js?v=227";
+import { clubCrestHtml } from "./club-crest.js?v=227";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -316,7 +316,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=226";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=227";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -383,7 +383,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=226";
+} from "./avatar.js?v=227";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
@@ -476,7 +476,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=226").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=227").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1643,6 +1643,8 @@ function bindMainOnce() {
       ensureTactics(club);
       const value = e.target.value;
       club.tactics[key] = FORMATIONS[value] ? value : null;
+      club.tactics.coachPhaseIdentityId = null;
+      club.tactics.coachPhaseIdentityVersion = null;
       renderTactics();
       saveGame(world);
     };
@@ -6743,6 +6745,8 @@ function showClubModal(clubId) {
     .sort((a, b) => b.scouting.ovrEstimate - a.scouting.ovrEstimate)
     .slice(0, 16);
   const formation = club.tactics?.formation || "4-3-3";
+  const possessionFormation = club.tactics?.possessionFormation || formation;
+  const outOfPossessionFormation = club.tactics?.outOfPossessionFormation || formation;
   const styleKey = club.tactics?.style || "balanced";
   const styleLabel = t("style." + styleKey) || styleKey;
   const staffRoles = ["coach", "scout", "doctor"];
@@ -6842,7 +6846,10 @@ function showClubModal(clubId) {
           ${escapeHtml(t("clubs.money"))} ${formatMoney(club.money || 0)}
           · ${escapeHtml(t("clubs.squadAvg"))} <strong class="${ovrClass(avg.estimate)}">${escapeHtml(avg.text)}</strong>
           · ${escapeHtml(t("clubs.power"))} ${club.power ?? "—"}
-          · ${escapeHtml(t("tac.formation"))} ${escapeHtml(formation)} · ${escapeHtml(styleLabel)}
+          · ${escapeHtml(t("tac.formation"))} ${escapeHtml(formation)}
+          · ${escapeHtml(t("tac.possessionFormation"))} ${escapeHtml(possessionFormation)}
+          · ${escapeHtml(t("tac.outOfPossessionFormation"))} ${escapeHtml(outOfPossessionFormation)}
+          · ${escapeHtml(styleLabel)}
         </p>
         <div style="margin-top:0.4rem">${formatFormHtml(club.form)} <span class="muted" style="font-size:0.8rem">${escapeHtml(t("clubs.formHint"))}</span></div>
       </div>

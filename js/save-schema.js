@@ -208,6 +208,18 @@ export function validateSaveStructure(world, options = {}) {
     ) {
       throw new Error(`invalid save: club ${club.id} coach role identity version is invalid`);
     }
+    if (
+      club.tactics?.coachPhaseIdentityId != null &&
+      typeof club.tactics.coachPhaseIdentityId !== "string"
+    ) {
+      throw new Error(`invalid save: club ${club.id} coach phase identity is invalid`);
+    }
+    if (
+      club.tactics?.coachPhaseIdentityVersion != null &&
+      !Number.isFinite(Number(club.tactics.coachPhaseIdentityVersion))
+    ) {
+      throw new Error(`invalid save: club ${club.id} coach phase identity version is invalid`);
+    }
     clubIds.add(club.id);
   }
   if (typeof world.userClubId !== "string" || !clubIds.has(world.userClubId)) {

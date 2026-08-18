@@ -32,6 +32,7 @@ const checks = [
   "scripts/delegation-audit.mjs",
   "scripts/staff-identity-audit.mjs",
   "scripts/manager-ecosystem-audit.mjs",
+  "scripts/manager-phase-shapes-audit.mjs",
   "scripts/scouting-knowledge-audit.mjs",
   "scripts/avatar-audit.mjs",
   "scripts/match-appearance-audit.mjs",

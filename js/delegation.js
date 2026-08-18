@@ -10,6 +10,7 @@ import {
 import { assistantTrainingPlan, setTraining } from "./training.js";
 import { setTrainingMode } from "./training-boost.js";
 import {
+  applyCoachPhaseFormations,
   assignCoachLineupRoles,
   ensureCoachIdentity,
   preferredCoachFormation,
@@ -281,6 +282,17 @@ export function applyDelegatedTactics(world, club, fixture = null, { force = fal
   club.tactics.tempo = plan.tempo;
   club.tactics.width = plan.width;
   club.tactics.defensiveLine = plan.defensiveLine;
+  club.tactics.coachIdentityId = coach.id;
+  club.tactics.coachIdentityVersion = coach.footballIdentity?.version || 1;
+  const opponentId = fixture
+    ? (fixture.home === club.id ? fixture.away : fixture.home)
+    : null;
+  const opponent = world.clubs?.find((item) => item.id === opponentId) || null;
+  const phasePlan = applyCoachPhaseFormations(club, coach, { opponent });
+  plan.possessionFormation = phasePlan.possessionFormation;
+  plan.outOfPossessionFormation = phasePlan.outOfPossessionFormation;
+  plan.effectivePossessionFormation = phasePlan.effectivePossessionFormation;
+  plan.effectiveOutOfPossessionFormation = phasePlan.effectiveOutOfPossessionFormation;
   ensureLineupRoles(club, { reset: true });
   assignCoachLineupRoles(club, coach, { force: true });
   delegation.lastAppliedDay.tactics = world.day;
