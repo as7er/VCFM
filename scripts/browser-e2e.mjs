@@ -567,6 +567,10 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("dialog", async (dialog) => {
+    const urgentInbox = /紧急信箱|urgent inbox/i.test(dialog.message());
+    await dialog[urgentInbox ? "dismiss" : "accept"]();
+  });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForFunction(() => (
     !("serviceWorker" in navigator)
@@ -590,6 +594,8 @@ try {
   await page.waitForSelector("#dashboard-priorities > *");
   assert.ok((await page.locator("#dashboard-priorities").innerText()).trim().length > 0, "manager workbench must render priorities or an explicit ready state");
   assert.ok(await page.locator("#dashboard-quick-actions [data-dashboard-link]").count() > 0, "manager workbench must expose contextual actions");
+  await page.waitForSelector("#dashboard-onboarding:not([hidden])");
+  assert.match(await page.locator("#dashboard-onboarding").innerText(), /0\/4/, "new careers must begin with four onboarding steps");
   const dashboardAction = page.locator("#dashboard-quick-actions [data-dashboard-link]").first();
   const dashboardTarget = await dashboardAction.getAttribute("data-dashboard-link");
   await dashboardAction.click();
@@ -606,6 +612,41 @@ try {
   assert.equal(await page.locator("#btn-advance").isEnabled(), true);
   assert.match(await page.locator("#dashboard-advance-summary").innerText(), /推进 1 天|Advanced 1 day/);
   assert.ok((await page.locator("#dashboard-advance-summary").innerText()).trim().length > 0, "calendar advance must explain what changed");
+  await page.waitForSelector("#dashboard-onboarding:not([hidden])");
+  assert.match(await page.locator("#dashboard-onboarding").innerText(), /0\/4/, "onboarding must survive pre-match date progression");
+
+  for (const onboardingTab of ["squad", "tactics", "training"]) {
+    await openTab(page, onboardingTab);
+    await page.waitForSelector(`#tab-${onboardingTab}.active`);
+    await openTab(page, "dashboard");
+  }
+  await page.waitForFunction(
+    () => document.querySelectorAll("#dashboard-onboarding .dashboard-onboarding-step.done").length === 3
+  );
+  assert.match(await page.locator("#dashboard-onboarding").innerText(), /3\/4/, "three management onboarding steps must be complete");
+  await page.waitForTimeout(500);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => !!window.vcfmMainApi);
+  await page.waitForSelector("#screen-main.active", { timeout: 90_000 });
+  await page.waitForSelector("#dashboard-onboarding:not([hidden])");
+  assert.match(await page.locator("#dashboard-onboarding").innerText(), /3\/4/, "onboarding progress must persist across reload");
+
+  const dateBeforeFirstMatch = await page.locator("#date-label").innerText();
+  await page.locator("#btn-advance").click();
+  await page.waitForFunction(
+    (before) => document.querySelector("#date-label")?.textContent !== before,
+    dateBeforeFirstMatch,
+    { timeout: 150_000 }
+  );
+  await page.waitForFunction(() => !document.querySelector("#btn-play-match")?.disabled, null, { timeout: 90_000 });
+  await page.locator("#btn-play-match").click();
+  await page.waitForSelector("#screen-match.active", { timeout: 90_000 });
+  await page.waitForFunction(() => !document.querySelector("#btn-sim-instant")?.disabled, null, { timeout: 90_000 });
+  await page.locator("#btn-sim-instant").click();
+  await page.waitForFunction(() => !document.querySelector("#btn-match-continue")?.disabled, null, { timeout: 90_000 });
+  await page.locator("#btn-match-continue").click();
+  await page.waitForSelector("#screen-main.active", { timeout: 90_000 });
+  assert.equal(await page.locator("#dashboard-onboarding").isHidden(), true, "onboarding must close after the first match");
 
   for (const tab of ["finance", "squad", "staff", "training", "tactics", "facilities", "media", "fixtures", "table", "career"]) {
     await openTab(page, tab);
@@ -755,7 +796,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: broadcast cameras, motion clip diagnostics, spatial goal replay, straight-pass rendering, nonblank match canvas, phase-shape evidence, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: first-week onboarding persistence and first-match completion, broadcast cameras, motion clip diagnostics, spatial goal replay, straight-pass rendering, nonblank match canvas, phase-shape evidence, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();
