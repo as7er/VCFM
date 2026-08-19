@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=230";
-import { clubCrestHtml } from "./club-crest.js?v=230";
+import { nationFlagHtml } from "./flags.js?v=231";
+import { clubCrestHtml } from "./club-crest.js?v=231";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -316,7 +316,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=230";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=231";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -383,8 +383,14 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=230";
+} from "./avatar.js?v=231";
 import { attributeArchetypeLabel } from "./player-attributes.js";
+import {
+  completeManagerOnboardingStep,
+  dismissManagerOnboarding,
+  ensureManagerOnboarding,
+  managerOnboardingView,
+} from "./manager-onboarding.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -476,7 +482,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=230").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=231").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1363,6 +1369,7 @@ function initStart() {
       ensureTransferWindow(world);
       processTransferWindowDay(world);
       ensureActiveCareer(world);
+      ensureManagerOnboarding(world);
       saveGame(world, slot);
       enterMain();
     } catch (err) {
@@ -1451,6 +1458,7 @@ function repairWorldFields(w) {
   ensureActiveCareer(w);
   ensureWorldFinances(w);
   ensureWorldDelegation(w);
+  ensureManagerOnboarding(w);
   if (!Array.isArray(w.poachBids)) w.poachBids = [];
   if (w.board && w.board.sackWarnings == null) w.board.sackWarnings = 0;
   for (const c of w.clubs || []) {
@@ -1590,6 +1598,9 @@ function syncMainNavigation(tab) {
 
 function activateMainTab(tab, { refresh = true } = {}) {
   if (!document.querySelector(`[data-tab="${tab}"]`)) return;
+  if (world && ["squad", "tactics", "training"].includes(tab)) {
+    if (completeManagerOnboardingStep(world, tab)) autosave(`onboarding-${tab}`);
+  }
   syncMainNavigation(tab);
   $$(".tab-panel").forEach((panel) => panel.classList.remove("active"));
   if (tab === "table") $(`#tab-${selectedLeagueCentreView}`)?.classList.add("active");
@@ -1629,9 +1640,23 @@ function bindMainOnce() {
   }
   $("#tab-dashboard")?.addEventListener("click", (event) => {
     const button = event.target.closest("[data-dashboard-link]");
-    if (!button) return;
-    const target = button.dataset.dashboardLink;
-    if (target) activateMainTab(target);
+    if (button) {
+      const target = button.dataset.dashboardLink;
+      if (target) activateMainTab(target);
+      return;
+    }
+    const dismiss = event.target.closest("[data-dashboard-onboarding-dismiss]");
+    if (dismiss && world && dismissManagerOnboarding(world)) {
+      autosave("onboarding-dismiss");
+      renderDashboard();
+      return;
+    }
+    const play = event.target.closest("[data-dashboard-onboarding-match]");
+    if (play) {
+      const next = getNextUserMatch(world);
+      if (next && next.day <= world.day) openMatch();
+      else activateMainTab("fixtures");
+    }
   });
   document.querySelectorAll("[data-squad-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -4192,7 +4217,7 @@ function collectDashboardWorkbench(club, next) {
     addAction("training", "🏋️", en ? "Training" : "训练", en ? "Prepare the squad" : "安排球队准备");
     addAction("squad", "👥", en ? "Squad" : "球队阵容", en ? "Review availability" : "检查球员状态");
   }
-  return { issues, actions, digest: dashboardAdvanceDigest };
+  return { issues, actions, digest: dashboardAdvanceDigest, onboarding: managerOnboardingView(world) };
 }
 
 function renderDashboard() {
@@ -11358,6 +11383,9 @@ function formatRoleReviewHtml(rev) {
 }
 
 function finishMatchUI() {
+  if (world && completeManagerOnboardingStep(world, "match")) {
+    renderDashboard();
+  }
   // 结束录制，可下载 JSON 回放
   try {
     if (matchView?.stopRecording) {

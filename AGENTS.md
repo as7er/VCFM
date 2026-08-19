@@ -4,7 +4,7 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v230**（2D 无球跑位连续性）
+> 缓存：**vcfm-v231**（首周经理引导）
 
 ## v230 2D 无球跑位连续性（2026-08-19）
 

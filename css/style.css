@@ -7174,6 +7174,7 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
   gap: 1rem;
 }
 .dashboard-workbench-card { grid-column: 1 / -1; }
+.dashboard-onboarding-card { grid-column: 1 / -1; }
 .dashboard-match-card { grid-column: span 8; }
 .dashboard-pulse-card { grid-column: span 4; }
 .dashboard-operations-card { grid-column: span 8; }
@@ -7305,6 +7306,59 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
 .dashboard-quick-icon { font-size: 1rem; }
 .dashboard-advance-summary,
 .dashboard-advance-empty { min-height: 4.5rem; }
+
+.dashboard-onboarding {
+  display: grid;
+  gap: 0.7rem;
+}
+.dashboard-onboarding-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.dashboard-onboarding-head h2 { margin: 0; }
+.dashboard-onboarding-progress {
+  flex: 0 0 auto;
+  padding: 0.22rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--primary);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+.dashboard-onboarding-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.dashboard-onboarding-steps {
+  display: grid;
+  gap: 0.45rem;
+}
+.dashboard-onboarding-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg2);
+}
+.dashboard-onboarding-step.current {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+.dashboard-onboarding-step.done { opacity: 0.72; }
+.dashboard-onboarding-icon { font-size: 1.05rem; }
+.dashboard-onboarding-copy { min-width: 0; }
+.dashboard-onboarding-copy strong,
+.dashboard-onboarding-copy small { display: block; overflow-wrap: anywhere; }
+.dashboard-onboarding-copy small { margin-top: 0.14rem; color: var(--muted); font-size: 0.76rem; }
+.dashboard-onboarding-state { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
+.dashboard-onboarding-dismiss { justify-self: start; }
 .dashboard-advance-empty {
   display: grid;
   align-content: center;
@@ -7635,6 +7689,7 @@ summary:focus-visible {
   .dashboard-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-layout > .card { grid-column: span 1; }
   .dashboard-workbench-card,
+  .dashboard-onboarding-card,
   .dashboard-match-card,
   .dashboard-operations-card,
   .dashboard-news-card { grid-column: 1 / -1 !important; }
@@ -7672,6 +7727,8 @@ summary:focus-visible {
   .dashboard-quick-actions { grid-template-columns: minmax(0, 1fr); }
   .dashboard-priority-item { grid-template-columns: auto minmax(0, 1fr); }
   .dashboard-issue-action { grid-column: 2; justify-self: start; }
+  .dashboard-onboarding-step { grid-template-columns: auto minmax(0, 1fr); }
+  .dashboard-onboarding-state { grid-column: 2; justify-self: start; white-space: normal; }
   .dashboard-ops-grid { grid-template-columns: minmax(0, 1fr); }
   .dashboard-match-card .next-match { min-height: 7rem; }
   .finance-budget-controls label { grid-template-columns: minmax(6.8rem, auto) minmax(5rem, 1fr) minmax(4rem, auto); }

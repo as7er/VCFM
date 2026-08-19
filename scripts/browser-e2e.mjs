@@ -570,7 +570,7 @@ try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForFunction(() => (
     !("serviceWorker" in navigator)
-      || sessionStorage.getItem("vcfm-sw-reloaded-v230") === "1"
+      || sessionStorage.getItem("vcfm-sw-reloaded-v231") === "1"
   ));
   await page.waitForLoadState("networkidle");
   await page.waitForFunction(() => !!window.vcfmMainApi);

@@ -62,11 +62,43 @@ function digestHtml(digest, en) {
     </div>`;
 }
 
-export function renderManagerWorkbench({ issues = [], actions = [], digest = null } = {}) {
+function onboardingHtml(onboarding, en) {
+  if (!onboarding) return "";
+  const current = onboarding.steps.find((step) => !step.done);
+  return `<div class="dashboard-onboarding" aria-labelledby="dashboard-onboarding-title">
+    <div class="dashboard-onboarding-head">
+      <div>
+        <span class="dashboard-eyebrow">${escapeHtml(en ? "First week" : "首周引导")}</span>
+        <h2 id="dashboard-onboarding-title">${escapeHtml(en ? "Build your first match plan" : "完成第一场比赛准备")}</h2>
+      </div>
+      <span class="dashboard-onboarding-progress">${onboarding.completed}/${onboarding.total}</span>
+    </div>
+    <p class="dashboard-onboarding-intro">${escapeHtml(en ? "Four short checks are enough to get started. You can skip this guide at any time." : "先完成四个简短检查，熟悉球队后再推进日程。随时可以跳过引导。")}</p>
+    <div class="dashboard-onboarding-steps">
+      ${onboarding.steps.map((step) => {
+        const action = step.id === "match"
+          ? `<button type="button" class="btn small ghost" data-dashboard-onboarding-match>${escapeHtml(en ? step.actionEn : step.action)}</button>`
+          : `<button type="button" class="btn small ghost" data-dashboard-link="${escapeHtml(step.tab)}">${escapeHtml(en ? step.actionEn : step.action)}</button>`;
+        return `<div class="dashboard-onboarding-step ${step.done ? "done" : step === current ? "current" : ""}">
+          <span class="dashboard-onboarding-icon" aria-hidden="true">${escapeHtml(step.icon)}</span>
+          <div class="dashboard-onboarding-copy">
+            <strong>${escapeHtml(en ? step.titleEn : step.title)}</strong>
+            <small>${escapeHtml(en ? step.detailEn : step.detail)}</small>
+          </div>
+          <span class="dashboard-onboarding-state">${step.done ? escapeHtml(en ? "Done" : "已完成") : action}</span>
+        </div>`;
+      }).join("")}
+    </div>
+    <button type="button" class="btn small ghost dashboard-onboarding-dismiss" data-dashboard-onboarding-dismiss>${escapeHtml(en ? "Skip guide" : "跳过引导")}</button>
+  </div>`;
+}
+
+export function renderManagerWorkbench({ issues = [], actions = [], digest = null, onboarding = null } = {}) {
   const en = getLang() === "en";
   const priorityBox = $("#dashboard-priorities");
   const actionBox = $("#dashboard-quick-actions");
   const digestBox = $("#dashboard-advance-summary");
+  const onboardingBox = $("#dashboard-onboarding");
   const status = $("#dashboard-workbench-status");
   if (!priorityBox || !actionBox || !digestBox) return;
 
@@ -90,4 +122,8 @@ export function renderManagerWorkbench({ issues = [], actions = [], digest = nul
     : `<div class="dashboard-priority-empty"><strong>${escapeHtml(en ? "No urgent issues" : "当前没有紧急事项")}</strong><span>${escapeHtml(en ? "The squad is ready for the next decision." : "球队已为下一项决策做好准备。")}</span></div>`;
   actionBox.innerHTML = actions.slice(0, 4).map(actionHtml).join("");
   digestBox.innerHTML = digestHtml(digest, en);
+  if (onboardingBox) {
+    onboardingBox.innerHTML = onboardingHtml(onboarding, en);
+    onboardingBox.hidden = !onboarding;
+  }
 }

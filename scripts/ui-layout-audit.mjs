@@ -28,9 +28,11 @@ assert.doesNotMatch(main, /(?<!\$)\$\(\"\.(?:primary-tab|tab|tab-panel)\"\)\.for
 assert.ok(css.includes("#squad-table.squad-compact .squad-detail"));
 assert.ok(css.includes(".dashboard-layout"));
 assert.ok(html.includes('id="dashboard-priorities"'), "manager workbench priority region required");
+assert.ok(html.includes('id="dashboard-onboarding"'), "first-week onboarding region required");
 assert.ok(html.includes('id="dashboard-quick-actions"'), "manager workbench quick actions required");
 assert.ok(html.includes('id="dashboard-advance-summary"'), "calendar change summary required");
 assert.ok(main.includes("collectDashboardWorkbench"), "dashboard must derive priorities from live world state");
+assert.ok(main.includes("managerOnboardingView"), "dashboard must derive onboarding from save state");
 assert.ok(main.includes("captureAdvanceSnapshot") && main.includes("buildAdvanceDigest"), "calendar advancement must compare before/after state");
 assert.ok(main.includes('closest("[data-dashboard-link]")'), "workbench links must use delegated tab navigation");
 assert.ok(workbench.includes("renderManagerWorkbench"));

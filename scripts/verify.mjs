@@ -72,6 +72,7 @@ const checks = [
   "scripts/match-balance-audit.mjs",
   "scripts/long-term-reality-audit.mjs",
   "scripts/ui-layout-audit.mjs",
+  "scripts/manager-onboarding-audit.mjs",
   "scripts/ecosystem-audit.mjs",
   "scripts/world-invariants-audit.mjs",
 ];
