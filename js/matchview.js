@@ -1105,8 +1105,6 @@ export class MatchView {
           <svg class="mp-press" id="mp-press" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
           <svg class="mp-network" id="mp-network" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
           <svg class="mp-trails" id="mp-trails" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
-          <div class="mp-bench-lane home" id="mp-bench-home" aria-hidden="true"></div>
-          <div class="mp-bench-lane away" id="mp-bench-away" aria-hidden="true"></div>
           <canvas class="mp-canvas" id="mp-canvas" aria-hidden="true"></canvas>
           <div class="mp-actors" id="mp-actors"></div>
           <div class="mp-fx" id="mp-fx"></div>
@@ -1121,6 +1119,13 @@ export class MatchView {
       </div>
       <!-- FMM 底栏：解说文案 ↔ 控球条（互斥） -->
       <div class="mp-fmm-dock" id="mp-fmm-dock">
+        <div class="mp-bench-strip" id="mp-bench-strip" aria-label="Substitutes">
+          <span class="mp-bench-side home" aria-hidden="true">主</span>
+          <div class="mp-bench-list home" id="mp-bench-home"></div>
+          <span class="mp-bench-divider" aria-hidden="true"></span>
+          <div class="mp-bench-list away" id="mp-bench-away"></div>
+          <span class="mp-bench-side away" aria-hidden="true">客</span>
+        </div>
         <div class="mp-fmm-ticker" id="mp-fmm-ticker" aria-live="polite"></div>
         <div class="mp-fmm-poss show" id="mp-fmm-poss" aria-hidden="false">
           <span class="mp-fmm-poss-val" id="mp-fmm-poss-h">50%</span>
@@ -1183,6 +1188,7 @@ export class MatchView {
     this.formZonesEl = wrap.querySelector("#mp-form-zones");
     this.attackArrowEl = wrap.querySelector("#mp-attack-arrow");
     this.replayBadgeEl = wrap.querySelector("#mp-replay-badge");
+    this.benchStripEl = wrap.querySelector("#mp-bench-strip");
     this.benchHomeEl = wrap.querySelector("#mp-bench-home");
     this.benchAwayEl = wrap.querySelector("#mp-bench-away");
     this.canvas = wrap.querySelector("#mp-canvas");
@@ -2623,7 +2629,7 @@ export class MatchView {
     }
   }
 
-  /** 侧边替补席（FMM 感：小板凳一列） */
+  /** 底部替补席：保留可点击资料入口，但不占用球场边线。 */
   _spawnBench(club, isHome, color, numColor) {
     const lane = isHome ? this.benchHomeEl : this.benchAwayEl;
     if (!lane || !club) return;
@@ -2636,6 +2642,10 @@ export class MatchView {
       .slice(0, 7);
     if (!bench.length) {
       lane.classList.add("empty");
+      this.benchStripEl?.classList.toggle(
+        "empty",
+        !this.benchHomeEl?.children.length && !this.benchAwayEl?.children.length
+      );
       return;
     }
     lane.classList.remove("empty");
@@ -2650,6 +2660,7 @@ export class MatchView {
       });
       lane.appendChild(el);
     }
+    this.benchStripEl?.classList.remove("empty");
   }
 
   /** 阵型半透明色块（按 DEF/MID/ATT 区域） */

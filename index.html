@@ -1287,10 +1287,15 @@
         </div>
 
         <!-- 底部事件流 -->
-        <aside class="fm-commentary fmm-commentary" aria-label="match commentary">
+        <aside class="fm-commentary fmm-commentary is-collapsed" aria-label="match commentary">
           <div class="fm-com-head">
             <span data-i18n="match.commentary">比赛事件</span>
-            <span class="fm-com-badge" id="match-com-badge">PRE</span>
+            <div class="fm-com-tools">
+              <button type="button" class="fm-com-toggle icon-btn" id="match-com-toggle" aria-expanded="false" aria-controls="match-log" title="展开比赛事件">
+                <span aria-hidden="true">⌄</span>
+              </button>
+              <span class="fm-com-badge" id="match-com-badge">PRE</span>
+            </div>
           </div>
           <div id="match-log" class="match-log fm-com-log"></div>
         </aside>

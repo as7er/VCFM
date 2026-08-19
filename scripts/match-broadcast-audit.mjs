@@ -67,6 +67,10 @@ assert.ok(!viewSource.includes("r + 7.5"), "the old outer possession glow must n
 assert.ok(viewSource.includes("source.loop = true"), "match audio needs a continuous generated crowd bed");
 assert.ok(viewSource.includes("crowdAtmosphere({"), "live spatial facts must drive the crowd bed");
 assert.ok(mainSource.includes("vcfm-match-camera"), "camera choice must persist between matches");
+assert.ok(viewSource.includes('id="mp-bench-strip"'), "substitutes must live in the match dock, not on the pitch edges");
+assert.ok(!viewSource.includes('class="mp-bench-lane'), "legacy side bench lanes must not return");
+assert.ok(indexSource.includes('id="match-com-toggle"'), "commentary must have a compact toggle");
+assert.ok(source("css/style.css").includes(".fmm-commentary.is-collapsed"), "commentary compact state must be styled");
 for (const preset of CAMERA_PRESET_IDS) {
   assert.ok(indexSource.includes(`data-match-camera="${preset}"`), `missing ${preset} camera control`);
 }

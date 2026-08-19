@@ -1837,6 +1837,17 @@ function bindMainOnce() {
   });
 
   // 事件流 / 赛后报告：点进球再看回放
+  const commentary = document.querySelector(".fmm-commentary");
+  const commentaryToggle = $("#match-com-toggle");
+  commentaryToggle?.addEventListener("click", (event) => {
+    event.preventDefault();
+    const expanded = !commentary?.classList.contains("is-collapsed");
+    commentary?.classList.toggle("is-collapsed", expanded);
+    commentaryToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+    commentaryToggle.title = expanded ? "展开比赛事件" : "收起比赛事件";
+    const icon = commentaryToggle.querySelector("span");
+    if (icon) icon.textContent = expanded ? "⌄" : "⌃";
+  });
   $("#match-log")?.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-goal-replay]");
     if (!btn) return;
