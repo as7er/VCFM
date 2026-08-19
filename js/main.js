@@ -2960,6 +2960,170 @@ function goToInboxTab() {
   activateMainTab("inbox");
 }
 
+/**
+ * 把邮件引用解析为详情链接所需的实体。
+ * 引用字段会随邮件类型变化，这里集中兼容旧存档和新邮件，避免让信箱
+ * 重新猜测正文中的名字，也避免为详情页复制一套展示逻辑。
+ */
+function inboxEntityRefs(mail) {
+  if (!world || !mail) return [];
+  const ref = mail.ref || {};
+  const entities = [];
+  const seen = new Set();
+  const add = (type, id, context = {}) => {
+    if (!id) return;
+    const key = `${type}:${id}`;
+    if (seen.has(key)) return;
+    let item = null;
+    if (type === "club") {
+      item = world.clubs?.find((club) => club.id === id) || null;
+    } else if (type === "player") {
+      for (const club of world.clubs || []) {
+        item = (club.players || []).find((player) => player.id === id) || null;
+        if (item) {
+          context = { ...context, clubId: club.id };
+          break;
+        }
+        item = (club.youth?.players || []).find((player) => player.id === id) || null;
+        if (item) {
+          context = { ...context, clubId: club.id };
+          break;
+        }
+      }
+      if (!item) item = world.retiredPlayers?.find((player) => player.id === id) || null;
+    } else if (type === "nation") {
+      item = listNationalTeams(world).find((nation) => nation.code === id) || null;
+    } else if (type === "staff") {
+      const found = findStaffById(id, context.clubId || null);
+      item = found?.staff || null;
+      if (found?.club?.id) context = { ...context, clubId: found.club.id };
+    }
+    if (!item) return;
+    const aliases = new Set();
+    if (type === "club") {
+      aliases.add(clubDisplayName(item));
+      aliases.add(item.name);
+      aliases.add(item.nameZh);
+      aliases.add(item.nameEn);
+      aliases.add(item.short);
+      aliases.add(item.shortName);
+    } else if (type === "player") {
+      aliases.add(item.name);
+      aliases.add(item.nameEn);
+    } else if (type === "nation") {
+      aliases.add(nationName(item.code, getLang()));
+      aliases.add(item.name);
+      aliases.add(item.nameEn);
+      aliases.add(item.code);
+    } else if (type === "staff") {
+      aliases.add(item.name);
+      aliases.add(item.nameEn);
+    }
+    const usableAliases = [...aliases].filter((alias) => String(alias || "").trim().length >= 2);
+    if (!usableAliases.length) return;
+    seen.add(key);
+    entities.push({ type, id, item, aliases: usableAliases, clubId: context.clubId || null });
+  };
+  const addIds = (value, type, context = {}) => {
+    const ids = Array.isArray(value) ? value : [value];
+    ids.forEach((id) => add(type, typeof id === "object" ? id.id : id, context));
+  };
+
+  // 先补充谈判/挖角记录中的关联对象，旧邮件只保存了记录 ID 也能正常回溯。
+  if (ref.kind === "poach") {
+    const bid = world.poachBids?.find((item) => item.id === ref.bidId);
+    add("player", ref.playerId || bid?.playerId, { clubId: ref.fromClubId || bid?.fromClubId || null });
+    add("club", ref.buyerId || bid?.buyerId);
+    add("club", ref.fromClubId || bid?.fromClubId);
+  } else if (ref.kind === "transfer_negotiation") {
+    const negotiation = world.transferNegotiations?.find((item) => item.id === ref.negotiationId);
+    add("player", ref.playerId || negotiation?.playerId);
+    add("club", ref.sellerClubId || negotiation?.sellerClubId);
+    add("club", ref.buyerClubId || negotiation?.buyerClubId);
+  } else if (ref.kind === "deal_negotiation") {
+    const negotiation = world.dealNegotiations?.find((item) => item.id === ref.negotiationId);
+    add("player", ref.playerId || negotiation?.playerId);
+    add("club", ref.ownerClubId || negotiation?.ownerClubId);
+    add("club", ref.hostClubId || negotiation?.hostClubId);
+  } else if (ref.kind === "scout_report") {
+    addIds(ref.playerIds, "player");
+  }
+
+  // 通用引用字段给新邮件和第三方模块使用，旧 kind 不需要额外适配。
+  addIds(ref.playerId, "player", { clubId: ref.playerClubId || ref.clubId || null });
+  addIds(ref.playerIds, "player");
+  addIds(ref.clubId, "club");
+  addIds(ref.clubIds, "club");
+  addIds(ref.buyerId, "club");
+  addIds(ref.sellerClubId, "club");
+  addIds(ref.ownerClubId, "club");
+  addIds(ref.hostClubId, "club");
+  addIds(ref.nationCode, "nation");
+  addIds(ref.nationCodes, "nation");
+  addIds(ref.staffId, "staff", { clubId: ref.staffClubId || ref.clubId || null });
+  addIds(ref.staffIds, "staff", { clubId: ref.staffClubId || ref.clubId || null });
+  // 球员和职员所属单位也是邮件中的常见上下文；有明确对象事实时一并开放查阅。
+  for (const entity of [...entities]) {
+    if ((entity.type === "player" || entity.type === "staff") && entity.clubId) {
+      add("club", entity.clubId);
+    }
+    if (entity.type === "player" && entity.item?.nationality) {
+      add("nation", entity.item.nationality);
+    }
+  }
+  return entities;
+}
+
+function inboxEntityLink(entity, label) {
+  const className = "inbox-entity-link";
+  if (entity.type === "club") return clubLinkHtml(entity.id, label, className);
+  if (entity.type === "player") return playerLinkHtml(entity.id, label, className);
+  if (entity.type === "staff") {
+    const clubAttr = entity.clubId ? ` data-staff-club="${escapeHtml(entity.clubId)}"` : "";
+    return `<button type="button" class="staff-link ${className}" data-staff-link="${escapeHtml(entity.id)}"${clubAttr} data-inbox-entity="staff">${escapeHtml(label)}</button>`;
+  }
+  return `<button type="button" class="nation-link ${className}" data-nation="${escapeHtml(entity.id)}" data-inbox-entity="nation">${escapeHtml(label)}</button>`;
+}
+
+function renderInboxEntityText(value, entities) {
+  const text = String(value || "");
+  if (!text) return "";
+  const aliases = [];
+  const aliasMap = new Map();
+  for (const entity of entities || []) {
+    for (const alias of entity.aliases || []) {
+      const normalized = String(alias || "").trim();
+      if (normalized.length < 2) continue;
+      const key = normalized.toLocaleLowerCase();
+      if (!aliasMap.has(key)) aliasMap.set(key, entity);
+      else if (aliasMap.get(key) !== entity) aliasMap.set(key, null);
+      aliases.push(normalized);
+    }
+  }
+  const uniqueAliases = [...new Set(aliases)].sort((a, b) => b.length - a.length);
+  if (!uniqueAliases.length) return escapeHtml(text).replace(/\r?\n/g, "<br>");
+  const escaped = uniqueAliases.map((alias) => alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const matcher = new RegExp(escaped.join("|"), "gi");
+  let html = "";
+  let cursor = 0;
+  for (const match of text.matchAll(matcher)) {
+    const index = match.index ?? 0;
+    html += escapeHtml(text.slice(cursor, index)).replace(/\r?\n/g, "<br>");
+    const entity = aliasMap.get(String(match[0]).toLocaleLowerCase()) || null;
+    const before = index > 0 ? text[index - 1] : "";
+    const after = text[index + match[0].length] || "";
+    const needsLeftBoundary = /^[A-Za-z0-9]/.test(match[0]);
+    const needsRightBoundary = /[A-Za-z0-9]$/.test(match[0]);
+    const insideWord =
+      (needsLeftBoundary && /[A-Za-z0-9]/.test(before)) ||
+      (needsRightBoundary && /[A-Za-z0-9]/.test(after));
+    html += entity && !insideWord ? inboxEntityLink(entity, match[0]) : escapeHtml(match[0]);
+    cursor = index + match[0].length;
+  }
+  html += escapeHtml(text.slice(cursor)).replace(/\r?\n/g, "<br>");
+  return html;
+}
+
 function renderInbox() {
   if (!world) return;
   ensureInbox(world);
@@ -2999,6 +3163,7 @@ function renderInbox() {
 
   box.innerHTML = list
     .map((m) => {
+      const entities = inboxEntityRefs(m);
       const cat = inboxCatLabel(m.category, en ? "en" : "zh");
       const st =
         m.status === "pending"
@@ -3041,8 +3206,8 @@ function renderInbox() {
           <span class="muted inbox-day">D${m.day}</span>
           <span class="inbox-status">${escapeHtml(st)}</span>
         </header>
-        <h3 class="inbox-title">${escapeHtml(en && m.titleEn ? m.titleEn : m.title)}</h3>
-        ${en && m.bodyEn ? `<p class="inbox-body">${escapeHtml(m.bodyEn)}</p>` : m.body ? `<p class="inbox-body">${escapeHtml(m.body)}</p>` : ""}
+        <h3 class="inbox-title">${renderInboxEntityText(en && m.titleEn ? m.titleEn : m.title, entities)}</h3>
+        ${en && m.bodyEn ? `<p class="inbox-body">${renderInboxEntityText(m.bodyEn, entities)}</p>` : m.body ? `<p class="inbox-body">${renderInboxEntityText(m.body, entities)}</p>` : ""}
         <div class="inbox-actions">${actions}</div>
       </article>`;
     })
@@ -3078,7 +3243,7 @@ function renderInbox() {
   // 点标题标已读
   box.querySelectorAll(".inbox-item").forEach((el) => {
     el.addEventListener("click", (ev) => {
-      if (ev.target.closest("[data-inbox-act]")) return;
+      if (ev.target.closest("[data-inbox-act], .inbox-entity-link")) return;
       const id = el.dataset.mailId;
       if (markInboxRead(world, id)) {
         saveGame(world);
@@ -4397,7 +4562,7 @@ function renderDashboard() {
       const lines = top
         .map(
           (m) =>
-            `<div class="dash-inbox-row"><span class="inbox-cat mini">${escapeHtml(inboxCatLabel(m.category, en ? "en" : "zh"))}</span> ${escapeHtml(en && m.titleEn ? m.titleEn : m.title)}</div>`
+            `<div class="dash-inbox-row"><span class="inbox-cat mini">${escapeHtml(inboxCatLabel(m.category, en ? "en" : "zh"))}</span> ${renderInboxEntityText(en && m.titleEn ? m.titleEn : m.title, inboxEntityRefs(m))}</div>`
         )
         .join("");
       dashIb.innerHTML = `<div class="dash-inbox-count">${en ? `${n} pending` : `${n} 封待办`}</div>${lines}`;

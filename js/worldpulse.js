@@ -178,7 +178,11 @@ function completeScoutMission(world, mission) {
     body: `任务条件：${missionFilterLabel(filters)}。以下均为本次观察估计，已自动加入关注列表。\n${lines.join("\n")}`,
     bodyEn: `Assignment: ${missionFilterLabel(filters, "en")}. All figures are observed estimates; targets were added to the watchlist.\n${linesEn.join("\n")}`,
     dedupeKey: `sm_done_${mission.id}`,
-    ref: { kind: "scout_report", playerIds: hits.map((hit) => hit.player.id) },
+    ref: {
+      kind: "scout_report",
+      playerIds: hits.map((hit) => hit.player.id),
+      clubIds: [...new Set(hits.map((hit) => hit.club.id))],
+    },
     actions: [
       { id: "ack", label: "很好", labelEn: "Nice", primary: true },
     ],

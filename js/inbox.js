@@ -174,7 +174,13 @@ export function syncPoachBidsToInbox(world) {
       bodyEn,
       dedupeKey: key,
       expiresDay: bid.expiresDay,
-      ref: { kind: "poach", bidId: bid.id },
+      ref: {
+        kind: "poach",
+        bidId: bid.id,
+        playerId: bid.playerId,
+        fromClubId: bid.fromClubId,
+        buyerId: bid.buyerId,
+      },
       actions: [
         { id: "accept", label: "接受报价", labelEn: "Accept", primary: true },
         { id: "reject", label: "拒绝", labelEn: "Reject" },
@@ -353,6 +359,9 @@ export function syncTransferNegotiationsToInbox(world) {
         kind: "transfer_negotiation",
         negotiationId: negotiation.id,
         negotiationRevision: negotiation.revision,
+        playerId: negotiation.playerId,
+        sellerClubId: negotiation.sellerClubId,
+        buyerClubId: negotiation.buyerClubId,
       },
     });
   }
@@ -456,6 +465,9 @@ export function syncDealNegotiationsToInbox(world) {
         kind: "deal_negotiation",
         negotiationId: negotiation.id,
         negotiationRevision: negotiation.revision,
+        playerId: negotiation.playerId,
+        ownerClubId: negotiation.ownerClubId,
+        hostClubId: negotiation.hostClubId,
       },
     });
   }

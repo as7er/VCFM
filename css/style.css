@@ -880,6 +880,14 @@ tr:hover td { background: var(--row-hover); }
   line-height: 1.45;
   color: var(--muted);
 }
+.inbox-entity-link {
+  display: inline;
+  color: var(--primary);
+  font-weight: 700;
+  line-height: inherit;
+}
+.inbox-entity-link .club-link-crest { display: none; }
+button.club-link.inbox-entity-link { display: inline; vertical-align: baseline; }
 .inbox-actions {
   display: flex;
   flex-wrap: wrap;

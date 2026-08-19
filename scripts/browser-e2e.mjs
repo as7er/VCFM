@@ -465,6 +465,71 @@ async function assertStraightPassRendering(page) {
   assert.equal(result.motionReview.rangeMax, result.motionClip.frames - 1);
 }
 
+async function assertInboxEntityLinks(page) {
+  const fixture = await page.evaluate(async () => {
+    const { getActiveSlot, loadGame, saveGame } = await import("./js/save.js");
+    const { pushInbox } = await import("./js/inbox.js");
+    const snapshot = await loadGame(getActiveSlot());
+    const user = snapshot.clubs.find((club) => club.id === snapshot.userClubId);
+    const other = snapshot.clubs.find((club) => club.id !== snapshot.userClubId);
+    const player = user.players[0];
+    const staff = Object.values(user.staff || {}).find(Boolean);
+    const nationCode = player.nationality;
+    const mail = pushInbox(snapshot, {
+      category: "system",
+      priority: 1,
+      title: `${player.name} 与 ${other.name} 的资料查阅`,
+      body: `${player.name}、${other.name}、${staff.name} 和 ${nationCode} 均应可直接打开详情。`,
+      ref: {
+        kind: "browser_entity_audit",
+        playerId: player.id,
+        playerClubId: user.id,
+        clubId: other.id,
+        nationCode,
+        staffId: staff.id,
+        staffClubId: user.id,
+      },
+      actions: [{ id: "ack", label: "知道了", labelEn: "OK" }],
+    });
+    saveGame(snapshot, getActiveSlot(), { immediate: true });
+    return {
+      mailId: mail.id,
+      player: player.name,
+      club: other.name,
+      staff: staff.name,
+      nation: nationCode,
+    };
+  });
+  await page.waitForTimeout(900);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => !!window.vcfmMainApi);
+  await page.locator('[data-tab="inbox"]').click();
+  await page.waitForSelector("#tab-inbox.active .inbox-item");
+  const item = page.locator(`#inbox-list [data-mail-id="${fixture.mailId}"]`);
+  await item.waitFor();
+  assert.ok(await item.locator("[data-player-link]").count() > 0, "inbox player should be a detail link");
+  assert.ok(await item.locator("[data-club-link]").count() > 0, "inbox club should be a detail link");
+  assert.ok(await item.locator("[data-staff-link]").count() > 0, "inbox staff should be a detail link");
+  assert.ok(await item.locator("[data-nation]").count() > 0, "inbox nation should be a detail link");
+
+  const openAndCheck = async (selector, expected) => {
+    await item.locator(selector).first().click();
+    await page.waitForSelector("#modal:not(.hidden)");
+    assert.match(await page.locator("#modal-body").innerText(), expected, `${selector} opened the wrong detail`);
+    await page.keyboard.press("Escape");
+    if (await page.locator("#modal:not(.hidden)").count()) await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelector("#modal")?.classList.contains("hidden"));
+  };
+  await openAndCheck("[data-player-link]", new RegExp(fixture.player));
+  await openAndCheck("[data-club-link]", new RegExp(fixture.club));
+  await openAndCheck("[data-staff-link]", new RegExp(fixture.staff));
+  await openAndCheck("[data-nation]", /国家队名单|National squad/);
+  await assertNoHorizontalOverflow(page, "desktop inbox entity links");
+  await page.locator('[data-tab="dashboard"]').click();
+  await page.waitForSelector("#tab-dashboard.active");
+  assert.ok(await page.locator("#dash-inbox [data-player-link]").count() > 0, "dashboard inbox summary should preserve entity links");
+}
+
 const navGroupByTab = {
   dashboard: "overview",
   finance: "overview",
@@ -591,6 +656,7 @@ try {
   }
   await assertCrestLoaded(page.locator("#club-name .club-crest"), "topbar crest");
   await assertNoHorizontalOverflow(page, "desktop dashboard");
+  await assertInboxEntityLinks(page);
   await page.waitForSelector("#dashboard-priorities > *");
   assert.ok((await page.locator("#dashboard-priorities").innerText()).trim().length > 0, "manager workbench must render priorities or an explicit ready state");
   assert.ok(await page.locator("#dashboard-quick-actions [data-dashboard-link]").count() > 0, "manager workbench must expose contextual actions");
