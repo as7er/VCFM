@@ -25,6 +25,7 @@ import {
   DIVISIONS,
   ensureKit,
   assignSquadNumbers,
+  registerSquadNumbers,
   ensurePlayerNumber,
   ensureWorldClubTemplates,
 } from "./models.js";
@@ -1196,6 +1197,8 @@ export function finishSeason(world) {
         const squadLimit = club.id === world.userClubId ? 23 : 25;
         if (plannedPromotion && club.players.length < squadLimit) {
           p.fromYouth = true;
+          // 学院号码只用于青训名单；进入一线队后参加正式赛季登记。
+          p.number = null;
           p.wage = estimateWage(p);
           ensurePlayerHistory(p);
           club.players.push(p);
@@ -1246,7 +1249,9 @@ export function finishSeason(world) {
         })
       );
     }
-    fillYouthSquad(club);
+    // 赛季末新补充球员先保持无号；下一赛季在归队/解约完成后统一登记，
+    // 避免普通补位球员提前占走刚释放的 7/9/10/11 号。
+    fillYouthSquad(club, null, { assignNumbers: false });
     autoLineup(club);
     club.form = [];
   }
@@ -1288,6 +1293,9 @@ export function startNextSeason(world) {
   if (!world.seasonOver) finishSeason(world);
 
   const endedSeason = world.season;
+  const priorNumberEntries = new Map(
+    (world.clubs || []).map((club) => [club.id, { ...(club.numberRegistration?.entries || {}) }])
+  );
 
   // 归档本赛季个人数据到 history + career（在赛季号 +1 之前）
   for (const c of world.clubs) {
@@ -1325,6 +1333,7 @@ export function startNextSeason(world) {
   ensureStaffApproaches(world);
   world.staffApproaches = (world.staffApproaches || []).filter((a) => a.status === "pending");
 
+  const userNumberRegistrationChanges = [];
   for (const c of world.clubs) {
     world.table[c.id] = { played: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
     if (!c.division) c.division = 3;
@@ -1335,6 +1344,13 @@ export function startNextSeason(world) {
       resetSeasonDiscipline(p);
     }
     autoLineup(c);
+    const numberResult = registerSquadNumbers(c, {
+      season: world.season,
+      reason: "new-season",
+      day: 1,
+      protectedEntries: priorNumberEntries.get(c.id) || {},
+    });
+    if (c.id === world.userClubId) userNumberRegistrationChanges.push(...numberResult.changes);
   }
   ensureWorldSponsorships(world);
   const leagueTransitionPayments = processLeagueTransitionPayments(world);
@@ -1352,6 +1368,14 @@ export function startNextSeason(world) {
     day: 1,
     text: `📅 ${world.season} 赛季开始！${user.name} 征战${divName}。国内联赛、杯赛与大陆赛事赛程已生成。${expandedClubs ? ` 世界联赛新增 ${expandedClubs} 家俱乐部。` : ""}`,
   });
+  if (userNumberRegistrationChanges.length) {
+    const changed = userNumberRegistrationChanges.slice(0, 6).map((item) => `${item.name} ${item.from ? `#${item.from}→` : ""}#${item.to}`).join("、");
+    const more = userNumberRegistrationChanges.length > 6 ? ` 等 ${userNumberRegistrationChanges.length} 人` : "";
+    world.news.unshift({
+      day: 1,
+      text: `🔢 新赛季号码登记：${changed}${more}。原有持有人优先保留，空缺重要号码按球员偏好、位置与阵容地位分配。`,
+    });
+  }
   const userTransitionPayment = leagueTransitionPayments.find((item) => item.clubId === user.id);
   if (userTransitionPayment) {
     world.news.unshift({

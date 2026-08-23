@@ -21,6 +21,7 @@ const checks = [
   "scripts/player-attributes-audit.mjs",
   "scripts/player-habits-audit.mjs",
   "scripts/player-positions-audit.mjs",
+  "scripts/squad-numbers-audit.mjs",
   "scripts/player-roles-audit.mjs",
   "scripts/team-shapes-audit.mjs",
   "scripts/player-control-audit.mjs",

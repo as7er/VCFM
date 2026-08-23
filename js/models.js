@@ -37,6 +37,14 @@ import {
   roleFitsPosition,
 } from "./player-roles.js";
 import {
+  assignSquadNumbers,
+  ensurePlayerNumber,
+  ensurePlayerNumberPreferences,
+  numberPreferenceLabel,
+  registerSquadNumbers,
+} from "./squad-numbers.js";
+export { assignSquadNumbers, ensurePlayerNumber, ensurePlayerNumberPreferences, numberPreferenceLabel, registerSquadNumbers, setSquadNumber } from "./squad-numbers.js";
+import {
   APPEARANCE_HAIR_COLORS as SHARED_APPEARANCE_HAIR_COLORS,
   APPEARANCE_HAIR_STYLE_IDS as SHARED_APPEARANCE_HAIR_STYLE_IDS,
   APPEARANCE_HAIR_STYLE_NAMES as SHARED_APPEARANCE_HAIR_STYLE_NAMES,
@@ -906,8 +914,11 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     intl: { caps: 0, goals: 0, assists: 0, cleanSheets: 0, goalsConceded: 0 },
     // 个人荣誉
     honors: [],
-    // 球衣号（入队时由 assignSquadNumbers 分配）
+    // 球衣号与稳定偏好（入队/登记时由 squad-numbers 分配）
     number: null,
+    numberPreferences: [],
+    numberPreferenceStrength: null,
+    numberPreferenceVersion: 0,
     talentModelVersion: TALENT_MODEL_VERSION,
   };
   generatePlayerAttributes(p, mean);
@@ -920,6 +931,7 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     p.hairStyle = look.hairStyle;
   }
   ensureFootballProfile(p);
+  ensurePlayerNumberPreferences(p);
   p.ovr = playerOverall(p);
   // 潜力：青年略高于当前，成年接近当前
   if (isYouth) {
@@ -981,14 +993,14 @@ export function createYouthPlayer(club) {
   return p;
 }
 
-export function fillYouthSquad(club, count = null) {
+export function fillYouthSquad(club, count = null, options = {}) {
   const ya = ensureYouthAcademy(club);
   const cfg = YOUTH_LEVELS[ya.level] || YOUTH_LEVELS[1];
   const target = count ?? Math.min(cfg.capacity, 4 + ya.level);
   while (ya.players.length < target) {
     ya.players.push(createYouthPlayer(club));
   }
-  assignSquadNumbers(club);
+  if (options.assignNumbers !== false) assignSquadNumbers(club, { reason: options.reason || "youth-intake" });
   return ya.players;
 }
 
@@ -1113,83 +1125,6 @@ export function kitBackground(kit) {
   }
 }
 
-/** 位置默认号段偏好 */
-function preferredNumbers(pos) {
-  if (pos === "GK") return [1, 13, 23, 25, 31];
-  if (pos === "DEF") return [2, 3, 4, 5, 6, 12, 14, 15, 16, 22, 24, 26, 32];
-  if (pos === "MID") return [6, 7, 8, 10, 11, 14, 16, 17, 18, 20, 21, 28, 30];
-  return [7, 9, 10, 11, 14, 17, 18, 19, 21, 27, 29, 33, 99];
-}
-
-/** 给俱乐部全员分配不重复球衣号（缺号才补） */
-export function assignSquadNumbers(club) {
-  if (!club || !Array.isArray(club.players)) return;
-  ensureKit(club);
-  const used = new Set();
-  for (const p of club.players) {
-    if (p.number != null && p.number >= 1 && p.number <= 99) used.add(p.number);
-  }
-  // 已有号的不动；缺号按能力优先占号
-  const need = club.players
-    .filter((p) => p.number == null || p.number < 1 || p.number > 99)
-    .sort((a, b) => (b.ovr || 0) - (a.ovr || 0));
-
-  for (const p of need) {
-    let num = null;
-    for (const cand of preferredNumbers(p.pos)) {
-      if (!used.has(cand)) {
-        num = cand;
-        break;
-      }
-    }
-    if (num == null) {
-      for (let n = 1; n <= 99; n++) {
-        if (!used.has(n)) {
-          num = n;
-          break;
-        }
-      }
-    }
-    p.number = num || 99;
-    used.add(p.number);
-  }
-  // 青训也补号（可与一线重复显示，但尽量不重复本队）
-  const ya = club.youth?.players;
-  if (Array.isArray(ya)) {
-    for (const p of ya) {
-      if (p.number != null && p.number >= 1 && p.number <= 99) continue;
-      let num = null;
-      for (const cand of preferredNumbers(p.pos)) {
-        if (!used.has(cand)) {
-          num = cand;
-          break;
-        }
-      }
-      if (num == null) {
-        for (let n = 40; n <= 99; n++) {
-          if (!used.has(n)) {
-            num = n;
-            break;
-          }
-        }
-      }
-      p.number = num || (40 + Math.floor(Math.random() * 50));
-      used.add(p.number);
-    }
-  }
-}
-
-export function ensurePlayerNumber(club, player) {
-  if (!player) return null;
-  if (player.number != null && player.number >= 1 && player.number <= 99) return player.number;
-  if (club) assignSquadNumbers(club);
-  if (player.number != null) return player.number;
-  // 无俱乐部上下文：按位置给个默认
-  const prefs = preferredNumbers(player.pos);
-  player.number = prefs[0] || 99;
-  return player.number;
-}
-
 const SQUAD_SHAPE = [
   ...Array(2).fill("GK"),
   ...Array(6).fill("DEF"),
@@ -1235,6 +1170,7 @@ export function createClub(template, lang = "zh") {
     },
     staff: null, // create 后填充，避免循环依赖 staff.js
     kit: null,
+    numberRegistration: null,
     training: { focus: "balanced", intensity: "normal" },
     facilities: template.realityProfile
       ? {
@@ -1267,7 +1203,7 @@ export function createClub(template, lang = "zh") {
   applyClubBranding(club, clubBrandingById[club.id] || template.branding, lang);
   ensureKit(club);
   fillYouthSquad(club);
-  assignSquadNumbers(club);
+  assignSquadNumbers(club, { reason: "club-created" });
   // staff / training / facilities 在 createWorld / 读档时 ensure
   return club;
 }
@@ -2127,7 +2063,10 @@ export function createWorld(userClubId, managerName, lang = "zh") {
     return c;
   });
   calibrateWorldAbilityDistribution(clubs);
-  for (const club of clubs) autoLineup(club);
+  for (const club of clubs) {
+    autoLineup(club);
+    registerSquadNumbers(club, { season: 2026, day: 1, reason: "initial-registration", protectedEntries: {} });
+  }
   // staff 延迟到 main/engine ensure，避免 models↔staff 循环
 
   const user = clubs.find((c) => c.id === userClubId);
@@ -2220,6 +2159,12 @@ export function ensureWorldClubTemplates(world, lang = "zh") {
     if (known.has(template.id)) continue;
     const club = createClub(template, lang);
     autoLineup(club);
+    registerSquadNumbers(club, {
+      season: world.season,
+      day: world.day,
+      reason: "club-added",
+      protectedEntries: {},
+    });
     world.clubs.push(club);
     world.table[club.id] = { played: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
     added++;

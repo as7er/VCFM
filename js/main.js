@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=232";
-import { clubCrestHtml } from "./club-crest.js?v=232";
+import { nationFlagHtml } from "./flags.js?v=233";
+import { clubCrestHtml } from "./club-crest.js?v=233";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -150,6 +150,7 @@ import {
   assignSquadNumbers,
   kitBackground,
   ensurePlayerNumber,
+  numberPreferenceLabel,
   swapLineupSlots,
   setLineupSlot,
   ensureLineupRoles,
@@ -316,7 +317,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=232";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=233";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -383,7 +384,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=232";
+} from "./avatar.js?v=233";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 import {
   MANAGER_ONBOARDING_TAB_STEPS,
@@ -483,7 +484,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=232").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=233").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1480,7 +1481,6 @@ function repairWorldFields(w) {
     ensureYouthAcademy(c);
     ensureKit(c);
     ensureTactics(c);
-    assignSquadNumbers(c);
     ensureTraining(c);
     ensureFacilities(c);
     ensureClubHonors(c);
@@ -1506,6 +1506,8 @@ function repairWorldFields(w) {
       ensureHonors(p);
       ensurePlayerInjury(p);
     }
+    // 先补齐详细位置与持久化号码偏好，再做旧档号码修复/当前赛季登记。
+    assignSquadNumbers(c, { season: w.season, reason: "save-migration" });
     if (c.id === w.userClubId) {
       for (const p of c.players || []) ensurePlayerPathway(p, c, w);
     }
@@ -5198,6 +5200,15 @@ function showPlayerModal(playerId, context = {}) {
   const intl = player.intl || {};
   const isGk = player.pos === "GK";
   const detailedPosition = positionSummary(player, en ? "en" : "zh");
+  const numberPreference = numberPreferenceLabel(player);
+  const numberPreferenceStrength = numberPreference.strength === "strong"
+    ? (en ? "strong" : "强烈")
+    : numberPreference.strength === "light"
+      ? (en ? "light" : "一般")
+      : (en ? "normal" : "明确");
+  const numberPreferenceText = numberPreference.numbers.length
+    ? `${en ? "Preferred numbers" : "钟情号码"} ${numberPreference.numbers.map((number) => `#${number}`).join(" / ")}（${numberPreferenceStrength}）`
+    : "";
 
   // 分赛季历史 + 当前未归档赛季
   const curAvgR = seasonAvgRating(player);
@@ -5278,6 +5289,7 @@ function showPlayerModal(playerId, context = {}) {
        · ${nationLabel(player)}
        · ${en ? `Age ${player.age}` : `${player.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${isOther ? "" : ovrClass(player.ovr)}">${escapeHtml(ovrShow)}</strong>
        · ${en ? "Potential" : "潜力"} <strong>${escapeHtml(String(pot))}</strong>
+       ${numberPreferenceText ? ` · ${escapeHtml(numberPreferenceText)}` : ""}
        · ${en ? "Foot" : "惯用脚"} ${escapeHtml(preferredFootLabel(player.preferredFoot, en))}
        · ${en ? "Height" : "身高"} ${Number(player.heightCm) || "—"}cm
        ${isYouth ? ` · <span class="badge MID">${en ? "Academy" : "青训学院"}</span>` : player.fromYouth ? ` · <span class="badge MID">${en ? "Youth graduate" : "青训"}</span>` : ""}

@@ -1,7 +1,7 @@
 /* VCFM offline cache (GitHub Pages friendly)
  * JS/CSS/HTML: network-first + no-store
  */
-const CACHE = "vcfm-v232";
+const CACHE = "vcfm-v233";
 const ASSETS = [
   "./",
   "./index.html",
@@ -38,6 +38,7 @@ const ASSETS = [
   "./js/matchview-coords.js",
   "./js/matchview-director.js",
   "./js/models.js",
+  "./js/squad-numbers.js",
   "./js/world-invariants.js",
   "./js/player-positions.js",
   "./js/player-attributes.js",
