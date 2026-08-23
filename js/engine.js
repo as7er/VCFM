@@ -156,6 +156,7 @@ import {
   invalidateClubSquadPlan,
   invalidateDivisionSquadPlans,
   selectPlannedLoanCandidate,
+  selectPlannedOverstockedPosition,
   selectPlannedRecruitmentPosition,
   selectPlannedSaleCandidate,
   squadPositionPlan,
@@ -2100,8 +2101,13 @@ export function processAiTransfers(world) {
     }
 
     // 卖：只处理计划明确判定为过剩且不会破坏位置最低骨架的球员。
-    if (needCash || tooOld || chance(seasonPlan?.key === "sustainable" || seasonPlan?.key === "rebuild" ? 0.24 : 0.15)) {
-      const victim = selectPlannedSaleCandidate(world, club);
+    // 上限先前的软刹车只是“别买更多”:真正超编时优先松一档上限放冗余走,
+    // 只有结构跌破最低骨架时才撤回普通换血线。
+    const rescueOverstock = !!selectPlannedOverstockedPosition(world, club);
+    if (needCash || tooOld || rescueOverstock || chance(seasonPlan?.key === "sustainable" || seasonPlan?.key === "rebuild" ? 0.24 : 0.15)) {
+      const victim = selectPlannedSaleCandidate(world, club, rescueOverstock
+        ? (player) => !!(squadPositionPlan(ensureClubSquadPlan(world, club), player.pos) || {}).overstock
+        : null);
       if (victim && club.players.length > 15) {
         const buyers = world.clubs
           .filter(
@@ -2161,7 +2167,11 @@ export function processAiTransfers(world) {
     const transferBudget = clubTransferBudget(world, club);
     if (club.finance?.debtPlan?.transferEmbargo || club.finance?.compliance?.transferEmbargo) continue;
     const needPos = selectPlannedRecruitmentPosition(world, club);
-    if (!needPos || transferBudget < 150000 || club.players.length >= 25) continue;
+    // 任何位置超编时先停买,优先让窗口清结构再进人。若不限购,``别买更多''
+    // 的软刹车挡不住高需求位置的第七人反复被买回。(本循环只遍历 AI 俱乐部,
+    // 玩家的阵容增长不受此约束。)
+    if (selectPlannedOverstockedPosition(world, club) || club.players.length >= 25) continue;
+    if (!needPos || transferBudget < 150000 || needPos === selectPlannedOverstockedPosition(world, club)) continue;
 
     const minOvr = Math.max(6, Math.floor((club.power || 50) / 8) - 1);
     const candidates = [];

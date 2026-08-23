@@ -276,7 +276,12 @@ function buildPositionPlan(world, club, position, slots, current, owned, registr
   const nextDeficit = Math.max(0, target.ideal - securedNext.length);
   const twoYearDeficit = Math.max(0, target.ideal - securedTwoYears.length);
   const qualityGap = Math.max(0, peerAverage - starterAverage);
+  // 超出理想深度就判定超编,而不是等逼近上限。上限(ideal+2)说到底是一条
+  // “极少数夺冠队才会用满”的宽松边,峰值(每队约 26)还压在长期均衡(约 24.5)
+  // 之上,用它当放人阈值,退出永远不会在真实样本里发生。理想深度(每队约
+  // 19–20:每条线首发加 1–2 名轮换)才是可持续的阵容规模,超了就该放出。
   const surplus = Math.max(0, currentPlayers.length - target.maximum);
+  const overstock = currentPlayers.length > target.ideal;
   const needScore = round(Math.max(0,
     currentDeficit * 18 +
     minimumDeficit * 22 +
@@ -331,6 +336,7 @@ function buildPositionPlan(world, club, position, slots, current, owned, registr
     ...target,
     current: currentPlayers.length,
     owned: ownedPlayers.length,
+    overstock,
     securedNext: securedNext.length,
     securedTwoYears: securedTwoYears.length,
     starterAverage,
@@ -361,6 +367,7 @@ function playerDecision(world, club, player, positionPlan, seasonPlan, decisionP
   const starter = rank <= Math.max(1, positionPlan.slots);
   const withinIdeal = rank <= positionPlan.ideal;
   const surplus = positionPlan.current > positionPlan.maximum;
+  const overstock = positionPlan.overstock === true;
   const replacementAge = REPLACEMENT_AGE[player.pos || "MID"];
   const formation = FORMATIONS[club?.tactics?.formation] || FORMATIONS["4-3-3"];
   const positionFit = bestDetailedFit(player, formation.slots || []);
@@ -412,6 +419,9 @@ function playerDecision(world, club, player, positionPlan, seasonPlan, decisionP
   } else if (!starter && weakForClub && (surplus || rank > positionPlan.ideal) && peers.length > positionPlan.minimum) {
     action = contractYears <= 1 ? "release" : "sell";
     priority = 56 + Math.max(0, rank - positionPlan.ideal) * 5 + Math.max(0, age - 27) * 2;
+    // 临界的“卖出”线也看向 overstock:一条战线只要超过理想深度,靠后的弱
+    // 员就是可以协商的真实冗余,而不是结构回填期该保住的深度。
+    if (overstock && rank > positionPlan.slots + 1) priority += 10;
     reason = surplus ? "位置人数超过阵型上限，且竞技顺位靠后" : "不在现实轮换顺位内，可释放名额与工资";
     reasonEn = surplus ? "Position is overstocked and the player is low in the order" : "Outside the realistic rotation order; can release a slot and wages";
   } else if (starter) {
@@ -608,6 +618,19 @@ export function squadPlayerPlan(plan, playerId) {
   return plan?.playerDecisions?.[playerId] || null;
 }
 
+export function selectPlannedOverstockedPosition(world, club) {
+  const plan = ensureClubSquadPlan(world, club);
+  const rows = (plan?.orderedNeeds || [])
+    .map((position) => ({ position, row: plan.positions[position] }))
+    .filter(({ row }) => row && row.overstock && row.current > (row.minimum || 0));
+  if (!rows.length) return null;
+  return rows
+    .sort((a, b) =>
+      (b.row.current - b.row.ideal) - (a.row.current - a.row.ideal) ||
+      b.row.current - a.row.current
+    )[0].position;
+}
+
 export function selectPlannedSaleCandidate(world, club, filter = null) {
   const plan = ensureClubSquadPlan(world, club);
   const candidates = (club?.players || [])
@@ -616,6 +639,9 @@ export function selectPlannedSaleCandidate(world, club, filter = null) {
     .filter(({ player, decision }) =>
       decision?.action === "sell" &&
       (!filter || filter(player, club.players)) &&
+      // 过剩判定以“该位置超编”为准:先要超编,再看当前结构是否跌破最低骨架。
+      // 只卡最低骨架(不设位置上限)就是只许进不许出,队伍永远停在线儿以上。
+      (plan.positions[player.pos]?.overstock || false) &&
       (plan.positions[player.pos]?.current || 0) > (plan.positions[player.pos]?.minimum || 0) &&
       (plan.positions[player.pos]?.owned || 0) > (plan.positions[player.pos]?.minimum || 0)
     )

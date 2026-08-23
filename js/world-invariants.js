@@ -54,6 +54,17 @@ export function assertWorldInvariants(world, stage = "unknown") {
     if (club.finance?.financeLedger != null && !Array.isArray(club.finance.financeLedger)) {
       fail(stage, `club ${club.id} finance ledger is invalid`);
     }
+    if (club.finance?.debt?.facilities != null) {
+      if (!Array.isArray(club.finance.debt.facilities)) fail(stage, `club ${club.id} debt facilities is invalid`);
+      const facilityIds = new Set();
+      for (const facility of club.finance.debt.facilities) {
+        if (!facility || typeof facility.id !== "string" || !facility.id) fail(stage, `club ${club.id} invalid debt facility id`);
+        if (facilityIds.has(facility.id)) fail(stage, `club ${club.id} duplicate debt facility ${facility.id}`);
+        facilityIds.add(facility.id);
+        if (facility.balance != null && !finite(facility.balance)) fail(stage, `club ${club.id} facility ${facility.id} balance is not finite`);
+        if (facility.annualRate != null && !finite(facility.annualRate)) fail(stage, `club ${club.id} facility ${facility.id} annualRate is not finite`);
+      }
+    }
   }
 
   if (!clubIds.has(world.userClubId)) fail(stage, "user club is missing");
