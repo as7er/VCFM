@@ -2634,7 +2634,6 @@ export class MatchView {
     const lane = isHome ? this.benchHomeEl : this.benchAwayEl;
     if (!lane || !club) return;
     lane.innerHTML = "";
-    const form = FORMATIONS[club.tactics?.formation] || FORMATIONS["4-3-3"];
     const xi = new Set((getLineupPlayers(club) || []).map((p) => p?.id).filter(Boolean));
     const bench = (club.players || [])
       .filter((p) => p && !xi.has(p.id) && (p.injured || 0) <= 0)

@@ -55,6 +55,15 @@ export const MANAGER_ONBOARDING_STEPS = Object.freeze([
   }),
 ]);
 
+/**
+ * 只靠打开对应页签就能完成的步骤。从步骤表派生而不是另抄一份，
+ * 这样改页签名或步骤 id 时两边不会走散。比赛步骤的页签是赛程，
+ * 但它要真的打完一场才算数，所以自然被这里排除。
+ */
+export const MANAGER_ONBOARDING_TAB_STEPS = Object.freeze(
+  MANAGER_ONBOARDING_STEPS.filter((step) => step.tab === step.id).map((step) => step.id)
+);
+
 function hasPlayedUserMatch(world) {
   const userClubId = world?.userClubId;
   return !!(userClubId && (world.fixtures || []).some(
@@ -78,8 +87,12 @@ export function ensureManagerOnboarding(world) {
   if (needsInitialization) {
     world.managerOnboarding = {
       version: MANAGER_ONBOARDING_VERSION,
-      dismissed: isEstablishedCareer(world),
-      steps: {},
+      // 版本迁移保留玩家已经表达过的选择和进度：跳过过引导、或已经走完几步的
+      // 存档，不该因为一次版本号变更又被从头引导一遍。生涯推断继续兜底，
+      // 这样字段损坏的老存档也不会被重新引导。
+      // normalizeSteps 会丢掉不再存在的步骤，新步骤默认未完成。
+      dismissed: existing?.dismissed === true || isEstablishedCareer(world),
+      steps: existing?.steps,
     };
   }
   const state = world.managerOnboarding;

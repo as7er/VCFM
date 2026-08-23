@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=231";
-import { clubCrestHtml } from "./club-crest.js?v=231";
+import { nationFlagHtml } from "./flags.js?v=232";
+import { clubCrestHtml } from "./club-crest.js?v=232";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -316,7 +316,7 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=231";
+import { ensureClubSquadPlan } from "./squad-planning.js?v=232";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -383,9 +383,10 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=231";
+} from "./avatar.js?v=232";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 import {
+  MANAGER_ONBOARDING_TAB_STEPS,
   completeManagerOnboardingStep,
   dismissManagerOnboarding,
   ensureManagerOnboarding,
@@ -482,7 +483,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=231").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=232").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1598,7 +1599,7 @@ function syncMainNavigation(tab) {
 
 function activateMainTab(tab, { refresh = true } = {}) {
   if (!document.querySelector(`[data-tab="${tab}"]`)) return;
-  if (world && ["squad", "tactics", "training"].includes(tab)) {
+  if (world && MANAGER_ONBOARDING_TAB_STEPS.includes(tab)) {
     if (completeManagerOnboardingStep(world, tab)) autosave(`onboarding-${tab}`);
   }
   syncMainNavigation(tab);
@@ -1638,7 +1639,7 @@ function bindMainOnce() {
   if (dashInboxBtn) {
     dashInboxBtn.onclick = () => goToInboxTab();
   }
-  $("#tab-dashboard")?.addEventListener("click", (event) => {
+  $("#tab-dashboard")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-dashboard-link]");
     if (button) {
       const target = button.dataset.dashboardLink;
@@ -1652,10 +1653,16 @@ function bindMainOnce() {
       return;
     }
     const play = event.target.closest("[data-dashboard-onboarding-match]");
-    if (play) {
+    if (play && world) {
       const next = getNextUserMatch(world);
-      if (next && next.day <= world.day) openMatch();
-      else activateMainTab("fixtures");
+      if (next && next.day <= world.day) {
+        try {
+          await openMatch();
+        } catch (error) {
+          console.error(error);
+          toast(getLang() === "en" ? "Match view failed to load" : "比赛画面加载失败");
+        }
+      } else activateMainTab("fixtures");
     }
   });
   document.querySelectorAll("[data-squad-view]").forEach((button) => {
@@ -1841,10 +1848,14 @@ function bindMainOnce() {
   const commentaryToggle = $("#match-com-toggle");
   commentaryToggle?.addEventListener("click", (event) => {
     event.preventDefault();
+    // expanded 指点击前的状态：展开着就收起，收起着就展开。
     const expanded = !commentary?.classList.contains("is-collapsed");
     commentary?.classList.toggle("is-collapsed", expanded);
     commentaryToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
-    commentaryToggle.title = expanded ? "展开比赛事件" : "收起比赛事件";
+    // 同时写 data-i18n-title，切换语言时 applyI18n 才能重新翻译当前状态。
+    const titleKey = expanded ? "match.commentaryExpand" : "match.commentaryCollapse";
+    commentaryToggle.setAttribute("data-i18n-title", titleKey);
+    commentaryToggle.title = t(titleKey);
     const icon = commentaryToggle.querySelector("span");
     if (icon) icon.textContent = expanded ? "⌄" : "⌃";
   });
@@ -2976,8 +2987,33 @@ function goToInboxTab() {
  * 引用字段会随邮件类型变化，这里集中兼容旧存档和新邮件，避免让信箱
  * 重新猜测正文中的名字，也避免为详情页复制一套展示逻辑。
  */
-function inboxEntityRefs(mail) {
+/**
+ * 单次渲染内共享的实体索引。信箱一次最多渲染 50 封邮件，每封都要按 id 回查
+ * 球员和俱乐部；没有索引时每次回查都要扫遍 270 家俱乐部的全部名单，
+ * 而且解析失败的 id 不会进 seen，同一个 id 还会被重复扫描。
+ * 构建顺序与原来的查找顺序一致：同一俱乐部先一队后青训，最后才是已退役球员。
+ */
+function buildInboxEntityIndex(world) {
+  const players = new Map();
+  const clubs = new Map();
+  for (const club of world?.clubs || []) {
+    clubs.set(club.id, club);
+    for (const player of club.players || []) {
+      if (player?.id && !players.has(player.id)) players.set(player.id, { player, clubId: club.id });
+    }
+    for (const player of club.youth?.players || []) {
+      if (player?.id && !players.has(player.id)) players.set(player.id, { player, clubId: club.id });
+    }
+  }
+  for (const player of world?.retiredPlayers || []) {
+    if (player?.id && !players.has(player.id)) players.set(player.id, { player, clubId: null });
+  }
+  return { players, clubs };
+}
+
+function inboxEntityRefs(mail, index = null) {
   if (!world || !mail) return [];
+  const entityIndex = index || buildInboxEntityIndex(world);
   const ref = mail.ref || {};
   const entities = [];
   const seen = new Set();
@@ -2987,23 +3023,15 @@ function inboxEntityRefs(mail) {
     if (seen.has(key)) return;
     let item = null;
     if (type === "club") {
-      item = world.clubs?.find((club) => club.id === id) || null;
+      item = entityIndex.clubs.get(id) || null;
     } else if (type === "player") {
-      for (const club of world.clubs || []) {
-        item = (club.players || []).find((player) => player.id === id) || null;
-        if (item) {
-          context = { ...context, clubId: club.id };
-          break;
-        }
-        item = (club.youth?.players || []).find((player) => player.id === id) || null;
-        if (item) {
-          context = { ...context, clubId: club.id };
-          break;
-        }
-      }
-      if (!item) item = world.retiredPlayers?.find((player) => player.id === id) || null;
+      const found = entityIndex.players.get(id);
+      item = found?.player || null;
+      if (item && found.clubId) context = { ...context, clubId: found.clubId };
     } else if (type === "nation") {
-      item = listNationalTeams(world).find((nation) => nation.code === id) || null;
+      // 这里只用得到国家的名字和代码，都是静态数据；listNationalTeams 会给每个
+      // 国家重新分组全部球员并选出首发，代价远高于这一次查名字。
+      item = NATIONALITIES.find((nation) => nation.code === id) || null;
     } else if (type === "staff") {
       const found = findStaffById(id, context.clubId || null);
       item = found?.staff || null;
@@ -3172,9 +3200,10 @@ function renderInbox() {
     return;
   }
 
+  const entityIndex = buildInboxEntityIndex(world);
   box.innerHTML = list
     .map((m) => {
-      const entities = inboxEntityRefs(m);
+      const entities = inboxEntityRefs(m, entityIndex);
       const cat = inboxCatLabel(m.category, en ? "en" : "zh");
       const st =
         m.status === "pending"
@@ -4570,10 +4599,11 @@ function renderDashboard() {
     if (!n && !top.length) {
       dashIb.innerHTML = `<span class="muted">${escapeHtml(en ? "No pending mail" : "暂无待办")}</span>`;
     } else {
+      const dashEntityIndex = buildInboxEntityIndex(world);
       const lines = top
         .map(
           (m) =>
-            `<div class="dash-inbox-row"><span class="inbox-cat mini">${escapeHtml(inboxCatLabel(m.category, en ? "en" : "zh"))}</span> ${renderInboxEntityText(en && m.titleEn ? m.titleEn : m.title, inboxEntityRefs(m))}</div>`
+            `<div class="dash-inbox-row"><span class="inbox-cat mini">${escapeHtml(inboxCatLabel(m.category, en ? "en" : "zh"))}</span> ${renderInboxEntityText(en && m.titleEn ? m.titleEn : m.title, inboxEntityRefs(m, dashEntityIndex))}</div>`
         )
         .join("");
       dashIb.innerHTML = `<div class="dash-inbox-count">${en ? `${n} pending` : `${n} 封待办`}</div>${lines}`;
@@ -11559,8 +11589,13 @@ function formatRoleReviewHtml(rev) {
 }
 
 function finishMatchUI() {
-  if (world && completeManagerOnboardingStep(world, "match")) {
-    renderDashboard();
+  // 首周引导的比赛步骤在这里落定，随后由调用方的 saveGame 落盘。
+  // 工作台此刻不可见（激活屏是比赛画面），点「继续」时 refreshAll 会重渲染，
+  // 所以这里只改状态不渲染；也不能让异常冒出去，后面还要解锁「继续」按钮。
+  try {
+    if (world) completeManagerOnboardingStep(world, "match");
+  } catch (err) {
+    console.error(err);
   }
   // 结束录制，可下载 JSON 回放
   try {

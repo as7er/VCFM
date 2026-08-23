@@ -53,8 +53,8 @@ export function ensureWorldDebts(world) {
   return world;
 }
 
-export function clubDebtCapacity(club) {
-  const annualRecurringRevenue = sponsorshipMarketWeekly(club) * FINANCE_WEEKS_PER_SEASON;
+export function clubDebtCapacity(club, season = null) {
+  const annualRecurringRevenue = sponsorshipMarketWeekly(club, season) * FINANCE_WEEKS_PER_SEASON;
   return Math.max(250_000, Math.round(annualRecurringRevenue * 1.2));
 }
 
@@ -69,13 +69,14 @@ export function clubDebtSnapshot(world, club) {
     if (!facility.amortizing || facility.lastPrincipalSeason === world?.season) return sum;
     return sum + Math.min(money(facility.balance), Math.ceil(money(facility.originalPrincipal) / Math.max(1, Number(facility.termSeasons) || 1)));
   }, 0);
+  const capacity = clubDebtCapacity(club, world?.season);
   return {
     facilities,
     outstanding,
     weeklyInterest,
     principalDueThisSeason,
-    capacity: clubDebtCapacity(club),
-    headroom: Math.max(0, clubDebtCapacity(club) - outstanding),
+    capacity,
+    headroom: Math.max(0, capacity - outstanding),
   };
 }
 

@@ -48,6 +48,11 @@ import {
 } from "./appearance.js";
 
 let _id = 1;
+/**
+ * 只由计数器和 Math.random 决定：id 既被当作稳定种子 hash（报名背景见
+ * squad-registration.js），又被大量排序拿来做同分兜底，而审计靠种子化的
+ * Math.random 复现整个世界，掺进时间戳会让同一份存档每次跑出不同结果。
+ */
 export function uid(prefix = "p") {
   return `${prefix}_${_id++}_${Math.random().toString(36).slice(2, 7)}`;
 }

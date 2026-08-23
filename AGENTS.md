@@ -4,7 +4,21 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v231**（首周经理引导）
+> 缓存：**vcfm-v232**（长期经济与比赛画面修复）
+
+## v232 长期经济与比赛画面修复（2026-08-21）
+
+- 赞助市场按签约赛季重新定价（`js/sponsorships.js`，基准 2026 年、每季 3%，对齐实测球员工资通胀）。只作用于新签合同，已生效合同保留签约周基数，老档在换约时跟上；`clubDebtCapacity` 同步跟随收入。
+- **收入端此前完全没有通胀**：赞助、比赛日、赛事奖金三处都是名义恒定，而工资与身价随球员能力逐年走高，导致经常性收支持续恶化。修复后 5 赛季样本中位经常性净额由 -22 万转为 +32 万，亏损俱乐部 146→116 家，债务余额 2653 万→1790 万。
+- **`negativeClubs` 不能反映生态健康**：现金转负会触发老板注资（`js/club-finance.js` 的 owner loan，3.5%/年计息），持续把该指标重置回低位，5 赛季实测它与真实亏损俱乐部数相差 29 倍。生态审计已补 `recurringDeficitClubs`、`medianRecurringNet`、`indebtedClubs`、`debtOutstanding`、`annualDebtInterest`，均为账本纯读，不触发结算副作用。
+- **仍未解决——阵容只进不出**：5 赛季 5719→6606（每队 21.2→24.5 人）。增速在快速衰减（+464/+291/+99/+33），说明它收敛到约 24.6 人/队的均衡而非无限膨胀，`players <= 270 * 25` 红线大概率**不会**如先前预计那样在第 6–7 季触发。真正的问题是均衡值偏大：同期单人工资中位仅 +7.5%，阵容却 +15.5%，工资总额 +24.2%，压过赞助通胀带来的 +12.6% 收入增幅——**这是经常性赤字的主因，而非「另一半」**。根因是出口缺失：全仓库没有任何一处因超编放人，`squad-planning.js:279` 算出的 `surplus` 只用于降低购买欲望（`:289`），唯一的软刹车是 `:726` 的魔数（拐点 23、斜率 4），它把均衡顶在 24–25 人。
+- **生态审计此前不可复现**：职员 id 掺了 `Date.now()`（`js/staff.js` 的 `uid`），而教练流派（`js/manager-ecosystem.js` 的 `ensureCoachIdentity`，seed 取 `coach.id`）与职员国籍都拿它当稳定种子 hash，于是同一份代码换个时刻跑就得到不同的联赛——实测两次运行债务余额相差 46%（2365 万 / 1616 万）。按仓库既有惯例（`phase-shape-evidence-audit`、`background-spatial-worker-audit` 都这么做）在 `scripts/ecosystem-audit.mjs` 钉死 `Date.now`，五赛季样本现可逐字段复现。**生产代码未动**：时间戳只影响实体首次生成，而首次生成本就该随机（`ensureStaffProfile` 会把结果连同 `profileVersion` 落档，`ensureCoachIdentity` 保留 `existing.archetype`），这是审计基础设施问题，不是游戏 bug。
+- 比赛底栏溢出球场区域会盖住解说折叠按钮（底栏 `position:relative`，解说栏 static，故画在其上）。`.fm-pitch-col` 的高度上限改为同时受视口和父容器约束；替补席空的一侧保留网格列，避免五列结构错位。
+- `finishMatchUI` 不再在解锁「继续」按钮之前渲染工作台：该处抛错会同时跳过 UI 解锁与调用方的 `saveGame`，导致卡死且赛果丢失。
+- 首周引导版本迁移保留玩家已跳过的选择与已完成步骤；页签步骤由 `MANAGER_ONBOARDING_TAB_STEPS` 从步骤表派生，不再手工抄一份。
+- 信箱实体解析使用单次渲染共享索引；国家查询改读 `NATIONALITIES` 静态数据，此前每取一个国家名都会重建全部国家队名单（分组全部球员并逐国选首发）。
+- 缓存 `vcfm-v232`
+- 已验证：`npm test`（71 项审计全通过）、`npm run test:browser`、财务专项 7 项、5 赛季生态样本
 
 ## v230 2D 无球跑位连续性（2026-08-19）
 

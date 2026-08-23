@@ -57,4 +57,37 @@ const active = sponsorshipSnapshot(world, first).active;
 assert.equal(active.id, selected.id);
 assert.equal(first.finance.financeLedger.some((entry) => entry.source === "sponsorship-signing"), true);
 
-console.log("Sponsorship audit passed: stable commercial split, offers, selection, renewal and performance settlement");
+// 赞助市场必须随赛季重新定价。收入端名义固定而工资和身价逐年走高，会让全联赛
+// 的经常性收支持续恶化（ecosystem 审计的 recurringDeficitClubs / medianRecurringNet）。
+const baseSeasonMarket = sponsorshipMarketWeekly(first, 2026);
+assert.ok(
+  sponsorshipMarketWeekly(first, 2036) > baseSeasonMarket * 1.3,
+  "sponsorship market must reprice across seasons"
+);
+assert.equal(
+  sponsorshipMarketWeekly(first, 2020),
+  baseSeasonMarket,
+  "seasons before the base season must not shrink the market"
+);
+assert.equal(
+  sponsorshipMarketWeekly(first),
+  baseSeasonMarket,
+  "an unknown season must fall back to base-season pricing"
+);
+
+// 重新定价只作用于新合同：晚开局的世界拿到更高的报价，已生效合同不被改写。
+const offersAt = (season) => {
+  const home = club(`market_${season}`, 72);
+  const scopedWorld = { season, day: 1, userClubId: home.id, clubs: [home] };
+  ensureWorldSponsorships(scopedWorld);
+  return sponsorshipSnapshot(scopedWorld, home).offers;
+};
+const earlyOffers = offersAt(2026);
+const lateOffers = offersAt(2040);
+assert.ok(
+  lateOffers[0].weeklyBase > earlyOffers[0].weeklyBase * 1.4,
+  "later seasons must offer repriced sponsorship contracts"
+);
+assert.equal(active.weeklyBase, selected.weeklyBase, "an active contract keeps the price it was signed at");
+
+console.log("Sponsorship audit passed: stable commercial split, offers, selection, renewal, season repricing and performance settlement");

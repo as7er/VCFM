@@ -639,7 +639,7 @@ try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForFunction(() => (
     !("serviceWorker" in navigator)
-      || sessionStorage.getItem("vcfm-sw-reloaded-v231") === "1"
+      || sessionStorage.getItem("vcfm-sw-reloaded-v232") === "1"
   ));
   await page.waitForLoadState("networkidle");
   await page.waitForFunction(() => !!window.vcfmMainApi);
@@ -707,12 +707,83 @@ try {
   await page.waitForFunction(() => !document.querySelector("#btn-play-match")?.disabled, null, { timeout: 90_000 });
   await page.locator("#btn-play-match").click();
   await page.waitForSelector("#screen-match.active", { timeout: 90_000 });
+
+  // 解说栏折叠开关。此前只有「源码里存在这个选择器」的断言，折叠行为本身没被测过。
+  const commentary = page.locator(".fmm-commentary");
+  const commentaryToggle = page.locator("#match-com-toggle");
+  const isCollapsed = () => commentary.evaluate((el) => el.classList.contains("is-collapsed"));
+  // 底栏一旦溢出 .fm-match-body 就会盖住折叠按钮让它点不到（它是 position:relative，
+  // 解说栏是 static，所以画在解说栏之上）。约束在 .fm-pitch-col 的 max-height。
+  const toggleOverlap = await page.evaluate(() => {
+    const button = document.querySelector("#match-com-toggle");
+    const dock = document.querySelector(".mp-fmm-dock");
+    const body = document.querySelector(".fm-match-body");
+    if (!button || !dock || !body) return { missing: true };
+    const rect = button.getBoundingClientRect();
+    const topMost = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return {
+      coveredByDock: dock.contains(topMost),
+      dockBottom: Math.round(dock.getBoundingClientRect().bottom),
+      bodyBottom: Math.round(body.getBoundingClientRect().bottom),
+    };
+  });
+  assert.notEqual(toggleOverlap.missing, true, "match dock and commentary toggle must both exist");
+  assert.ok(
+    toggleOverlap.dockBottom <= toggleOverlap.bodyBottom + 1,
+    `match dock must stay inside the pitch area (dock ${toggleOverlap.dockBottom} > body ${toggleOverlap.bodyBottom})`
+  );
+  assert.equal(
+    toggleOverlap.coveredByDock,
+    false,
+    `match dock must not cover the commentary toggle (dock ${toggleOverlap.dockBottom}, body ${toggleOverlap.bodyBottom})`
+  );
+  assert.equal(await isCollapsed(), true, "commentary must start collapsed");
+  await commentaryToggle.click();
+  assert.equal(await isCollapsed(), false, "commentary must expand on toggle");
+  assert.equal(await commentaryToggle.getAttribute("aria-expanded"), "true", "expanded commentary must announce itself");
+  await commentaryToggle.click();
+  assert.equal(await isCollapsed(), true, "commentary must collapse again");
+  assert.equal(await commentaryToggle.getAttribute("aria-expanded"), "false", "collapsed commentary must announce itself");
+
+  // 替补席是五列网格，空的一侧必须留住自己的列；display:none 会让后面的元素
+  // 前移一列，把分隔线挤进替补席的位置。
+  await page.waitForSelector("#mp-bench-strip", { timeout: 90_000 });
+  assert.equal(
+    await page.locator("#mp-bench-strip > *").count(),
+    5,
+    "bench strip must keep its five grid columns"
+  );
+  assert.equal(
+    await page.locator("#mp-bench-strip .mp-bench-list").evaluateAll(
+      (nodes) => nodes.filter((node) => getComputedStyle(node).display === "none").length
+    ),
+    0,
+    "an empty bench side must keep its column instead of collapsing it"
+  );
+
   await page.waitForFunction(() => !document.querySelector("#btn-sim-instant")?.disabled, null, { timeout: 90_000 });
   await page.locator("#btn-sim-instant").click();
   await page.waitForFunction(() => !document.querySelector("#btn-match-continue")?.disabled, null, { timeout: 90_000 });
   await page.locator("#btn-match-continue").click();
   await page.waitForSelector("#screen-main.active", { timeout: 90_000 });
   assert.equal(await page.locator("#dashboard-onboarding").isHidden(), true, "onboarding must close after the first match");
+  // 关闭状态必须真的落盘。这一步只靠 finishMatchUI 之后调用方的 saveGame 保证，
+  // 少了它，重开存档引导会再次出现，而纯内存断言看不出来。
+  await page.waitForTimeout(500);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => !!window.vcfmMainApi);
+  await page.waitForSelector("#screen-main.active", { timeout: 90_000 });
+  // 面板本来就带 hidden，要等工作台渲染完再断言，否则是假阳性。
+  await page.waitForFunction(
+    () => !!document.querySelector("#dashboard-priorities")?.innerHTML.trim(),
+    null,
+    { timeout: 90_000 }
+  );
+  assert.equal(
+    await page.locator("#dashboard-onboarding").isHidden(),
+    true,
+    "a completed onboarding must stay closed across reload"
+  );
 
   for (const tab of ["finance", "squad", "staff", "training", "tactics", "facilities", "media", "fixtures", "table", "career"]) {
     await openTab(page, tab);

@@ -1799,8 +1799,10 @@ html[data-theme="light"] .fm-scoreboard {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  max-height: 70vh;
-  max-height: 70dvh;
+  /* 同时受视口和父容器约束：只写 70vh 时，窗口一高就会撑出 .fm-match-body，
+     底栏溢出到下面的解说栏上，把折叠按钮盖住点不到。 */
+  max-height: min(70vh, 100%);
+  max-height: min(70dvh, 100%);
 }
 .fm-commentary,
 .fmm-commentary {
@@ -3404,8 +3406,9 @@ html[data-theme="dark"] .mp-fmm-dock {
 .mp-zone.away.pos-att { background: rgba(252, 165, 165, 0.2); }
 .mp-field.mp-pre .mp-zone,
 .mp-field.mp-paused .mp-zone { opacity: 0.32; }
-/* 替补席：底栏横向排布，避免把号码误读成场上球员。 */
-.mp-bench-list.empty { display: none; }
+/* 替补席：底栏横向排布，避免把号码误读成场上球员。
+   空的一侧保留占位：整条是五列网格，display:none 会让后面的元素前移一列，
+   把分隔线挤进替补席的位置。两边都空时由 .mp-bench-strip.empty 整条隐藏。 */
 .mp-bench-chip {
   display: flex;
   justify-content: center;

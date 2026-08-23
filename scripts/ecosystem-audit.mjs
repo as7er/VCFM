@@ -33,6 +33,35 @@ function median(values) {
   return percentile(values, 0.5);
 }
 
+/**
+ * Recurring football economics: everything the club earns from playing football
+ * each season, against the wage and upkeep bills it has to cover. Transfers,
+ * financing and owner injections are excluded on purpose — they are one-off
+ * swings, while this difference is the structural one. The season counters are
+ * one per ledger category (see LEGACY_FIELDS in js/finance-ledger.js) so they do
+ * not overlap; wage and facility are stored as positive outflows. Read straight
+ * off the ledger totals so the probe stays free of the `ensure*` side effects
+ * that would perturb the seeded run.
+ */
+function clubRecurringNet(club) {
+  const finance = club.finance || {};
+  const value = (field) => Number(finance[field]) || 0;
+  const income =
+    value("seasonTicketIncome") +
+    value("seasonMatchdayIncome") +
+    value("seasonCommercialIncome") +
+    value("seasonBroadcastIncome") +
+    value("seasonPrizeIncome") +
+    value("seasonCompetitionIncome");
+  return income - value("seasonWageOut") - value("seasonFacilityOut");
+}
+
+function activeDebtFacilities(club) {
+  return (club.finance?.debt?.facilities || []).filter(
+    (facility) => facility.status === "active" && (Number(facility.balance) || 0) > 0
+  );
+}
+
 function seasonSnapshot(world) {
   const clubs = world.clubs || [];
   const players = clubs.flatMap((club) => club.players || []);
@@ -40,6 +69,8 @@ function seasonSnapshot(world) {
   const wages = players.map((player) => Number(player.wage) || 0).filter((value) => value > 0);
   const values = players.map((player) => Number(player.value) || 0).filter((value) => value > 0);
   const ages = players.map((player) => Number(player.age) || 0).filter((value) => value > 0);
+  const recurringNets = clubs.map(clubRecurringNet);
+  const debtFacilities = clubs.flatMap(activeDebtFacilities);
   const facilityLevels = clubs.map((club) => {
     const facilities = club.facilities || {};
     return (
@@ -53,6 +84,18 @@ function seasonSnapshot(world) {
     clubs: clubs.length,
     players: players.length,
     negativeClubs: money.filter((value) => value < 0).length,
+    // Cash can look healthy while the club only stays solvent on owner loans, so
+    // track the recurring balance and the debt those loans leave behind.
+    recurringDeficitClubs: recurringNets.filter((value) => value < 0).length,
+    medianRecurringNet: median(recurringNets),
+    indebtedClubs: clubs.filter((club) => activeDebtFacilities(club).length > 0).length,
+    debtOutstanding: debtFacilities.reduce((sum, facility) => sum + (Number(facility.balance) || 0), 0),
+    annualDebtInterest: Math.round(
+      debtFacilities.reduce(
+        (sum, facility) => sum + (Number(facility.balance) || 0) * (Number(facility.annualRate) || 0),
+        0
+      )
+    ),
     medianMoney: median(money),
     p10Money: percentile(money, 0.1),
     p90Money: percentile(money, 0.9),
@@ -109,7 +152,12 @@ function logProgress(phase, details = {}) {
 }
 
 const originalRandom = Math.random;
+const originalNow = Date.now;
 Math.random = seededRandom(0x1692026);
+// 和 phase-shape-evidence / background-spatial-worker 两个审计一样钉死时间：
+// 实体 id 里只要掺进 Date.now()，被当作稳定种子 hash 出来的教练流派和职员国籍
+// 就会随运行时刻漂移，整个五赛季样本再也对不上第二次运行。
+Date.now = () => 1787061720042;
 
 try {
   const world = createWorld(startClub.id, "Ecosystem Audit");
@@ -208,4 +256,5 @@ try {
   console.log("Ecosystem audit passed: shared finances, solvency, squads, ages and inflation");
 } finally {
   Math.random = originalRandom;
+  Date.now = originalNow;
 }
