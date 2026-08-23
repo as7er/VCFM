@@ -1592,10 +1592,14 @@ function syncMainNavigation(tab) {
     const active = button.dataset.navGroup === group;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", active ? "true" : "false");
+    button.setAttribute("aria-current", active ? "page" : "false");
   });
   $$(".tab").forEach((button) => {
+    const active = button.dataset.tab === tab;
     button.hidden = !MAIN_NAV_GROUPS[group].includes(button.dataset.tab);
-    button.classList.toggle("active", button.dataset.tab === tab);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+    button.setAttribute("aria-current", active ? "page" : "false");
   });
 }
 
@@ -4253,6 +4257,7 @@ function syncTopbarContinue({ seasonDone = false, matchReady = false } = {}) {
     btn.textContent = t("dash.advance");
     btn.title = en ? "Advance one day" : "推进一天";
   }
+  btn.setAttribute("aria-label", btn.title);
   btn.classList.toggle("is-matchday", topbarContinueMode === "match");
   btn.disabled = calendarAdvanceBusy;
 
@@ -8731,6 +8736,13 @@ let calendarAdvanceBusy = false;
 
 function setCalendarAdvanceBusy(busy) {
   calendarAdvanceBusy = !!busy;
+  const en = getLang() === "en";
+  const status = $("#calendar-advance-status");
+  if (status) {
+    status.textContent = busy
+      ? (en ? "Advancing the calendar…" : "正在推进日历…")
+      : (en ? "Calendar ready" : "日历已准备好");
+  }
   for (const id of [
     "#btn-advance",
     "#btn-advance-matchday",
@@ -8741,7 +8753,11 @@ function setCalendarAdvanceBusy(busy) {
     "#btn-topbar-advance-season-end",
   ]) {
     const button = $(id);
-    if (button) button.disabled = calendarAdvanceBusy;
+    if (button) {
+      button.disabled = calendarAdvanceBusy;
+      button.setAttribute("aria-busy", calendarAdvanceBusy ? "true" : "false");
+      button.toggleAttribute("data-advance-busy", calendarAdvanceBusy);
+    }
   }
 }
 
@@ -8760,6 +8776,12 @@ async function runCalendarAdvance(task) {
         ? `Running spatial matches ${completed}/${total}`
         : `正在运行空间比赛 ${completed}/${total}`
     );
+    const status = $("#calendar-advance-status");
+    if (status) {
+      status.textContent = getLang() === "en"
+        ? `Running spatial matches ${completed}/${total}`
+        : `正在运行空间比赛 ${completed}/${total}`;
+    }
   };
   window.addEventListener("vcfm-calendar-progress", onProgress);
   toast(

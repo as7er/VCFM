@@ -118,7 +118,7 @@ export function renderManagerWorkbench({ issues = [], actions = [], digest = nul
       <span class="dashboard-focus-icon" aria-hidden="true">${escapeHtml(focus.icon || "•")}</span>
       <div class="dashboard-focus-copy">
         <span class="dashboard-focus-kicker">${escapeHtml(severityLabel(focus.severity, en))} · ${escapeHtml(en ? "Focus" : "现在")}</span>
-        <div class="dashboard-focus-title">${escapeHtml(focus.title || en ? "No focus yet" : "暂无重点")}</div>
+        <div class="dashboard-focus-title">${escapeHtml(focus.title || (en ? "No focus yet" : "暂无重点"))}</div>
         ${focus.detail ? `<div class="dashboard-focus-detail">${escapeHtml(focus.detail)}</div>` : ""}
       </div>
       ${focus.target ? `<div class="dashboard-focus-action"><button type="button" class="btn small primary" data-dashboard-link="${escapeHtml(focus.target)}">${escapeHtml(focus.actionLabel || (en ? "Open" : "前往处理"))}</button></div>` : ""}
@@ -137,13 +137,11 @@ export function renderManagerWorkbench({ issues = [], actions = [], digest = nul
         : en ? "Ready" : "准备就绪";
   }
 
-  // 今日焦点已经放大过最重要的一条,列表自上而下再排,但避免和焦点重复。
-  // 焦点组件显示最高优先级的那条,作为“现在最该处理”;列表继续展示它以外
-  // 的待办,让玩家既看到主心骨又看到整体挂起项。
-  const list = sorted.slice(0, 5);
+  // 今日焦点已经放大过最重要的一条,列表只展示其余待办,避免同一事项在一屏出现两次。
+  const list = sorted.slice(1, 5);
   priorityBox.innerHTML = list.length
     ? list.map((issue) => issueHtml(issue, en)).join("")
-    : `<div class="dashboard-priority-empty"><strong>${escapeHtml(en ? "No urgent issues" : "当前没有紧急事项")}</strong><span>${escapeHtml(en ? "The squad is ready for the next decision." : "球队已为下一项决策做好准备。")}</span></div>`;
+    : `<div class="dashboard-priority-empty${sorted.length ? " dashboard-priority-empty-secondary" : ""}"><strong>${escapeHtml(sorted.length ? (en ? "No other pending issues" : "暂无其他待办") : (en ? "No urgent issues" : "当前没有紧急事项"))}</strong><span>${escapeHtml(sorted.length ? (en ? "The focus above is the only decision waiting for you." : "上方重点事项是当前唯一等待处理的决定。") : (en ? "The squad is ready for the next decision." : "球队已为下一项决策做好准备。") )}</span></div>`;
   actionBox.innerHTML = actions.slice(0, 4).map(actionHtml).join("");
   digestBox.innerHTML = digestHtml(digest, en);
   if (onboardingBox) {
