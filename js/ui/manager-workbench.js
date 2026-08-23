@@ -100,6 +100,7 @@ export function renderManagerWorkbench({ issues = [], actions = [], digest = nul
   const digestBox = $("#dashboard-advance-summary");
   const onboardingBox = $("#dashboard-onboarding");
   const status = $("#dashboard-workbench-status");
+  const focusBox = $("#dashboard-focus");
   if (!priorityBox || !actionBox || !digestBox) return;
 
   const sorted = [...issues].sort(
@@ -107,6 +108,25 @@ export function renderManagerWorkbench({ issues = [], actions = [], digest = nul
   );
   const urgent = sorted.filter((item) => item.severity === "critical").length;
   const warning = sorted.filter((item) => item.severity === "warning").length;
+
+  // 今日焦点:把最高优先级的一件事放大到行首,给整页一个明确的当下动作。
+  if (focusBox && sorted.length) {
+    const focus = sorted[0];
+    focusBox.className = `dashboard-focus ${focus.severity === "critical" ? "critical" : focus.severity === "warning" ? "warning" : "info"}`;
+    focusBox.hidden = false;
+    focusBox.innerHTML = `
+      <span class="dashboard-focus-icon" aria-hidden="true">${escapeHtml(focus.icon || "•")}</span>
+      <div class="dashboard-focus-copy">
+        <span class="dashboard-focus-kicker">${escapeHtml(severityLabel(focus.severity, en))} · ${escapeHtml(en ? "Focus" : "现在")}</span>
+        <div class="dashboard-focus-title">${escapeHtml(focus.title || en ? "No focus yet" : "暂无重点")}</div>
+        ${focus.detail ? `<div class="dashboard-focus-detail">${escapeHtml(focus.detail)}</div>` : ""}
+      </div>
+      ${focus.target ? `<div class="dashboard-focus-action"><button type="button" class="btn small primary" data-dashboard-link="${escapeHtml(focus.target)}">${escapeHtml(focus.actionLabel || (en ? "Open" : "前往处理"))}</button></div>` : ""}
+    `;
+  } else if (focusBox) {
+    focusBox.hidden = true;
+    focusBox.innerHTML = "";
+  }
 
   if (status) {
     status.className = `dashboard-workbench-status ${urgent ? "critical" : warning ? "warning" : "ready"}`;
@@ -117,8 +137,12 @@ export function renderManagerWorkbench({ issues = [], actions = [], digest = nul
         : en ? "Ready" : "准备就绪";
   }
 
-  priorityBox.innerHTML = sorted.length
-    ? sorted.slice(0, 5).map((issue) => issueHtml(issue, en)).join("")
+  // 今日焦点已经放大过最重要的一条,列表自上而下再排,但避免和焦点重复。
+  // 焦点组件显示最高优先级的那条,作为“现在最该处理”;列表继续展示它以外
+  // 的待办,让玩家既看到主心骨又看到整体挂起项。
+  const list = sorted.slice(0, 5);
+  priorityBox.innerHTML = list.length
+    ? list.map((issue) => issueHtml(issue, en)).join("")
     : `<div class="dashboard-priority-empty"><strong>${escapeHtml(en ? "No urgent issues" : "当前没有紧急事项")}</strong><span>${escapeHtml(en ? "The squad is ready for the next decision." : "球队已为下一项决策做好准备。")}</span></div>`;
   actionBox.innerHTML = actions.slice(0, 4).map(actionHtml).join("");
   digestBox.innerHTML = digestHtml(digest, en);

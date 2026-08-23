@@ -1606,6 +1606,11 @@ function activateMainTab(tab, { refresh = true } = {}) {
   $$(".tab-panel").forEach((panel) => panel.classList.remove("active"));
   if (tab === "table") $(`#tab-${selectedLeagueCentreView}`)?.classList.add("active");
   else $(`#tab-${tab}`)?.classList.add("active");
+  if (!refresh) {
+    // 进入具体页签后再凑齐该页内容;停在概览时不预先铺满其余页。
+    if (tab === "inbox") renderInbox();
+    else if (tab === "dashboard") renderDashboard();
+  }
   if (refresh) refreshAll();
 }
 
@@ -3169,6 +3174,8 @@ function renderInbox() {
   syncPoachBidsToInbox(world);
   syncTransferNegotiationsToInbox(world);
   syncDealNegotiationsToInbox(world);
+  const tab = document.querySelector("#tab-inbox");
+  if (tab && !tab.classList.contains("active")) return;
   const en = getLang() === "en";
   const pendingOnly = inboxFilter === "pending";
   const list = listInbox(world, { pendingOnly, limit: 50 });
@@ -5091,21 +5098,21 @@ function renderSquad() {
       return `<tr class="${xi.has(p.id) ? "me" : ""} ${!isAvailable(p) ? "row-unavailable" : ""} ${needsContractAttention(p) && !p.loan ? "row-contract" : ""}">
         <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${num}</span></td>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)} <span>${playerLinkHtml(p.id, p.name)} ${statusBadges}</span></td>
-        <td class="squad-detail">${nationLabel(p)}</td>
         <td title="${escapeHtml(detailedPosition)}"><span class="badge ${p.pos}">${en ? p.pos : POS_LABEL[p.pos]}</span><small class="muted squad-position-detail">${escapeHtml(detailedPosition)}</small></td>
-        <td class="squad-detail">${p.age}</td>
         <td class="${ovrClass(ovr)}"><strong>${ovr}</strong></td>
+        <td class="num-stat rating-cell ${formClass(form)}" title="${escapeHtml(formTitle)}">${formatForm(form)}</td>
+        <td>${Math.round(p.fitness ?? 0)}%</td>
+        <td class="contract-cell">${contractCell}</td>
+        <td class="squad-detail">${nationLabel(p)}</td>
+        <td class="squad-detail">${p.age}</td>
         <td class="num-stat squad-detail" title="${escapeHtml(t("squad.appsTitle") || "本赛季出场")}">${apps}</td>
         <td class="num-stat squad-detail ${gCls}" title="${escapeHtml(gTitle)}">${colG}</td>
         <td class="num-stat squad-detail ${aCls}" title="${escapeHtml(aTitle)}">${colA}</td>
         <td class="num-stat rating-cell squad-detail ${ratingClass(avgR)}" title="${escapeHtml(t("squad.avgRTitle") || "本赛季场均评分")}">${formatRating(avgR)}</td>
         <td class="num-stat rating-cell squad-detail ${ratingClass(lastR)}" title="${escapeHtml(t("squad.lastRTitle") || "最近一场评分")}">${formatRating(lastR)}</td>
-        <td class="num-stat rating-cell ${formClass(form)}" title="${escapeHtml(formTitle)}">${formatForm(form)}</td>
-        <td>${Math.round(p.fitness ?? 0)}%</td>
         <td class="squad-detail">${Math.round(p.morale ?? 0)}</td>
         <td class="rel-cell squad-detail rel-${relationTone(p.relation)}">${escapeHtml(relationLabel((ensurePlayerRelation(p), p.relation), getLang() === "en" ? "en" : "zh"))}</td>
         <td class="squad-detail" title="${escapeHtml(playingTitle)}"><span class="badge ${playingProgress.fulfilment >= 0.9 ? "DEF" : playingProgress.fulfilment >= 0.7 ? "MID" : "ATT"}">${escapeHtml(playingTimeRoleLabel(playingTime.role, en ? "en" : "zh"))}</span></td>
-        <td class="contract-cell">${contractCell}</td>
         <td class="squad-detail">${formatMoney(p.value)}</td>
         <td class="squad-detail">${formatMoney(p.wage)}</td>
         <td><button class="btn small" data-pid="${p.id}">${en ? "Info" : "详情"}</button></td>
