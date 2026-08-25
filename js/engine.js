@@ -1245,9 +1245,11 @@ export function finishSeason(world) {
     const minimumByPosition = { GK: 2, DEF: 5, MID: 5, ATT: 3 };
     for (const [position, minimum] of Object.entries(minimumByPosition)) {
       while (club.players.filter((player) => player.pos === position).length < minimum) {
+        const existingNames = new Set(club.players.map((player) => player.name));
         club.players.push(
           createPlayer(position, club.power - 5 + Math.floor(rng() * 8), club.id, {
             homeNation: club.countryCode,
+            existingNames,
           })
         );
       }
@@ -1256,9 +1258,11 @@ export function finishSeason(world) {
     // 阵容过少则继续补充轮换球员。
     while (club.players.length < 16) {
       const posPick = ["GK", "DEF", "MID", "ATT"][Math.floor(rng() * 4)];
+      const existingNames = new Set(club.players.map((player) => player.name));
       club.players.push(
         createPlayer(posPick, club.power - 5 + Math.floor(rng() * 8), club.id, {
           homeNation: club.countryCode,
+          existingNames,
         })
       );
     }

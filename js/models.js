@@ -11,10 +11,11 @@ import {
   START_DIVISION,
   START_DIVISIONS,
   generatePlayerName,
+  NAMES_BY_NATION,
   PLAYER_ROLES,
   defaultRoleForSlot,
 } from "./data.js";
-import { applyClubBranding } from "./branding.js";
+import { applyClubBranding, fictionalizePlayerName } from "./branding.js";
 import { CURRENT_SAVE_SCHEMA_VERSION } from "./save-schema.js";
 import { recordPlayerDevelopment } from "./player-pathway.js";
 import {
@@ -79,6 +80,64 @@ function clamp(v, a = 1, b = 20) {
 
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function stableNameIndex(seed, length) {
+  if (!length) return 0;
+  let hash = 2166136261;
+  for (const ch of String(seed || "")) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % length;
+}
+
+function playerNameIdentity(player) {
+  const pool = NAMES_BY_NATION[player?.nationality];
+  const order = pool?.order || "given-family";
+  const parts = String(player?.name || "").trim().split(/\s+/).filter(Boolean);
+  const parsed = parts.length < 2
+    ? { order, given: parts[0] || "", family: "" }
+    : order === "family-given"
+    ? { order, given: parts.slice(1).join(" "), family: parts[0] }
+    : { order, given: parts[0], family: parts.slice(1).join(" ") };
+  if (!pool || (pool.first.includes(parsed.given) && pool.last.includes(parsed.family))) return parsed;
+  // 公开姓名可能来自 branding.js 的真实姓名替换；反查原始池，避免迁移时误改名。
+  for (const given of pool.first) {
+    for (const family of pool.last) {
+      const source = order === "family-given" ? `${family} ${given}` : `${given} ${family}`;
+      if (fictionalizePlayerName(source) === player?.name) return { order, given, family };
+    }
+  }
+  return parsed;
+}
+
+function stableNamePicker(player) {
+  const identity = playerNameIdentity(player);
+  let call = 0;
+  return (items) => {
+    const desired = call++ === 0 ? identity.given : identity.family;
+    return items.includes(desired)
+      ? desired
+      : items[stableNameIndex(`${player?.id || player?.name}:${call}`, items.length)];
+  };
+}
+
+/** 修复旧档同队姓名冲突；稳定保留已有姓名，只有发生名/姓碰撞时才换名。 */
+export function ensureDistinctClubPlayerNames(club) {
+  if (!club) return 0;
+  const players = [...(club.players || []), ...(club.youth?.players || [])];
+  const usedNames = new Set();
+  let changed = 0;
+  for (const player of players) {
+    const next = generatePlayerName(player.nationality, stableNamePicker(player), { usedNames });
+    if (next !== player.name) {
+      player.name = next;
+      changed++;
+    }
+    usedNames.add(player.name);
+  }
+  return changed;
 }
 
 const TALENT_MODEL_VERSION = 1;
@@ -886,7 +945,9 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
   const age = isYouth ? rand(15, 18) : rand(17, 34);
   const p = {
     id: uid(isYouth ? "yt" : "pl"),
-    name: generatePlayerName(nation.code, pick),
+    name: generatePlayerName(nation.code, opts.namePick || pick, {
+      usedNames: opts.existingNames,
+    }),
     pos,
     age,
     nationality: nation.code,
@@ -983,7 +1044,15 @@ export function createYouthPlayer(club) {
   // 实力与俱乐部+青训等级挂钩
   const power = Math.max(40, club.power - 18 + level * 3 + rand(-4, 6));
   const pos = pick(["GK", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"]);
-  const p = createPlayer(pos, power, club.id, { youth: true, homeNation: club.countryCode });
+  const existingNames = new Set([
+    ...(club.players || []).map((player) => player.name),
+    ...(club.youth?.players || []).map((player) => player.name),
+  ]);
+  const p = createPlayer(pos, power, club.id, {
+    youth: true,
+    homeNation: club.countryCode,
+    existingNames,
+  });
   // 高等级更容易出高潜力
   if (Math.random() < 0.08 + level * 0.04) {
     p.potential = clamp(p.potential + rand(1, 3), p.potential, 20);
@@ -1133,9 +1202,15 @@ const SQUAD_SHAPE = [
 ];
 
 export function createClub(template, lang = "zh") {
+  const existingNames = new Set();
   const players = SQUAD_SHAPE.map((pos) => {
     const jitter = rand(-6, 6);
-    return createPlayer(pos, template.power + jitter, template.id, { homeNation: template.countryCode });
+    const player = createPlayer(pos, template.power + jitter, template.id, {
+      homeNation: template.countryCode,
+      existingNames,
+    });
+    existingNames.add(player.name);
+    return player;
   });
   // 排序：主力能力略高
   players.sort((a, b) => b.ovr - a.ovr);

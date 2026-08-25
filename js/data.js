@@ -439,15 +439,109 @@ export const NAMES_BY_NATION = {
   },
 };
 
+// 主要联赛的基础姓名池扩展到足以覆盖一线队加青训，避免同队只能重复使用少数名/姓。
+// 这些只是公开姓名组件，不参与能力、位置或比赛结算。
+const NAME_VARIETY_EXTENSIONS = Object.freeze({
+  ENG: {
+    first: ["Liam", "Ethan", "Finley", "Callum", "Joshua", "Ryan", "Daniel", "Benjamin", "Samuel", "Louis", "Adam", "Jacob"],
+    last: ["Harris", "Martin", "Anderson", "Clark", "Turner", "Baker", "Parker", "Collins", "Edwards", "Morris", "Mitchell", "Carter"],
+  },
+  ESP: {
+    first: ["Alejandro", "Daniel", "Diego", "Hugo", "Pablo", "Alvaro", "Adrian", "Sergio", "Marcos", "Raul", "Mario", "Ivan", "Joaquin", "Ruben", "Ismael", "Cristian", "Hector", "Victor", "Guillermo", "Enrique"],
+    last: ["Fernandez", "Martinez", "Gomez", "Diaz", "Moreno", "Munoz", "Alvarez", "Romero", "Navarro", "Torres", "Dominguez", "Ramos", "Vazquez", "Serrano", "Molina", "Suarez", "Blanco", "Iglesias"],
+  },
+  GER: {
+    first: ["Lukas", "Felix", "Paul", "Maximilian", "Leon", "Elias", "Julian", "Jonas", "Finn", "Moritz", "Niklas", "Florian", "Sebastian", "Matthias", "Johannes", "Christian", "Stefan", "Oliver", "Simon", "Alexander", "Vincent", "Anton"],
+    last: ["Muller", "Schmidt", "Schneider", "Fischer", "Weber", "Meyer", "Wagner", "Becker", "Schulz", "Hoffmann", "Schaefer", "Koch", "Brandt", "Braun", "Hartmann", "Krause", "Lehmann", "Maier", "Kraus", "Frank", "Otto", "Busch", "Graf", "Herrmann", "Peters"],
+  },
+  ITA: {
+    first: ["Luca", "Matteo", "Lorenzo", "Marco", "Andrea", "Francesco", "Davide", "Alessandro", "Federico", "Gabriele", "Simone", "Riccardo", "Enrico", "Alberto", "Michele", "Salvatore", "Emanuele", "Tommaso", "Jacopo", "Cristian", "Mattia", "Edoardo", "Nicola"],
+    last: ["Rossi", "Russo", "Ferrari", "Esposito", "Bianchi", "Romano", "Colombo", "Bruno", "Ricci", "Marino", "Greco", "Conti", "Barbieri", "Fontana", "Santoro", "Moretti", "Caruso", "Ferrara", "Leone", "Longo", "Gentile", "Martinelli", "Serra", "Mariani", "Riva", "D'Angelo"],
+  },
+  FRA: {
+    first: ["Lucas", "Hugo", "Louis", "Gabriel", "Arthur", "Jules", "Leo", "Nathan", "Theo", "Mathis", "Enzo", "Maxime", "Victor", "Valentin", "Clement", "Baptiste", "Quentin", "Romain", "Florian", "Benoit", "Damien", "Corentin", "Simon"],
+    last: ["Martin", "Bernard", "Dubois", "Thomas", "Robert", "Richard", "Petit", "Durand", "Leroy", "Moreau", "Simon", "Laurent", "Blanc", "Garnier", "Chevalier", "Francois", "Faure", "Mercier", "Girard", "Bonnet", "Dupont", "Fontaine", "Andre", "Henry", "Gauthier", "Robin"],
+  },
+  NED: {
+    first: ["Daan", "Bram", "Lars", "Thijs", "Joris", "Sven", "Niels", "Timo", "Stijn", "Wout", "Koen", "Mees", "Pim", "Teun", "Guus", "Kees", "Sander", "Maarten", "Joost"],
+    last: ["De Jong", "Jansen", "De Vries", "Van den Berg", "Van Dijk", "Bakker", "Visser", "Smit", "Meijer", "De Boer", "Mulder", "Bos", "Willems", "Vermeulen", "Kuipers", "Van der Meer", "Prins", "Timmermans", "Jacobs", "Van den Heuvel", "Hoekstra"],
+  },
+  POR: {
+    first: ["Joao", "Diogo", "Tiago", "Miguel", "Duarte", "Goncalo", "Rodrigo", "Afonso", "Rui", "Bruno", "Andre", "Vasco", "Mateus", "Dinis", "Martim", "Leandro", "Vitor", "Ruben", "Eder", "Helder"],
+    last: ["Silva", "Santos", "Ferreira", "Pereira", "Oliveira", "Costa", "Rodrigues", "Martins", "Jesus", "Sousa", "Fernandes", "Goncalves", "Teixeira", "Moreira", "Correia", "Mendes", "Carvalho", "Coelho", "Pires", "Monteiro", "Cardoso", "Araujo", "Tavares", "Faria", "Batista", "Matos"],
+  },
+});
+
+for (const [nationCode, extension] of Object.entries(NAME_VARIETY_EXTENSIONS)) {
+  const pool = NAMES_BY_NATION[nationCode];
+  if (!pool) continue;
+  pool.first.push(...extension.first.filter((name) => !pool.first.includes(name)));
+  pool.last.push(...extension.last.filter((name) => !pool.last.includes(name)));
+}
+
+function nameParts(name, order) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return { given: parts[0] || "", family: "" };
+  return order === "family-given"
+    ? { given: parts.slice(1).join(" "), family: parts[0] }
+    : { given: parts[0], family: parts.slice(1).join(" ") };
+}
+
+/**
+ * 从同一队已有姓名中选择碰撞最少的组合。
+ * 首次抽取仍由调用方的 pickFn 决定；只有名或姓与队内已有球员冲突时，
+ * 才在静态池中确定性地找更少冲突的组合，不额外消费随机数。
+ */
+function distinctName(pool, order, first, last, usedNames) {
+  const used = [...usedNames].map((name) => nameParts(name, order));
+  const candidates = [];
+  for (let firstIndex = 0; firstIndex < pool.first.length; firstIndex++) {
+    for (let lastIndex = 0; lastIndex < pool.last.length; lastIndex++) {
+      const given = pool.first[firstIndex];
+      const family = pool.last[lastIndex];
+      const fullName = pool.order === "family-given" ? `${family} ${given}` : `${given} ${family}`;
+      const fictional = fictionalizePlayerName(fullName);
+      const parts = nameParts(fictional, order);
+      const exact = used.some((entry) => entry.given === parts.given && entry.family === parts.family);
+      const sameGiven = used.filter((entry) => entry.given === parts.given).length;
+      const sameFamily = used.filter((entry) => entry.family === parts.family).length;
+      const selectedDistance = (pool.first[firstIndex] === first ? 0 : 1) + (pool.last[lastIndex] === last ? 0 : 1);
+      candidates.push({
+        name: fictional,
+        score: (exact ? 10000 : 0) + sameGiven * 100 + sameFamily * 100,
+        selectedDistance,
+        firstIndex,
+        lastIndex,
+      });
+    }
+  }
+  candidates.sort(
+    (a, b) =>
+      a.score - b.score ||
+      a.selectedDistance - b.selectedDistance ||
+      a.firstIndex - b.firstIndex ||
+      a.lastIndex - b.lastIndex
+  );
+  return candidates[0]?.name || null;
+}
+
 /** 根据国籍 code 生成姓名；无专用池时回退通用池 */
-export function generatePlayerName(nationCode, pickFn) {
+export function generatePlayerName(nationCode, pickFn, options = {}) {
   const pick = pickFn || ((arr) => arr[Math.floor(Math.random() * arr.length)]);
   const pool = NAMES_BY_NATION[nationCode];
   if (!pool) {
-    return `${pick(FIRST_NAMES)} ${pick(LAST_NAMES)}`;
+    const first = pick(FIRST_NAMES);
+    const last = pick(LAST_NAMES);
+    if (options.usedNames instanceof Set && options.usedNames.size) {
+      return distinctName({ first: FIRST_NAMES, last: LAST_NAMES, order: "given-family" }, "given-family", first, last, options.usedNames);
+    }
+    return `${first} ${last}`;
   }
   const first = pick(pool.first);
   const last = pick(pool.last);
+  if (options.usedNames instanceof Set && options.usedNames.size) {
+    return distinctName(pool, pool.order, first, last, options.usedNames);
+  }
   const fullName = pool.order === "family-given" ? `${last} ${first}` : `${first} ${last}`;
   return fictionalizePlayerName(fullName);
 }

@@ -26,6 +26,7 @@ import {
   teamTalkDesc,
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
+import { ensureDistinctClubPlayerNames } from "./models.js";
 import {
   nextDisplayedMinute,
   PENALTY_SETUP_SEC,
@@ -56,8 +57,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=234";
-import { clubCrestHtml } from "./club-crest.js?v=234";
+import { nationFlagHtml } from "./flags.js?v=235";
+import { clubCrestHtml } from "./club-crest.js?v=235";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -322,7 +323,7 @@ import {
   selectPlannedSaleCandidate,
   squadPlayerPlan,
   squadPositionPlan,
-} from "./squad-planning.js?v=234";
+} from "./squad-planning.js?v=235";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -389,7 +390,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=234";
+} from "./avatar.js?v=235";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 import {
   MANAGER_ONBOARDING_TAB_STEPS,
@@ -489,7 +490,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=234").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=235").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -1490,6 +1491,7 @@ function repairWorldFields(w) {
     ensureFacilities(c);
     ensureClubHonors(c);
     if (!c.youth.players.length) fillYouthSquad(c);
+    ensureDistinctClubPlayerNames(c);
     for (const p of c.players || []) {
       if (p.potential == null) p.potential = Math.min(20, (p.ovr || 10) + 1);
       ensureRealisticPlayerTalent(p);

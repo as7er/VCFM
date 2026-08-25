@@ -19,6 +19,7 @@ const checks = [
   "scripts/set-piece-presentation-audit.mjs",
   "scripts/player-traits-set-pieces-audit.mjs",
   "scripts/player-attributes-audit.mjs",
+  "scripts/player-names-audit.mjs",
   "scripts/player-habits-audit.mjs",
   "scripts/player-positions-audit.mjs",
   "scripts/squad-numbers-audit.mjs",
