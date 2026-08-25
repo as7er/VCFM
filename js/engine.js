@@ -927,7 +927,20 @@ function finishAdvanceDay(world, context) {
   if (!world.seasonOver && !world.sacked) {
     sackedResult = checkBoardMidSeason(world, getSortedTable);
     if (!world.sacked && isTransferWindowOpen(world)) {
-      processAiTransfers(world);
+      const aiMoves = processAiTransfers(world);
+      if (aiMoves.length) {
+        const types = aiMoves.reduce((counts, move) => {
+          const type = move.type || "transfer";
+          counts[type] = (counts[type] || 0) + 1;
+          return counts;
+        }, {});
+        events.push({
+          type: "ai_squad_moves",
+          day: world.day,
+          count: aiMoves.length,
+          types,
+        });
+      }
     }
   }
 
@@ -2061,8 +2074,12 @@ export function processAiTransfers(world) {
   const moves = [];
   const clubs = world.clubs.filter((c) => c.id !== world.userClubId);
   const shuffled = clubs.slice().sort(() => rng() - 0.5);
-  // 夏窗更活跃
-  let budgetMoves = getTransferPhase(world) === "summer" ? 6 : 3;
+  // 夏窗更活跃。此前这里是全世界每三天 6/3 笔，全年最多百余笔，
+  // 明显低于青训提拔、合同流动和退役带来的正常球员流入，市场因此
+  // 只能限制继续买人，却没有足够吞吐量把真实冗余送出去。提高的是
+  // 市场容量，不是单家俱乐部的购买权限；每家俱乐部在本轮仍最多一笔，
+  // 且继续服从位置需求、预算、财政禁令和最低阵容骨架。
+  let budgetMoves = getTransferPhase(world) === "summer" ? 18 : 9;
 
   for (const club of shuffled) {
     if (budgetMoves <= 0) break;
@@ -2183,6 +2200,27 @@ export function processAiTransfers(world) {
             }
             continue;
           }
+        }
+
+        // 转会市场没有合适买家时，真实的冗余仍有第二条出口：主动解约。
+        // 只对规划明确为低顺位、位置超出理想深度的球员执行，并支付剩余
+        // 合同补偿；资金不足或会破坏最低骨架时保留球员，等待下一窗口。
+        const release = terminatePlayer(world, club, victim);
+        if (release.ok) {
+          moves.push({
+            ...release,
+            type: "release",
+            clubId: club.id,
+            playerId: victim.id,
+          });
+          budgetMoves -= 1;
+          if (chance(0.3)) {
+            world.news.unshift({
+              day: world.day,
+              text: `📝 ${club.name} 与 ${victim.name} 解约，球员进入自由市场`,
+            });
+          }
+          continue;
         }
       }
     }

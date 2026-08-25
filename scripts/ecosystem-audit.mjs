@@ -62,7 +62,7 @@ function activeDebtFacilities(club) {
   );
 }
 
-function seasonSnapshot(world) {
+function seasonSnapshot(world, marketMoves = {}) {
   const clubs = world.clubs || [];
   const players = clubs.flatMap((club) => club.players || []);
   const money = clubs.map((club) => Number(club.money) || 0);
@@ -106,6 +106,9 @@ function seasonSnapshot(world) {
     aiFacilityInvestments: clubs.filter(
       (club) => club.finance?.lastAiFacilityInvestmentSeason === world.season
     ).length,
+    aiTransferMoves: Number(marketMoves.transfer) || 0,
+    aiLoanMoves: Number(marketMoves.loan) || 0,
+    aiReleaseMoves: Number(marketMoves.release) || 0,
     missingPositionClubs: clubs.filter((club) =>
       ["GK", "DEF", "MID", "ATT"].some((position) =>
         !(club.players || []).some((player) => player.pos === position)
@@ -196,6 +199,7 @@ try {
     let guard = 0;
     let advanceMs = 0;
     let userMatchMs = 0;
+    const marketMoves = { transfer: 0, loan: 0, release: 0 };
     const seasonStartedAt = performance.now();
     while (!longWorld.seasonOver && guard < 420) {
       if (longWorld.board) {
@@ -204,6 +208,12 @@ try {
       }
       const advanceStartedAt = performance.now();
       const result = advanceDay(longWorld);
+      for (const event of result.events || []) {
+        if (event.type !== "ai_squad_moves") continue;
+        for (const type of Object.keys(marketMoves)) {
+          marketMoves[type] += Number(event.types?.[type]) || 0;
+        }
+      }
       advanceMs += performance.now() - advanceStartedAt;
       const userMatchStartedAt = performance.now();
       playUserFixturesAsBackground(longWorld, result.userMatches);
@@ -220,7 +230,7 @@ try {
       }
     }
     assert.ok(longWorld.seasonOver, `season ${longWorld.season} should complete within 420 days`);
-    const snapshot = seasonSnapshot(longWorld);
+    const snapshot = seasonSnapshot(longWorld, marketMoves);
     snapshots.push(snapshot);
     console.log("ecosystem season", JSON.stringify(snapshot));
     assert.equal(snapshot.clubs, 270, "seven-country club population remains stable");
@@ -231,6 +241,10 @@ try {
     assert.ok(snapshot.negativeClubs <= Math.ceil(snapshot.clubs * 0.15), "widespread insolvency detected");
     assert.ok(snapshot.averageAge >= 22 && snapshot.averageAge <= 30, "player age structure left a plausible range");
     assert.ok(snapshot.aiFacilityInvestments >= 10, "solvent AI clubs should reinvest retained income");
+    assert.ok(
+      snapshot.aiTransferMoves + snapshot.aiLoanMoves + snapshot.aiReleaseMoves > 0,
+      "AI squad movement should produce observable transfer, loan or release events"
+    );
 
     if (index < seasons - 1) {
       const next = startNextSeason(longWorld);

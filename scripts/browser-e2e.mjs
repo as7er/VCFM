@@ -639,7 +639,7 @@ try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await page.waitForFunction(() => (
     !("serviceWorker" in navigator)
-    || sessionStorage.getItem("vcfm-sw-reloaded-v233") === "1"
+    || sessionStorage.getItem("vcfm-sw-reloaded-v234") === "1"
   ));
   await page.waitForLoadState("networkidle");
   await page.waitForFunction(() => !!window.vcfmMainApi);

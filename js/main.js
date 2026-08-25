@@ -56,8 +56,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=233";
-import { clubCrestHtml } from "./club-crest.js?v=233";
+import { nationFlagHtml } from "./flags.js?v=234";
+import { clubCrestHtml } from "./club-crest.js?v=234";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -317,7 +317,12 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=233";
+import {
+  ensureClubSquadPlan,
+  selectPlannedSaleCandidate,
+  squadPlayerPlan,
+  squadPositionPlan,
+} from "./squad-planning.js?v=234";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -384,7 +389,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=233";
+} from "./avatar.js?v=234";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 import {
   MANAGER_ONBOARDING_TAB_STEPS,
@@ -484,7 +489,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=233").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=234").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -4416,6 +4421,28 @@ function collectDashboardWorkbench(club, next) {
       actionLabel: en ? "Contracts" : "处理合同",
     });
     addAction("transfer", "📝", en ? "Contracts" : "合同", en ? `${contracts.length} need attention` : `${contracts.length} 份待处理`);
+  }
+
+  // 将多年阵容规划中的真实冗余变成一个可处理的管理提醒：说明依据，
+  // 但不替玩家自动出售或解约，避免把规划建议变成隐藏的后台动作。
+  const squadPlan = ensureClubSquadPlan(world, club);
+  const saleCandidate = selectPlannedSaleCandidate(world, club);
+  if (saleCandidate && club.players.length > 15) {
+    const decision = squadPlayerPlan(squadPlan, saleCandidate.id);
+    const positionPlan = squadPositionPlan(squadPlan, saleCandidate.pos);
+    const positionName = en ? positionPlan?.labelEn || saleCandidate.pos : positionPlan?.label || saleCandidate.pos;
+    const excess = Math.max(0, Number(positionPlan?.current || 0) - Number(positionPlan?.ideal || 0));
+    issues.push({
+      severity: "info",
+      icon: "↔",
+      title: en ? `Squad exit available: ${saleCandidate.name}` : `阵容有可处理出口：${saleCandidate.name}`,
+      detail: en
+        ? `${positionName} is ${excess || 1} over ideal depth; ${decision?.reasonEn || "the player is outside the realistic rotation"}.`
+        : `${positionName} 超过理想深度 ${excess || 1} 人；${decision?.reason || "球员不在现实轮换顺位内"}。`,
+      target: "squad",
+      actionLabel: en ? "Review squad" : "查看阵容",
+    });
+    addAction("squad", "↔", en ? "Squad exits" : "阵容出口", en ? "Review planned sale" : "查看规划建议");
   }
 
   ensureSquadRelations(club);
@@ -8644,6 +8671,29 @@ function advanceEventLines(events) {
           priority: 2,
         });
         break;
+      case "ai_squad_moves": {
+        const transfer = Number(ev.types?.transfer) || 0;
+        const loan = Number(ev.types?.loan) || 0;
+        const release = Number(ev.types?.release) || 0;
+        const parts = en
+          ? [
+              transfer ? `${transfer} transfer${transfer === 1 ? "" : "s"}` : "",
+              loan ? `${loan} loan${loan === 1 ? "" : "s"}` : "",
+              release ? `${release} release${release === 1 ? "" : "s"}` : "",
+            ].filter(Boolean)
+          : [
+              transfer ? `${transfer} 笔转会` : "",
+              loan ? `${loan} 笔租借` : "",
+              release ? `${release} 人解约` : "",
+            ].filter(Boolean);
+        lines.push({
+          day,
+          icon: "↔",
+          text: en ? `AI squad movement: ${parts.join(", ")}` : `AI 阵容流动：${parts.join("、")}`,
+          priority: 2,
+        });
+        break;
+      }
       case "international_break":
         lines.push({
           day,
