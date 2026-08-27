@@ -141,6 +141,10 @@ function playUserFixturesAsBackground(world, fixtures) {
 const seasons = Math.max(3, Number(process.argv[2]) || Number(process.env.VCFM_ECO_SEASONS) || 5);
 const progressEnabled = process.env.VCFM_ECO_PROGRESS === "1";
 const progressDays = Math.max(1, Number(process.env.VCFM_ECO_PROGRESS_DAYS) || 30);
+// 默认种子保持不变，样本仍可逐字段复现。换种子只用于判断某个指标的变化是
+// 真实效应还是单一种子的混沌发散——任何改变随机抽取次数的改动都会让整份
+// 五赛季样本走进另一个随机世界，单次对比不足以归因。
+const ecoSeed = Number(process.env.VCFM_ECO_SEED) || 0x1692026;
 const startClub = CLUB_TEMPLATES.find((club) => club.division === 3);
 assert.ok(startClub, "ecosystem audit needs a valid starting club");
 
@@ -156,7 +160,7 @@ function logProgress(phase, details = {}) {
 
 const originalRandom = Math.random;
 const originalNow = Date.now;
-Math.random = seededRandom(0x1692026);
+Math.random = seededRandom(ecoSeed);
 // 和 phase-shape-evidence / background-spatial-worker 两个审计一样钉死时间：
 // 实体 id 里只要掺进 Date.now()，被当作稳定种子 hash 出来的教练流派和职员国籍
 // 就会随运行时刻漂移，整个五赛季样本再也对不上第二次运行。

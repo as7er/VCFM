@@ -4,7 +4,22 @@
 
 > 仓库：https://github.com/as7er/vcfm.git · `master`  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v235**（同队姓名多样性、确定性避让与旧档修复）
+> 缓存：**vcfm-v236**（国家队征召代价、赛前准备对称与死代码清理）
+
+## v236 国家队征召代价与赛前准备对称（2026-08-26）
+
+- **国家队征召此前对俱乐部零后果。** `js/intl.js` 只在 `nationalCallupScore` 里**读** fitness 做征召评分，`runInternationalBreak` 跑完比赛只把 `callups` 交给 `appendInternationalNews` 发新闻，全文件没有一处**写**体能或伤病——球员打完国家队比赛满体能回来、零伤病风险。新增 `applyCallupCost`：整场出战按与 `match.js` 的 `drainFitness` 同量级（4–9）扣体能，另加长途奔波固定项 2，下限同样取 35；每人承担一次伤病判定，沿用 `injuries.js` 既有的诊断与复发风险，不新增伤病类型。
+- 单场伤病基准 `CALLUP_INJURY_BASE = 0.02`，与俱乐部比赛同量级（`tryInjury` 每分钟 0.005、每次随机选一队，90 分钟约合每队每场 0.22 次，摊到 11 人即约 0.02/人）。**征召更让俱乐部头疼不是因为基准更高，而是国家队没有俱乐部队医与康复设施的减免**（`doctorInjuryMod` / `trainingInjuryMod`），再加上奔波消耗。
+- 伤情与比赛结果存在同一条记录：`match.callupInjuries` 由 `runInternationalBreak` 汇总返回，推进事件 `international_break` 携带被征召人数与自家伤员，工作台推进摘要按中英双语展示。受伤球员由既有的 `nationalAvailable` 过滤，不会在下一个比赛日被再次征召。
+- **赛前准备模式此前是玩家独占机制。** `training-boost.js` 的攻防/体能/士气加成只有玩家 UI 与 `delegation.js` 会设置，AI 走 `autoPickTraining` 只设 focus/intensity，永远停在 `balanced`——而 `match.js:523` 对双方都调 `applyMatchPrepBonus`，等于给玩家一份单向的 ±5% 攻防加成，正是最高设计原则禁止的隐藏加权。
+- 新增 `pickPrepMode` 作为准备模式的唯一决策口径，玩家助教（`assistantTrainingPlan`）与 AI（`autoPickTraining`）共用同一实现、同一份输入口径（平均体能均只统计可出场球员），并同样经过 `setTrainingMode` 的 3 天冷却。决策全程不消费随机数，不改变 `autoPickTraining` 原有的训练抽取。
+- `nextMatchDaysByClub` 改为 `nextMatchByClub`，同一次赛程扫描顺带带出对手 id；`processTrainingDay` 建一次俱乐部索引，避免为 270 家俱乐部逐个 `find` 对手。
+- 删除死代码：`js/matchview-canvas.js`（315 行，全仓库零 import，只在 `docs/matchview-optimization*.md` 里提到，是那次优化建的 4 个模块中唯一没接进去的）；`js/matchday-income.js` 的 `calculateMatchdayBonus()` 及其私有辅助（224 → 57 行）——它与 `facilities.js` 的 `matchdayIncome()` 重复计算德比、杯赛阶段与争冠/保级加成，靠一句文档注释"禁止叠加"防守，是用了就出 bug 的定时炸弹。
+- 新增 `scripts/international-callup-audit.mjs`、`scripts/training-prep-symmetry-audit.mjs`，均已登记进 `verify.mjs`。
+- **生态样本的对比方法**：`scripts/ecosystem-audit.mjs` 新增 `VCFM_ECO_SEED`（默认种子不变，样本仍逐字段可复现）。本次改动给每名出场球员增加了 2 次随机抽取，固定种子下这足以让整份五赛季样本走进另一个随机世界——**单点对比会得出完全错误的结论**：首轮实测债务余额 2902 万 vs 基线 1880 万（+54%），看起来像严重的经济退化，但把两边各跑几个种子后，基线自身波动 1880–2568 万、改动后 2083–2902 万，两个区间完全重叠。**任何改变随机抽取次数的改动，都必须跨种子比区间，不能比单点。**
+- 唯一跨种子稳定的差异是 `indebtedClubs`：基线 18–21，改动后 26–27（270 家里 6.7% → 9.6%）。这是预期方向——征召伤病造成临时人手缺口，部分俱乐部小额举债周转，故举债家数上升而债务总额不变。`negativeClubs` 实测 2 家，远低于 15% 红线。
+- 已验证：`npm test`（全量语法检查 + 75 项检查：72 项审计与 3 组单元测试）、`node scripts/cache-audit.mjs`、两个新审计，以及基线 2 种子 / 改动后 3 种子的五赛季生态样本对比
+- 缓存 `vcfm-v236`
 
 ## v235 同队姓名多样性与旧档修复（2026-08-26）
 

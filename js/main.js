@@ -57,8 +57,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=235";
-import { clubCrestHtml } from "./club-crest.js?v=235";
+import { nationFlagHtml } from "./flags.js?v=236";
+import { clubCrestHtml } from "./club-crest.js?v=236";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -323,7 +323,7 @@ import {
   selectPlannedSaleCandidate,
   squadPlayerPlan,
   squadPositionPlan,
-} from "./squad-planning.js?v=235";
+} from "./squad-planning.js?v=236";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -390,7 +390,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=235";
+} from "./avatar.js?v=236";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 import {
   MANAGER_ONBOARDING_TAB_STEPS,
@@ -490,7 +490,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=235").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=236").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -8696,14 +8696,32 @@ function advanceEventLines(events) {
         });
         break;
       }
-      case "international_break":
+      case "international_break": {
+        const callups = Number(ev.callups) || 0;
         lines.push({
           day,
           icon: "🌍",
-          text: en ? "International break" : "国际比赛日",
+          text: en
+            ? callups
+              ? `International break · ${callups} of your players featured`
+              : "International break"
+            : callups
+              ? `国际比赛日 · 你有 ${callups} 人出场`
+              : "国际比赛日",
           priority: 2,
         });
+        for (const item of ev.injuries || []) {
+          lines.push({
+            day,
+            icon: "🏥",
+            text: en
+              ? `${item.playerName} returned injured from national duty (${item.labelEn} · ~${item.days}d)`
+              : `${item.playerName} 从国家队带伤回队（${item.label} · 约 ${item.days} 天）`,
+            priority: 3,
+          });
+        }
         break;
+      }
       case "key_matches":
         for (const m of ev.matches || []) {
           lines.push({

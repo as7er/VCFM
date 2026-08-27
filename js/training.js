@@ -21,6 +21,7 @@ import {
   habitLabel,
   processHabitTrainingWeek,
 } from "./player-habits.js";
+import { setTrainingMode } from "./training-boost.js";
 
 export const TRAINING_FOCUSES = {
   recovery: {
@@ -304,10 +305,16 @@ function growFirstTeamPlayer(player, growthRate, focusCfg, context = {}) {
 }
 
 /**
- * AI：按平均体能 / 是否临近比赛日自动调训练
- * nextMatchDays: 距下一场自己比赛的天数，未知则 null
+ * AI：按平均体能 / 是否临近比赛日自动调训练，并设置赛前准备模式
+ *
+ * 准备模式与玩家助教共用 `pickPrepMode`，并同样经过 `setTrainingMode` 的
+ * 3 天冷却：AI 与玩家在赛前准备上受同一套规则约束，不存在单向加成。
+ *
+ * @param {Object} club
+ * @param {number|null} nextMatchDays 距下一场自己比赛的天数，未知则 null
+ * @param {{day?: number, opponent?: Object|null}} [opts] 当前日期与下一个对手
  */
-export function autoPickTraining(club, nextMatchDays = null) {
+export function autoPickTraining(club, nextMatchDays = null, opts = {}) {
   ensureStaff(club);
   const players = club.players || [];
   if (!players.length) return ensureTraining(club);
@@ -341,7 +348,30 @@ export function autoPickTraining(club, nextMatchDays = null) {
     intensity = "normal";
   }
 
-  return setTraining(club, { focus, intensity });
+  const plan = setTraining(club, { focus, intensity });
+
+  // 赛前准备：与玩家助教同一口径，不消费随机数，因此不影响上面的训练抽取。
+  // 平均体能同样只统计可出场球员，避免伤员把两侧的输入口径拉开。
+  const available = players.filter((p) => !(p.injured > 0));
+  const sample = available.length ? available : players;
+  const opponent = opts.opponent || null;
+  const ownOvr = opponent ? average(sample.map((p) => Number(p.ovr || 0)), 0) : null;
+  setTrainingMode(
+    club,
+    pickPrepMode({
+      avgFitness: Math.round(average(sample.map((p) => Number(p.fitness ?? 70)), 70)),
+      avgMorale: Math.round(average(sample.map((p) => Number(p.morale ?? 70)), 70)),
+      injured,
+      lowFitness: sample.filter((p) => Number(p.fitness ?? 70) < 65).length,
+      daysToMatch: nextMatchDays,
+      ownOvr,
+      opponentOvr: opponent
+        ? average((opponent.players || []).map((p) => Number(p.ovr || 0)), ownOvr)
+        : null,
+    }),
+    Number(opts.day || 0)
+  );
+  return plan;
 }
 
 function average(values, fallback = 0) {
@@ -368,6 +398,38 @@ function nextFixtureForClub(world, clubId) {
       Number(fixture.day || 0) >= Number(world.day || 0)
     )
     .sort((a, b) => Number(a.day || 0) - Number(b.day || 0))[0] || null;
+}
+
+/**
+ * 赛前准备模式的唯一决策口径。
+ *
+ * 玩家的助教建议（`assistantTrainingPlan`）与 AI 的自动备战（`autoPickTraining`）
+ * 共用这一份实现：同样的阵容状态与对手，在两侧得出同样的准备。此前只有玩家
+ * 一侧会设置准备模式，AI 永远停在 `balanced`，等于给了玩家一份单向的攻防加成。
+ *
+ * 全程不消费随机数，相同事实必然得到相同结果。
+ */
+export function pickPrepMode({
+  avgFitness,
+  avgMorale,
+  injured,
+  lowFitness,
+  daysToMatch,
+  ownOvr = null,
+  opponentOvr = null,
+}) {
+  if (avgFitness < 65 || injured >= 3 || lowFitness >= 5) return "fitness";
+  if (daysToMatch != null && daysToMatch <= 3) {
+    const threshold = daysToMatch <= 1 ? 78 : 76;
+    return avgFitness < threshold ? "fitness" : avgMorale < 58 ? "morale" : "setpiece";
+  }
+  if (avgFitness < 76 || injured >= 2) return "fitness";
+  if (avgMorale < 52) return "morale";
+  // 没有下一场对手可读时保持均衡，不猜测。
+  if (ownOvr == null || opponentOvr == null) return "balanced";
+  if (opponentOvr > ownOvr + 1) return "defense";
+  if (ownOvr > opponentOvr + 1) return "attack";
+  return "setpiece";
 }
 
 /** Build a deterministic recommendation using the assistant coach and current squad state. */
@@ -400,33 +462,27 @@ export function assistantTrainingPlan(world, club) {
 
   let focus = "balanced";
   let intensity = "normal";
-  let prepMode = "balanced";
   let reasonKey = "balanced";
 
   if (avgFitness < 65 || injured >= 3 || lowFitness >= 5) {
     focus = "recovery";
     intensity = "light";
-    prepMode = "fitness";
     reasonKey = "recovery";
   } else if (daysToMatch != null && daysToMatch <= 1) {
     focus = "match_prep";
     intensity = "light";
-    prepMode = avgFitness < 78 ? "fitness" : avgMorale < 58 ? "morale" : "setpiece";
     reasonKey = "imminent";
   } else if (daysToMatch != null && daysToMatch <= 3) {
     focus = "match_prep";
     intensity = avgFitness < 76 ? "light" : "normal";
-    prepMode = avgFitness < 76 ? "fitness" : avgMorale < 58 ? "morale" : "setpiece";
     reasonKey = "matchPrep";
   } else if (avgFitness < 76 || injured >= 2) {
     focus = "recovery";
     intensity = avgFitness < 70 ? "light" : "normal";
-    prepMode = "fitness";
     reasonKey = "fitness";
   } else if (avgMorale < 52) {
     focus = "balanced";
     intensity = "light";
-    prepMode = "morale";
     reasonKey = "morale";
   } else if (coachRating >= 14 && developmentPlayers >= 6 && (daysToMatch == null || daysToMatch >= 5)) {
     focus = "youth";
@@ -440,13 +496,24 @@ export function assistantTrainingPlan(world, club) {
     }
   }
 
-  if (prepMode === "balanced" && nextFixture) {
+  let ownOvr = null;
+  let opponentOvr = null;
+  if (nextFixture) {
     const opponentId = nextFixture.home === club.id ? nextFixture.away : nextFixture.home;
     const opponent = world.clubs?.find((item) => item.id === opponentId);
-    const ownOvr = average(sample.map((player) => Number(player.ovr || 0)), 0);
-    const opponentOvr = average((opponent?.players || []).map((player) => Number(player.ovr || 0)), ownOvr);
-    prepMode = opponentOvr > ownOvr + 1 ? "defense" : ownOvr > opponentOvr + 1 ? "attack" : "setpiece";
+    ownOvr = average(sample.map((player) => Number(player.ovr || 0)), 0);
+    // 对手不可读时按势均力敌处理，与此前的行为一致。
+    opponentOvr = average((opponent?.players || []).map((player) => Number(player.ovr || 0)), ownOvr);
   }
+  const prepMode = pickPrepMode({
+    avgFitness,
+    avgMorale,
+    injured,
+    lowFitness,
+    daysToMatch,
+    ownOvr,
+    opponentOvr,
+  });
 
   const reasons = {
     recovery: ["多名球员体能告急或正在伤停，先降低负荷并恢复。", "Several players are fatigued or injured, so workload is reduced for recovery."],
@@ -479,8 +546,9 @@ function pickWeighted(pairs) {
   return pairs[0][0];
 }
 
-function nextMatchDaysByClub(world) {
-  const nextDays = new Map();
+/** 每家俱乐部的下一场比赛：距今天数与对手。单次扫描赛程，供全部俱乐部共用。 */
+function nextMatchByClub(world) {
+  const next = new Map();
   const currentDay = world.day || 0;
   const fixtures = [...(world.fixtures || []), ...allCompetitionFixtures(world)];
   for (const f of fixtures) {
@@ -489,11 +557,13 @@ function nextMatchDaysByClub(world) {
     if (d < 0) continue;
     for (const clubId of [f.home, f.away]) {
       if (!clubId) continue;
-      const best = nextDays.get(clubId);
-      if (best == null || d < best) nextDays.set(clubId, d);
+      const best = next.get(clubId);
+      if (best == null || d < best.days) {
+        next.set(clubId, { days: d, opponentId: clubId === f.home ? f.away : f.home });
+      }
     }
   }
-  return nextDays;
+  return next;
 }
 
 /**
@@ -502,7 +572,8 @@ function nextMatchDaysByClub(world) {
  */
 export function processTrainingDay(world) {
   const logs = [];
-  const nextMatchDays = nextMatchDaysByClub(world);
+  const nextMatches = nextMatchByClub(world);
+  const clubsById = new Map((world.clubs || []).map((club) => [club.id, club]));
 
   for (const club of world.clubs || []) {
     ensureStaff(club);
@@ -510,7 +581,11 @@ export function processTrainingDay(world) {
 
     const isUser = club.id === world.userClubId;
     if (!isUser) {
-      autoPickTraining(club, nextMatchDays.get(club.id) ?? null);
+      const next = nextMatches.get(club.id) || null;
+      autoPickTraining(club, next?.days ?? null, {
+        day: world.day,
+        opponent: next ? clubsById.get(next.opponentId) || null : null,
+      });
     }
 
     const t = ensureTraining(club);

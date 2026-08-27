@@ -800,8 +800,15 @@ function beginAdvanceDay(world) {
   // 国际比赛日（约每 50 天，更贴近现实频率）
   if (!world.lastIntlDay) world.lastIntlDay = 0;
   if (world.day - world.lastIntlDay >= 50 && !world.seasonOver) {
-    runInternationalBreak(world);
-    events.push({ type: "international_break", day: world.day });
+    const intl = runInternationalBreak(world);
+    // 征召的代价对玩家可见：被征召人数与因国家队比赛受伤的自家球员。
+    const userPlayerIds = new Set((userClub?.players || []).map((p) => p.id));
+    events.push({
+      type: "international_break",
+      day: world.day,
+      callups: (intl.callups || []).length,
+      injuries: (intl.injuries || []).filter((item) => userPlayerIds.has(item.playerId)),
+    });
   }
 
   ensureCompetitions(world);
