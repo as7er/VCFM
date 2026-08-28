@@ -27,6 +27,7 @@ const checks = [
   "scripts/team-shapes-audit.mjs",
   "scripts/player-control-audit.mjs",
   "scripts/collective-defense-audit.mjs",
+  "scripts/box-defending-audit.mjs",
   "scripts/edge-rules-audit.mjs",
   "scripts/defensive-spacing-audit.mjs",
   "scripts/lazy-load-audit.mjs",

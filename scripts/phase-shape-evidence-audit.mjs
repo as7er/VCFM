@@ -143,8 +143,13 @@ function auditWorkerReport() {
     integration?.fineSharePct <= 20,
     `evidence collection must preserve the background fine-step budget (${integration?.fineSharePct}%)`
   );
+  // 预算由 32 上调到 34（v237）：恢复禁区盯人后后卫真的贴到球边（实测最近防守者
+  // 由 2.42 米收到 2.05 米），`_contactFineReason` 的 close-contest 细步窗口因此更
+  // 常触发——这正是改动的预期后果，细步本身就是为了让禁区接触判定更准。
+  // 实测代价：8 场后台档 16.6 → 17.4 秒（+4.8%），占比 31.9% → 32.3%。
+  // 基线 31.9% 原本只剩 0.1pp 余量，这里恢复到与此前相当的余量。
   assert.ok(
-    integration?.extraStepSharePct <= 32,
+    integration?.extraStepSharePct <= 34,
     `evidence collection must preserve the background extra-step budget (${integration?.extraStepSharePct}%)`
   );
   return { score: result.report.score, integration };

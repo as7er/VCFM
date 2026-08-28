@@ -113,8 +113,12 @@ assert.ok(
   first.result.report.simulationMeta?.integration?.fineSharePct <= 20,
   "background critical ball windows exceeded their time budget"
 );
+// 预算由 32 上调到 34（v237，与 phase-shape-evidence-audit 同步）：恢复禁区盯人后
+// 后卫真的贴到球边（最近防守者 2.42 → 2.05 米），close-contest 细步窗口因此更常
+// 触发——这正是改动的预期后果，细步本身就是为了让禁区接触判定更准。
+// 实测代价：8 场后台档 16.6 → 17.4 秒（+4.8%），占比 31.9% → 32.3%。
 assert.ok(
-  first.result.report.simulationMeta?.integration?.extraStepSharePct <= 32,
+  first.result.report.simulationMeta?.integration?.extraStepSharePct <= 34,
   "background critical ball substeps exceeded their execution budget"
 );
 assert.ok(

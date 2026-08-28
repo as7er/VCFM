@@ -153,7 +153,12 @@ export function handballContactDecision({
         (isShot ? 0.006 : 0));
   risk *= 1.08 - judgement * 0.2;
   if (intendedReceive) risk *= 0.72;
-  if (inPenaltyArea) risk *= 0.42;
+  // 禁区内抑制：本模型只读球高、来球速度与身体朝向暴露，**不建模手臂位置**，
+  // 因此无法区分「自然摆臂」与「主动扩大身体」。该系数原为 0.42，是在后卫被推到
+  // 离球 3.5 米外时定的；恢复禁区盯人后后卫贴到 2.05 米，禁区内手球点球由 0
+  // 升到 0.25/场（手球总数未变，只是发生地点从禁区外挪进禁区）。按实测压回原
+  // 量级，代偿的是模型缺少手臂位置这一项，不是现实里禁区手球更不易判罚。
+  if (inPenaltyArea) risk *= 0.14;
   risk = clamp(risk, 0.001, inPenaltyArea ? 0.016 : 0.036);
   const rollValue = Number(roll);
   return {

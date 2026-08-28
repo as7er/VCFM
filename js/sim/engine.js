@@ -65,7 +65,10 @@ import {
   shouldHandoffMark,
   weakSideTargetX,
 } from "../collective-defense.js";
-import { resolveOffBallTarget } from "../off-ball-movement.js";
+import {
+  OFF_BALL_TARGET_DEFAULTS,
+  resolveOffBallTarget,
+} from "../off-ball-movement.js";
 import { estimateShotXg } from "./../match-analysis.js";
 import {
   PENALTY_RUN_SEC,
@@ -1234,6 +1237,71 @@ export class SimEngine {
     this._clampOffside(a);
   }
 
+  /**
+   * 队级接应目标横向松弛：在本 tick 全部球员都提交完跑位目标之后运行一次。
+   *
+   * 逐球员的去拥挤（`off-ball-movement.js` 的分层）读的是队友**上一 tick** 的
+   * 预留目标，同一 tick 内排在前面的球员看到的全是过期数据；而 `_clampOffside`
+   * 又在分层之后把纵深投影到越位线上，把刚分开的接应点重新压回一起——实测标准档
+   * 的「接应目标拥挤」全部 sources=["updated","updated"]（分层根本没触发），且每
+   * 一对的实际间距恰好等于两人越位缓冲之差。
+   *
+   * 这里改为在所有目标定稿后统一处理：同时看到全部最终目标，不受提交顺序和过期
+   * 影响。只沿横向移动，纵深保持在越位线上，因此不会让���员重新越位；配对顺序与
+   * 分侧都由稳定的 id 决定，不消费随机数。
+   */
+  _separateSupportTargets() {
+    const spacing = OFF_BALL_TARGET_DEFAULTS.supportSpacingMetres;
+    const perUnitX = SIM.PITCH_W_METRES / SIM.FIELD_W;
+    const perUnitY = SIM.PITCH_H_METRES / SIM.FIELD_H;
+    // 分组口径与运动完整性检测一致：同队、同持球人。这里刻意**不**按阶段分组—���
+    // `offBallTarget.phase` 记的是提交那一刻的阶段，而球员因决策节流在不同 tick
+    // 提交，同一波进攻里存下的阶段并不相同；按阶段分组会把本该分开的两个接应点
+    // 判成互不相干，正是此前拥挤修不掉的原因。
+    const buckets = new Map();
+    for (const a of this.agents) {
+      if (a.sentOff || a.fsm !== "support" || !a.offBallTarget) continue;
+      if (a.offBallTarget.ownerId == null) continue;
+      const key = `${a.team}|${a.offBallTarget.ownerId}`;
+      let bucket = buckets.get(key);
+      if (!bucket) buckets.set(key, (bucket = []));
+      bucket.push(a);
+    }
+
+    for (const bucket of buckets.values()) {
+      if (bucket.length < 2) continue;
+      bucket.sort((p, q) => p.tx - q.tx || String(p.id).localeCompare(String(q.id)));
+      // 有界的 Gauss-Seidel：两人各让一半，最多 4 轮；提前收敛即退出。
+      for (let pass = 0; pass < 4; pass++) {
+        let moved = false;
+        for (let i = 0; i < bucket.length; i++) {
+          for (let j = i + 1; j < bucket.length; j++) {
+            const left = bucket[i];
+            const right = bucket[j];
+            const gapY = (left.ty - right.ty) * perUnitY;
+            // 纵深本身已经拉开足够间距时不需要横向补偿。
+            if (Math.abs(gapY) >= spacing) continue;
+            const neededX = Math.sqrt(spacing * spacing - gapY * gapY);
+            const gapX = (left.tx - right.tx) * perUnitX;
+            const spread = Math.abs(gapX);
+            if (spread >= neededX - 1e-6) continue;
+            // 横向完全重合时按稳定 id 分侧，避免两点永久粘连。
+            const side = spread > 1e-6
+              ? Math.sign(gapX)
+              : (String(left.id) < String(right.id) ? -1 : 1);
+            const half = (neededX - spread) / 2 / perUnitX;
+            left.tx = clamp(left.tx + side * half, 3, 97);
+            right.tx = clamp(right.tx - side * half, 3, 97);
+            moved = true;
+          }
+        }
+        if (!moved) break;
+      }
+      // 预留目标必须跟着走，否则下一 tick 的分层仍会读到未松弛的坐标。
+      for (const a of bucket) a.offBallTarget = { ...a.offBallTarget, x: a.tx };
+    }
+  }
+
   _commitOffBallTarget(a, phaseActor) {
     const phase = this._teamShapePhase(a.team);
     const ownerId = this.ball.owner || this.ball.receiverId || phaseActor?.id || null;
@@ -1526,6 +1594,7 @@ export class SimEngine {
     }
     this._samplePossession();
     for (const a of this.agents) this._think(a, dt, owner, controlTeam, phaseActor);
+    this._separateSupportTargets();
     // 2) 积分运动
     for (const a of this.agents) {
       if (this._goalkeeperNeedsFineMovement(a, dt)) {
@@ -3693,9 +3762,22 @@ export class SimEngine {
       if (wideCover) jobs.set(wideCover.id, { type: "wide-cover", side: flankSide });
     }
 
+    // 阵地战此前只有 pressing>=5 才派盯人，于是禁区里一个盯人都没有：实测对方
+    // 在自家禁区持球时，mark 只占防守任务时长的 0.2%，四名后卫全部落在 shape 上，
+    // 被支援安全圈推到离球 3 米开外站着看。真实球队不论压迫设置高低，球进入自家
+    // 禁区都会贴人。危险度只读球到自家球门的真实距离，不读比分、名望或球队身份。
+    // 距离取真实禁区纵深 16.5 米、名额取 1：实测放到 20 米 / 2 人时后台档进球
+    // 由 2.71 掉到 2.29（真实约 2.7），防守强度明显过头。
+    const ballGoalDistanceMetres = pitchDistanceToGoalMetres(
+      this.ball.x,
+      this.ball.y,
+      ownGoalY
+    );
     const markingLimit = defensiveTransition
       ? Math.min(1, profile.markingCount)
-      : pressing >= 5 ? 1 : 0;
+      : pressing >= 5 || ballGoalDistanceMetres < 16.5
+        ? 1
+        : 0;
     const handoffs = this._assignMarkingJobs(
       team,
       owner,
@@ -3886,14 +3968,22 @@ export class SimEngine {
       const mark = job.markId ? this.agentById(job.markId) : null;
       if (mark && !mark.sentOff && mark.team !== a.team) {
         const goalDistance = pitchDistanceToGoalMetres(mark.x, mark.y, ownGoalY);
-        const markDistance = clamp(2.05 + goalDistance / 48, 2.05, 3.4);
+        const awareness = defensiveAwarenessProfile(a.attr);
+        // 贴身程度读防守意识（marking / positioning / decisions）：意识顶级的能贴到
+        // 1.5 米，意识差的只守到 3 米开外。此前这个距离与属性完全无关，弱队后卫
+        // 因此拿到与顶级中卫等同的贴身收益——既压缩了实力差，也不符合真实：
+        // 盯得住人本来就是能力差异最直接的体现之一。
+        const markDistance = clamp(
+          2.05 + goalDistance / 48 - (awareness.awareness - 0.5) * 1.3,
+          1.5,
+          3.4
+        );
         const goalSide = pitchOffsetToward(50 - mark.x, ownGoalY - mark.y, markDistance);
         const ballSide = pitchOffsetToward(b.x - mark.x, b.y - mark.y, 1.35);
         const markX = mark.x + goalSide.x + ballSide.x;
         const markY = mark.y + goalSide.y + ballSide.y;
         const zoneX = weakSideTargetX({ baseX: a.baseX, ballX: b.x, profile: coordination });
         const zoneY = this._defLineY(a);
-        const awareness = defensiveAwarenessProfile(a.attr);
         const markWeight = clamp(
           (goalDistance < 20 ? 0.58 : 0.38) + awareness.markWeightAdjustment,
           0.3,
@@ -3903,7 +3993,10 @@ export class SimEngine {
           zoneX * (1 - markWeight) + markX * markWeight,
           zoneY * (1 - markWeight) + markY * markWeight,
           ownGoalY,
-          goalDistance < 20 ? 2.8 : 3.7,
+          // 盯人是贴住自己的人，不是站在离球固定距离的地方：禁区内若仍被推到
+          // 离球 2.8 米，被盯者一旦靠近球，盯人就自动松开。收到 1.9 米，
+          // 保留避免全队塌向球的作用，但不再阻止禁区内的真实贴身。
+          goalDistance < 20 ? 1.9 : 3.7,
           mark.x <= b.x ? -1 : 1
         );
         a.tx = target.x;
@@ -4331,14 +4424,12 @@ export class SimEngine {
             dy = Math.sin(angle) * 0.001;
             d = 0.001;
           }
-          const inBox =
-            (a.y < 20 || a.y > 80) &&
-            (b.y < 20 || b.y > 80) &&
-            a.x > 22 &&
-            a.x < 78 &&
-            b.x > 22 &&
-            b.x < 78;
-          const need = inBox ? 3.35 : minD;
+          // 禁区内曾被强制拉得比禁区外更开（3.35 vs 2.85 场地单位，沿球门方向
+          // 合 3.52 米），动机是让 2D 画面里小禁区的圆点不糊成一团。代价是后卫在
+          // 禁区里物理上无法贴身：战术目标本身只要求离球 3.05 米，而这条几何下限
+          // 是 3.52 米，两者取大，贴身防守被求解器直接顶开。身体半径不会因为球
+          // 进了禁区就变大，这里统一用同一个下限；圆点是否重叠是渲染层的事。
+          const need = minD;
           if (d >= need) continue;
           resolved = false;
           a.separationContactEpoch = separationEpoch;
@@ -5502,7 +5593,11 @@ export class SimEngine {
     );
     pFoul *= contactSamplingScale;
     // 后卫在禁区内会收脚，但不应把点球压低两个数量级。
-    if (inBox && !goalkeeperChallenge) pFoul *= 0.04;
+    // 0.04 是在「后卫被支援安全圈推到离球 3.5 米外」的世界里定的；恢复禁区盯人后
+    // 实测后卫贴到 2.05 米，同样的单次概率就产出更多点球（后台档 0.38 → 0.63，
+    // 门槛 0.5）。这里按实测把本路径压回原量级：抢断+手球两条合计从 0.50 回到
+    // 0.167（系数 0.334），门将出击一路不动。
+    if (inBox && !goalkeeperChallenge) pFoul *= 0.014;
     if (this.random() >= pFoul) return false;
 
     // 被侵犯方获得球权重启
