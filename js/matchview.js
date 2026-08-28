@@ -1074,32 +1074,37 @@ export class MatchView {
           <div class="mp-form-zones" id="mp-form-zones" aria-hidden="true"></div>
           <div class="mp-attack-arrow" id="mp-attack-arrow" aria-hidden="true"></div>
           <svg class="mp-lines" viewBox="0 0 100 150" preserveAspectRatio="none" aria-hidden="true">
-            <rect x="3" y="3" width="94" height="144" fill="none" stroke="rgba(255,255,255,0.78)" stroke-width="0.7"/>
-            <line x1="3" y1="75" x2="97" y2="75" stroke="rgba(255,255,255,0.7)" stroke-width="0.55"/>
-            <circle cx="50" cy="75" r="12" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
+            <!-- 标线坐标 = 引擎坐标 × [1, 1.5]：球员用 left/top 百分比定位（引擎 x/y 均为
+                 0-100），本 SVG 的 viewBox 高 150，所以 y 要乘 1.5。禁区必须与
+                 _inOwnFoulBox（x 22-78、home y>=84）逐格对齐——此前画的是 x 21-79 /
+                 y 78-98，比引擎判定浅 6 个单位（约 6.3 米），站在 y=80 的球员看着在禁区里，
+                 引擎却算他在禁区外，于是出现「禁区内犯规不判点球」。边线同理：此前内缩到
+                 x 3-97 / y 2-98，而球员可以走到 0 和 100，会跑到画出的边线之外。
+                 注意：本段位于 innerHTML 模板字符串内，注释里不得出现反引号或美元花括号插值。 -->
+            <rect x="0.35" y="0.35" width="99.3" height="149.3" fill="none" stroke="rgba(255,255,255,0.78)" stroke-width="0.7"/>
+            <line x1="0.35" y1="75" x2="99.65" y2="75" stroke="rgba(255,255,255,0.7)" stroke-width="0.55"/>
+            <!-- 中圈半径 9.15 m。x/y 缩放比不同（68 m 对 105 m），必须用椭圆，
+                 屏幕上才是正圆：rx=9.15/68*100、ry=9.15/105*100*1.5。 -->
+            <ellipse cx="50" cy="75" rx="13.46" ry="13.07" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
             <circle cx="50" cy="75" r="0.85" fill="rgba(255,255,255,0.9)"/>
-            <rect x="21" y="117" width="58" height="30" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
-            <rect x="33" y="131" width="34" height="16" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
-            <path d="M 37 117 A 13 13 0 0 1 63 117" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="0.5"/>
-            <circle cx="50" cy="127" r="0.6" fill="rgba(255,255,255,0.75)"/>
-            <!-- 底端球门：门架在底线外侧（场外），不画进场内 -->
-            <rect x="43.2" y="147" width="13.6" height="2.6" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.88)" stroke-width="0.65"/>
-            <line x1="43.2" y1="147" x2="43.2" y2="149.6" stroke="rgba(255,255,255,0.92)" stroke-width="0.9"/>
-            <line x1="56.8" y1="147" x2="56.8" y2="149.6" stroke="rgba(255,255,255,0.92)" stroke-width="0.9"/>
-            <line x1="43.2" y1="149.6" x2="56.8" y2="149.6" stroke="rgba(255,255,255,0.92)" stroke-width="0.85"/>
-            <rect x="21" y="3" width="58" height="30" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
-            <rect x="33" y="3" width="34" height="16" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
-            <path d="M 37 33 A 13 13 0 0 0 63 33" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="0.5"/>
-            <circle cx="50" cy="23" r="0.6" fill="rgba(255,255,255,0.75)"/>
-            <!-- 顶端球门：门架在顶线外侧（场外） -->
-            <rect x="43.2" y="0.4" width="13.6" height="2.6" fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.88)" stroke-width="0.65"/>
-            <line x1="43.2" y1="3" x2="43.2" y2="0.4" stroke="rgba(255,255,255,0.92)" stroke-width="0.9"/>
-            <line x1="56.8" y1="3" x2="56.8" y2="0.4" stroke="rgba(255,255,255,0.92)" stroke-width="0.9"/>
-            <line x1="43.2" y1="0.4" x2="56.8" y2="0.4" stroke="rgba(255,255,255,0.92)" stroke-width="0.85"/>
-            <path d="M 3 7.2 A 4.2 4.2 0 0 0 7.2 3" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.5"/>
-            <path d="M 92.8 3 A 4.2 4.2 0 0 0 97 7.2" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.5"/>
-            <path d="M 3 142.8 A 4.2 4.2 0 0 1 7.2 147" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.5"/>
-            <path d="M 92.8 147 A 4.2 4.2 0 0 1 97 142.8" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.5"/>
+            <!-- 底端（主队防守）：大禁区 40.32×16.5 m = 引擎 x22-78 / y84-100 -->
+            <rect x="22" y="126" width="56" height="23.65" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
+            <rect x="36.53" y="142.14" width="26.94" height="7.51" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
+            <path d="M 39.6 126 A 13.46 13.07 0 0 1 60.4 126" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="0.5"/>
+            <circle cx="50" cy="134.29" r="0.6" fill="rgba(255,255,255,0.75)"/>
+            <!-- 球门口：与引擎 SIM.GOAL_X0/GOAL_X1（44/56）一致 -->
+            <line x1="44" y1="149.65" x2="56" y2="149.65" stroke="rgba(255,255,255,0.92)" stroke-width="1.4"/>
+            <!-- 顶端（客队防守） -->
+            <rect x="22" y="0.35" width="56" height="23.65" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
+            <rect x="36.53" y="0.35" width="26.94" height="7.51" fill="none" stroke="rgba(255,255,255,0.68)" stroke-width="0.55"/>
+            <path d="M 39.6 24 A 13.46 13.07 0 0 0 60.4 24" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="0.5"/>
+            <circle cx="50" cy="15.71" r="0.6" fill="rgba(255,255,255,0.75)"/>
+            <line x1="44" y1="0.35" x2="56" y2="0.35" stroke="rgba(255,255,255,0.92)" stroke-width="1.4"/>
+            <!-- 角球弧半径 1 m（此前 4.2 SVG 单位≈2.9 m） -->
+            <path d="M 0.35 1.78 A 1.47 1.43 0 0 0 1.82 0.35" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.5"/>
+            <path d="M 98.18 0.35 A 1.47 1.43 0 0 0 99.65 1.78" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.5"/>
+            <path d="M 0.35 148.22 A 1.47 1.43 0 0 1 1.82 149.65" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.5"/>
+            <path d="M 98.18 149.65 A 1.47 1.43 0 0 1 99.65 148.22" fill="none" stroke="rgba(255,255,255,0.5)" stroke-width="0.5"/>
           </svg>
           <div class="mp-heat" id="mp-heat" aria-hidden="true"></div>
           <svg class="mp-press" id="mp-press" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
