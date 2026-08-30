@@ -1497,13 +1497,24 @@ async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighl
         }
         recomputeSides(state);
       }
-      if (!silent && onEvent) {
-        const snap = liveSnap(state, minute, null);
-        // 分钟边界事件也要带模拟时刻，直播数据条才能按画面进度切片统计。
-        snap.simT = minute * 60;
-        for (const ev of state.events.slice(mark)) {
-          ev._simLive = true;
-          onEvent(ev, snap);
+      if (onEvent) {
+        // 跳过平淡时段时 silent=true，旧实现把这一分钟产生的事件全部咽掉——
+        // 换人/黄红牌/伤停恰恰多半发生在平淡段里，于是整场看不到一次换人播报，
+        // 球员却在场上悄悄换了。这类「必须让人知道」的事件即使在跳过段也要播，
+        // 其余流水账（抢断/拦截等）继续静默。
+        const ANNOUNCE_WHEN_SKIPPING = ["sub", "card", "red", "injury"];
+        const fresh = state.events.slice(mark);
+        const list = silent
+          ? fresh.filter((ev) => ANNOUNCE_WHEN_SKIPPING.includes(ev.type))
+          : fresh;
+        if (list.length) {
+          const snap = liveSnap(state, minute, null);
+          // 分钟边界事件也要带模拟时刻，直播数据条才能按画面进度切片统计。
+          snap.simT = minute * 60;
+          for (const ev of list) {
+            ev._simLive = true;
+            onEvent(ev, snap);
+          }
         }
       }
     };
@@ -2227,6 +2238,10 @@ function coachInMatchReview(state, minute) {
       decisions.push(`调整阶段阵型为持球 ${phasePlan.effectivePossessionFormation}、无球 ${phasePlan.effectiveOutOfPossessionFormation}`);
     }
 
+    // 换人事件由 aiAutoSub 在循环里逐条 push，而「主教练评估」文案要等决定
+    // 全部做完才能拼出来。按追加顺序写日志的话，读到的是「换人完成」在前、
+    // 「教练决定换人」在后，因果颠倒。先记下插入点，最后把评估条插回这里。
+    const reviewMark = state.events.length;
     const targetCount = aiSubTargetCount(state, club, minute, scoreGap);
     const replaced = [];
     while (state.subsUsed[sk] < targetCount) {
@@ -2249,12 +2264,18 @@ function coachInMatchReview(state, minute) {
     if (!decisions.length) decisions.push("维持场上阵容，继续观察");
 
     if (managedUser) {
-      pushEv(state, minute, "coach", `🧠 ${minute}' 主教练评估：${decisions.join("；")}`, {
-        teamId: club.id,
-        managedDecision: true,
-        phase: "matchday",
+      const reviewEv = pushEv(
+        state,
         minute,
-      });
+        "coach",
+        `🧠 ${minute}' 主教练评估：${decisions.join("；")}`,
+        { teamId: club.id, managedDecision: true, phase: "matchday", minute }
+      );
+      // 挪到本轮换人之前：先看到教练的决定，再看到换人落地。
+      if (state.events[state.events.length - 1] === reviewEv) {
+        state.events.pop();
+        state.events.splice(reviewMark, 0, reviewEv);
+      }
     }
     recomputeSides(state);
   }

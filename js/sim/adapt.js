@@ -332,6 +332,10 @@ export function compactSimFrame(eng) {
   // 入网脉冲只发一帧，立即清掉，避免后续帧/跳段在错误位置重放网效
   const netHit = !!b._netHitPulse;
   if (netHit) b._netHitPulse = false;
+  // 擦球脉冲（门将指尖蹭偏、未扑住）同样只发一帧：球的方向确实变了，
+  // 表现层要在这一点画接触标记，否则看起来是「无接触折射」。
+  const deflect = b._deflectPulse || null;
+  if (deflect) b._deflectPulse = null;
   // 定位球阶段直接随帧传给表现层，不能等事件文案临时摆拍。
   const setPiece =
     b.state === "penalty"
@@ -358,6 +362,7 @@ export function compactSimFrame(eng) {
       owner: b.owner,
       state: b.state || null,
       netHit,
+      deflect,
       setPiece:
         setPiece ||
         (b.state === "corner" ? "corner" : b.state === "penalty" ? "penalty" : null),

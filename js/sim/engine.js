@@ -4966,10 +4966,15 @@ export class SimEngine {
           this._emit("save", gk, { hold, lateral, openGoal: !!b._openGoalShot });
           return;
         }
-        // 未扑住：球继续飞，仅轻微蹭偏
+        // 未扑住：球继续飞，仅轻微蹭偏（指尖擦到）。
+        // 这里会改变球的飞行方向，但过去不发任何信号，表现层无从知晓，
+        // 画面上就成了「球在无人接触的情况下自己拐弯」。
+        // 加一个只存活一帧的脉冲（与 _netHitPulse 同一套做法），
+        // 让表现层能在擦球点画出接触标记。不改物理、不改判定概率。
         if (this.random() < 0.18) {
           b.vx += diveDir * (1.5 + this.random() * 2);
           b.vy *= 0.96;
+          b._deflectPulse = { x: b.x, y: b.y, byId: gk.id };
         }
         break; // 已判定本脚，不再换门将
       }
@@ -5731,12 +5736,66 @@ export class SimEngine {
       return;
     }
 
-    // 死球摆位：其余球员全部在禁区和罚球弧外分槽站立。
-    // 每队独立横向错位，避免双方落在同一点；纵向至少距罚球点 12 个坐标单位。
-    const staged = this.agents.filter(
-      (a) => !a.sentOff && a !== taker && a !== gk && a.role !== "GK"
-    );
+    // 死球摆位：其余球员退到禁区外 + 罚球弧外 + 球后方。
+    //
+    // 旧实现用等距网格（x = 25 + col*12.5，y = 24/29 两行），画面上是标尺一样的
+    // 两条横排，而且纵坐标只看主罚方，双方球员交错混在同两排里，站位离球 13~18m。
+    // 规则只要求离罚球点 9.15m，真实比赛里球员是贴着禁区线和弧线挤成松散弧形，
+    // 进攻方抢弧顶等第二点、防守方站得更宽更靠后准备解围。
+    //
+    // 这里按「极角 + 半径」布点：
+    //  · 进攻方（除主罚者）贴弧，半径小、集中在弧顶附近
+    //  · 防守方半径更大、角度铺得更宽
+    //  · 每人再叠一层按 id 派生的确定性抖动，避免任何等距痕迹
+    // 抖动不能用 this.random()：它是有序流，在下面 pScore 抽样之前插入调用会
+    // 改变本场之后所有随机数，破坏 seed 决定性。改用 id 哈希。
+    const ARC_RX = 9.15 / 0.68;   // 9.15m 换成横向坐标单位（68m = 100）
+    const ARC_RY = 9.15 / 1.05;   // 纵向坐标单位（105m = 100）
+    const boxEdgeY = team === "home" ? 16 : 84;   // 对方禁区线
+    const outward = team === "home" ? 1 : -1;     // 离球门为正方向
+
+    /** id 派生的 [0,1) 确定性伪随机，不消耗 this.random() 流 */
+    const idNoise = (id, salt) => {
+      const s = `${id}|${salt}`;
+      let h = 2166136261;
+      for (let i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      return ((h >>> 0) % 100000) / 100000;
+    };
+
+    /**
+     * 给定横坐标，返回该处「最靠近球门的合法纵坐标」。
+     * 合法边界由三段拼成（以主队主罚为例，outward=+1）：
+     *  · x < 22 或 x > 78：禁区之外，只受「必须在球后方」约束 → spotY
+     *  · 弧与禁区线的交点之间（x≈38..62）：罚球弧是约束 → 弧上的 y
+     *  · 其余（22..38、62..78）：禁区线是约束 → boxEdgeY
+     */
+    const frontierY = (x) => {
+      let y = spotY + outward * 1.2;                  // 球后方
+      if (x > 22 && x < 78) {
+        const edge = boxEdgeY + outward * 0.6;        // 禁区线外侧
+        y = outward > 0 ? Math.max(y, edge) : Math.min(y, edge);
+      }
+      const nx = (x - 50) / ARC_RX;
+      if (Math.abs(nx) < 1) {
+        // 弧在该 x 处的纵向半高
+        const h = ARC_RY * Math.sqrt(1 - nx * nx) * 1.04;
+        const arcY = spotY + outward * h;
+        y = outward > 0 ? Math.max(y, arcY) : Math.min(y, arcY);
+      }
+      return y;
+    };
+
     const teamRanks = { home: 0, away: 0 };
+    const teamCounts = { home: 0, away: 0 };
+    for (const a of this.agents) {
+      if (a.sentOff || a === taker || a === gk || a.role === "GK") continue;
+      teamCounts[a.team]++;
+    }
+
+    const placed = [];
     for (const a of this.agents) {
       if (a.sentOff) continue;
       a.vx = 0;
@@ -5745,20 +5804,69 @@ export class SimEngine {
       a.pose = null;
       if (a === taker || a === gk) continue;
       if (a.role === "GK") {
+        // 另一位门将（主罚方的）留在自己半场，不参与摆位
         a.x = a.baseX;
         a.y = a.baseY;
-      } else {
-        const rank = teamRanks[a.team]++;
-        const row = Math.floor(rank / 5);
-        const col = rank % 5;
-        const teamOffset = a.team === team ? -2.4 : 2.4;
-        a.x = clamp(25 + col * 12.5 + teamOffset, 8, 92);
-        a.y = team === "home" ? 24 + row * 5 : 76 - row * 5;
+        a.tx = a.x;
+        a.ty = a.y;
+        a.decisionUntil = this.t + SIM.PENALTY_RESOLVE_SEC + 1.5;
+        a.fsm = "home";
+        continue;
       }
-      a.tx = a.x;
-      a.ty = a.y;
-      a.decisionUntil = this.t + SIM.PENALTY_RESOLVE_SEC + 1.5;
-      a.fsm = "home";
+      const attacking = a.team === team;
+      const rank = teamRanks[a.team]++;
+      const n = Math.max(1, teamCounts[a.team]);
+      // 横向：进攻方挤在弧顶附近抢第二点；防守方铺得更宽，覆盖禁区两侧
+      const halfSpan = attacking ? 17 : 27;
+      const slot = n === 1 ? 0 : (rank / (n - 1)) * 2 - 1;      // -1..1
+      const xJit = (idNoise(a.id, "x") - 0.5) * (attacking ? 7 : 9);
+      let px = clamp(50 + slot * halfSpan + xJit, 6, 94);
+      // 纵向：贴合法边界，再按队伍性质往后垫一点（防守方站得更靠后准备解围）
+      const depth = (attacking ? 0.4 : 2.2) + idNoise(a.id, "d") * (attacking ? 2.6 : 5.0);
+      let py = frontierY(px) + outward * depth;
+      py = clamp(py, 3, 97);
+      placed.push({ a, x: px, y: py, attacking });
+    }
+
+    // 去重叠：球员圆点直径约 1.6m，挤在一起会糊成一坨。做几轮互推，
+    // 每轮之后重新压回合法边界，保证推挤不会把人顶进禁区或弧内。
+    const MIN_GAP_M = 2.0;
+    for (let iter = 0; iter < 6; iter++) {
+      let moved = false;
+      for (let i = 0; i < placed.length; i++) {
+        for (let j = i + 1; j < placed.length; j++) {
+          const p = placed[i];
+          const q = placed[j];
+          const dxm = (q.x - p.x) * 0.68;
+          const dym = (q.y - p.y) * 1.05;
+          const dm = Math.hypot(dxm, dym);
+          if (dm >= MIN_GAP_M || dm < 1e-6) continue;
+          const push = (MIN_GAP_M - dm) / 2 + 0.05;
+          const ux = dxm / dm;
+          const uy = dym / dm;
+          p.x -= (ux * push) / 0.68;
+          p.y -= (uy * push) / 1.05;
+          q.x += (ux * push) / 0.68;
+          q.y += (uy * push) / 1.05;
+          moved = true;
+        }
+      }
+      for (const p of placed) {
+        p.x = clamp(p.x, 6, 94);
+        const front = frontierY(p.x);
+        p.y = outward > 0 ? Math.max(p.y, front) : Math.min(p.y, front);
+        p.y = clamp(p.y, 3, 97);
+      }
+      if (!moved) break;
+    }
+
+    for (const p of placed) {
+      p.a.x = p.x;
+      p.a.y = p.y;
+      p.a.tx = p.x;
+      p.a.ty = p.y;
+      p.a.decisionUntil = this.t + SIM.PENALTY_RESOLVE_SEC + 1.5;
+      p.a.fsm = "home";
     }
     if (gk) {
       gk.x = 50;
@@ -5833,7 +5941,9 @@ export class SimEngine {
       targetX,
       saveSide,
       phase: "setup",
-      stagedIds: staged.map((a) => a.id),
+      // placed 就是这次摆位涉及的场上球员（不含主罚者和两位门将），
+      // _tickPenalty 的 setup 阶段用它把这些人钉住不动。
+      stagedIds: placed.map((p) => p.a.id),
     };
   }
 

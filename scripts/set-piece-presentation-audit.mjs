@@ -46,14 +46,79 @@ assert.equal(compactSimFrame(engine).ball.setPiece, "penalty", "compact frames m
 
 const takerId = engine.pendingPenalty.takerId;
 const gkId = engine.pendingPenalty.gkId;
-for (const player of engine.agents) {
-  if (player.sentOff || player.id === takerId || player.id === gkId || player.role === "GK") continue;
-  assert.ok(player.y >= 24, `${player.id} entered the penalty area before the kick`);
+
+// 点球摆位的三条规则（Law 14）：除主罚者和守门员外，所有人必须
+//  1. 在罚球区外
+//  2. 距罚球点至少 9.15 m
+//  3. 在球的后方（离对方球门更远的一侧）
+// 坐标不是米：x 一格 = 68/100 m，y 一格 = 105/100 m，所以距离必须换算后再比，
+// 直接对坐标取 hypot 和 9.15 比较是没有物理含义的（旧断言的写法）。
+const M_PER_X = 0.68;
+const M_PER_Y = 1.05;
+const spotY = 12;                 // home 主罚：罚球点在客队禁区
+const BOX_Y = 16;                 // 客队罚球区纵向边界（见 _inOwnFoulBox）
+const metresFromSpot = (x, y) =>
+  Math.hypot((x - 50) * M_PER_X, (y - spotY) * M_PER_Y);
+
+const stagedPlayers = engine.agents.filter(
+  (player) =>
+    !player.sentOff &&
+    player.id !== takerId &&
+    player.id !== gkId &&
+    player.role !== "GK"
+);
+assert.ok(stagedPlayers.length >= 18, "both teams must be staged for the penalty");
+
+for (const player of stagedPlayers) {
+  const insideBox = player.x > 22 && player.x < 78 && player.y <= BOX_Y;
+  assert.ok(!insideBox, `${player.id} entered the penalty area before the kick`);
   assert.ok(
-    Math.hypot(player.x - 50, player.y - 12) >= 9.15,
-    `${player.id} entered the penalty arc before the kick`
+    metresFromSpot(player.x, player.y) >= 9.15,
+    `${player.id} stood closer than 9.15 m to the penalty mark ` +
+      `(${metresFromSpot(player.x, player.y).toFixed(2)} m)`
   );
+  assert.ok(player.y >= spotY, `${player.id} stood ahead of the penalty mark`);
 }
+
+// 摆位必须像真实点球：松散弧形，而不是等距队列。
+// 旧实现是 5 列 × 2 行的网格（x = 25 + col*12.5，y = 24/29），画面上是两条标尺横排。
+const uniqueYBands = [];
+for (const y of stagedPlayers.map((p) => p.y).sort((a, b) => a - b)) {
+  if (!uniqueYBands.length || y - uniqueYBands[uniqueYBands.length - 1] > 1.5) {
+    uniqueYBands.push(y);
+  }
+}
+assert.ok(
+  uniqueYBands.length >= 4,
+  `staged players collapsed into ${uniqueYBands.length} row(s); expected a loose arc`
+);
+
+// 双方不该混在同一条带上：进攻方抢第二点站得更靠前，防守方更靠后准备解围。
+const avgY = (team) => {
+  const list = stagedPlayers.filter((p) => p.team === team);
+  return list.reduce((sum, p) => sum + p.y, 0) / list.length;
+};
+assert.ok(
+  avgY("away") > avgY("home"),
+  "the defending side must sit further from its own goal than the attackers"
+);
+
+// 圆点直径约 1.6 m：任意两人不得挤成一坨
+let penClosest = Infinity;
+for (let i = 0; i < stagedPlayers.length; i++) {
+  for (let j = i + 1; j < stagedPlayers.length; j++) {
+    const a = stagedPlayers[i];
+    const b = stagedPlayers[j];
+    penClosest = Math.min(
+      penClosest,
+      Math.hypot((a.x - b.x) * M_PER_X, (a.y - b.y) * M_PER_Y)
+    );
+  }
+}
+assert.ok(
+  penClosest >= 1.6,
+  `staged players overlap (closest pair ${penClosest.toFixed(2)} m)`
+);
 
 for (let i = 0; i < 16; i++) engine.step(SIM.DT);
 assert.ok(engine.pendingPenalty, "the setup and run-up must span recorded frames");

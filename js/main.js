@@ -1124,11 +1124,21 @@ function updateMotionCaptureUI(status = null) {
   const button = $("#btn-match-motion-capture");
   if (!button) return;
   const frames = Number(status?.frames) || 0;
+  // incidents 是「当前滚动窗口内」的数量，会被 _trimFrames 裁掉，所以徽章会
+  // 自己涨上去又归零；totalIncidents 才是本场累计。徽章继续表示「现在按下去
+  // 能导出几个标记」（这才是按钮的真实行为），但提示里补上累计数，
+  // 免得用户刚看到 3 个、回头发现清零了以为漏了。
   const incidents = Number(status?.incidents) || 0;
+  const total = Number(status?.totalIncidents) || 0;
   const base = t("match.motionCaptureHint");
-  const detail = incidents
-    ? getLang() === "en" ? ` · ${incidents} marked` : ` · ${incidents} 个标记`
-    : "";
+  const en = getLang() === "en";
+  let detail = "";
+  if (incidents) {
+    detail = en ? ` · ${incidents} marked` : ` · 可导出 ${incidents} 个标记`;
+  }
+  if (total > incidents) {
+    detail += en ? ` (${total} this match)` : `（本场累计 ${total}）`;
+  }
   button.disabled = frames < 2;
   button.dataset.motionIncidents = String(Math.min(99, incidents));
   button.title = `${base}${detail}`;
@@ -9143,7 +9153,16 @@ function handleSimLiveEvent(ev, snap) {
   if (!ev || ev.type === "tick" || ev.type === "sim_frame") return;
   const spd = Math.max(0.25, Number(matchSpeed) || 1);
   const fixture = pendingMatch;
-  if (snap?.minute != null) setMatchMinute(snap.minute);
+  // 半场/完场是真实的时钟边界，必须显式 reset 才能落回 45'/90'：
+  // 顶栏走 nextDisplayedMinute 的单调保护（Math.max，防止迟到事件把时钟拨回去），
+  // 而上半场结束时快照分钟已经滚到 46，ht 事件写的是 45，
+  // Math.max(46, 45) 恒为 46 —— 于是「中场休息」时顶栏挂着 46'。
+  // 单调保护本身是对的（有审计钉着），所以只在这两个边界上开 reset。
+  const evMin = Number.isFinite(ev.minute) ? ev.minute : null;
+  const isBoundary = ev.type === "ht" || ev.type === "ft";
+  if (isBoundary && evMin != null) setMatchMinute(evMin, { reset: true });
+  else if (snap?.minute != null) setMatchMinute(snap.minute);
+  else if (evMin != null) setMatchMinute(evMin);
   if (snap?.homeGoals != null) setMatchScore(snap.homeGoals, snap.awayGoals);
   // 高光事件的 snap 带的是整段模拟统计，按事件时刻切片后再显示。
   if (snap?.home) {
@@ -9236,8 +9255,28 @@ function handleSimLiveEvent(ev, snap) {
       setTimeout(() => matchView?.setBanner?.(""), holdMs * 0.75);
     } else if (ev.text && !["tick", "sim_frame", "goal"].includes(ev.type)) {
       // 一般事件：短时 ticker
-      const clean = String(ev.text).replace(/^\[.*?\]\s*/, "").slice(0, 48);
-      if (clean) matchView.setFmmTicker?.(clean, "info", eventTickerMs(ev.type, spd));
+      // 旧实现所有杂项事件一律 "info"，于是「裁判示意有利」和「VAR 复核完成」
+      // 长得一模一样——一条是继续比赛的提示，一条是改判结果，轻重完全不同。
+      // 按性质分级：判罚争议 / 需要留意 / 普通信息。
+      const kindMap = {
+        var_decision: "dispute",
+        offside: "dispute",
+        handball: "warn",
+        card: "warn",
+        red: "warn",
+        injury: "warn",
+        backpass: "warn",
+      };
+      const raw = String(ev.text).replace(/^\[.*?\]\s*/, "");
+      // 截断要留省略号，否则句子被硬切在半路，看着像文案出错
+      const clean = raw.length > 48 ? raw.slice(0, 47) + "…" : raw;
+      if (clean) {
+        matchView.setFmmTicker?.(
+          clean,
+          kindMap[ev.type] || "info",
+          eventTickerMs(ev.type, spd)
+        );
+      }
     }
     matchView.onEvent(ev, snap, fixture);
     const holdMap = {
@@ -9355,13 +9394,23 @@ async function playHighlightPlanBridge(spec) {
   const fast = !!(matchState && !matchState._liveMode);
 
   // 开场提示一次
-  if (segs.some((s) => s.kind === "play") && matchView?.setCaption) {
+  // 旧实现每调用一次 playHighlightPlanBridge 就弹一遍，一场比赛按高光批次能弹五六次；
+  // 且文案写死「倍速生效」，而倍速选择器读数是 ×1，看着像系统自作主张改了倍速。
+  // 改成：整场只提示一次，并直接报出当前实际倍速。
+  if (
+    segs.some((s) => s.kind === "play") &&
+    matchView?.setCaption &&
+    matchState &&
+    !matchState._hlIntroShown
+  ) {
+    matchState._hlIntroShown = true;
     const en = getLang() === "en";
+    const spd = getSpeed();
     matchView.setCaption(
       fast
         ? en
-          ? "Fast highlights · goals in motion · speed applies"
-          : "快速高光 · 进球动态细看 · 倍速生效"
+          ? `Fast highlights · goals in motion · ×${spd}`
+          : `快速高光 · 进球动态细看 · 当前 ×${spd}`
         : en
           ? "Highlights mode · dull passages skipped"
           : "高光观赛 · 平淡时段已跳过",
@@ -9607,11 +9656,15 @@ async function driveMatchEvent(ev, snap, { live = true } = {}) {
   }
 
   // 顶栏与评论：快速/直播都写（高光 _simLive 事件不经过本函数）
+  // ht/ft 是真实时钟边界，要显式 reset 才能落回 45'/90'：顶栏分钟是单调的
+  // （Math.max），而半场末快照已经滚到 46，不 reset 就永远显示 46'。
+  const clockBoundary = ev.type === "ht" || ev.type === "ft";
   if (snap) {
     setMatchScore(snap.homeGoals, snap.awayGoals);
-    setMatchMinute(ev.minute ?? snap.minute);
+    const m = ev.minute ?? snap.minute;
+    setMatchMinute(m, clockBoundary && ev.minute != null ? { reset: true } : undefined);
   } else if (ev.minute != null) {
-    setMatchMinute(ev.minute);
+    setMatchMinute(ev.minute, clockBoundary ? { reset: true } : undefined);
   }
   if (ev.text) appendMatchEvent(ev);
   if (ev.type === "ht") setMatchLiveState("ht");
@@ -10616,7 +10669,7 @@ function renderHtTips() {
   }
   if (tips.avgFit != null) {
     parts.push(
-      `<div class="ht-tip fit"><strong>${en ? "Avg fitness" : "首发体能"}</strong> ${tips.avgFit}%</div>`
+      `<div class="ht-tip fit"><strong>${en ? "Avg fitness" : "首发体能均"}</strong> ${tips.avgFit}%</div>`
     );
   }
   if (tips.fitness?.length) {
@@ -10672,7 +10725,9 @@ function renderHtFitnessBars() {
     return;
   }
   const en = getLang() === "en";
-  const title = en ? "XI fitness" : "首发体能";
+  // 标题不能再叫「首发体能」：上面的 ht-tip 摘要行已经占了这个词，
+  // 同一块面板里出现两个一模一样的标题。这里是逐人明细，叫「各队员体能」。
+  const title = en ? "Player fitness" : "各队员体能";
   const rows = xi
     .map((p) => {
       const fit = Math.round(p.fitness ?? 100);
@@ -11496,19 +11551,33 @@ export function showMatchReport(report, opts = {}) {
   const review = !!opts.review || !!matchPlayback.reviewMode;
   const h = report.home;
   const a = report.away;
-  const row = (label, hv, av, bar) => {
+  /**
+   * @param {string} label
+   * @param {number|string} hv
+   * @param {number|string} av
+   * @param {boolean} bar 是否画对比条
+   * @param {((n: number) => string)|null} [fmt] 数值格式化
+   *
+   * 战报表格原来直接输出原始值，于是控球写成 80.4、xG 写成 1.2345，
+   * 而同一场比赛的实时面板用的是 Math.round(...)% 和 toFixed(2)——
+   * 同一个指标在两块界面上格式和读数都对不上。这里补上与实时面板一致的格式化。
+   */
+  const row = (label, hv, av, bar, fmt = null) => {
     let barHtml = "";
     if (bar && typeof hv === "number" && typeof av === "number") {
       const t = hv + av || 1;
       const hp = Math.round((hv / t) * 100);
       barHtml = `<div class="report-bar-wrap"><div class="report-bar-h" style="width:${hp}%"></div></div>`;
     }
+    const show = (v) => (fmt && typeof v === "number" ? fmt(v) : v);
     return `<tr>
-      <td class="num">${hv}</td>
+      <td class="num">${show(hv)}</td>
       <td class="stat-label">${label}${barHtml}</td>
-      <td class="num">${av}</td>
+      <td class="num">${show(av)}</td>
     </tr>`;
   };
+  const fmtXgCell = (n) => (Number(n) || 0).toFixed(2);
+  const fmtPossCell = (n) => `${Math.round(Number(n) || 0)}%`;
   const meta = [
     report.weather ? `${report.weather.icon} ${report.weather.name}` : "",
     report.derby ? "🔥 德比" : "",
@@ -11624,10 +11693,10 @@ export function showMatchReport(report, opts = {}) {
         <th>${escapeHtml(a.short || a.name)}</th>
       </tr></thead>
       <tbody>
-        ${row(t("match.xg"), h.xg, a.xg, true)}
+        ${row(t("match.xg"), h.xg, a.xg, true, fmtXgCell)}
         ${row(t("match.shots"), h.shots, a.shots, true)}
         ${row(t("match.shotsOn"), h.shotsOn, a.shotsOn, true)}
-        ${row(t("match.poss"), h.possession, a.possession, true)}
+        ${row(t("match.poss"), h.possession, a.possession, true, fmtPossCell)}
         ${row(t("match.corners"), h.corners, a.corners, true)}
         ${row(t("match.fouls"), h.fouls, a.fouls, false)}
         ${row(t("match.yellows"), h.yellows, a.yellows, false)}
