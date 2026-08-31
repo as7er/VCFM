@@ -43,6 +43,12 @@
  * 根因是机会供给高一个量级（禁区内 1092 秒 vs 真实 60~90 秒），全队射门冷却是
  * 当前唯一压住进球的东西。**必须先降低禁区持球循环，再谈门前射门意愿。**
  * 完整标定曲线与两次负结果见 AGENTS.md v239 遗留问题 #1。
+ *
+ * `boxPassDestinationPct` 与 `medianAttackersInBoxAtSpellStart` 用来定位循环形态：
+ * 实测 58.3% 的禁区传球目标点仍在同一禁区内，而禁区里平均只有 3 名进攻方（含持球人）。
+ * 人少却仍在内部倒球——说明杠杆在传球价值评估，不在人数或跑位分布；这也排除了
+ * 复活 `matchview.js` 里那条死代码软顶（`_capAttackersInBox`，≤3 且不含持球人，
+ * 实测非持球者中位仅 2 名，本就在其上限之内）。
  */
 import assert from "node:assert/strict";
 
@@ -126,6 +132,15 @@ export function runBoxPossessionSample(seeds) {
     pressLagBehindTarget: [],
     pressActualToCarrier: [],
     nearestDefenderToCarrier: [],
+    // 禁区回合以传球结束时，球去了哪里：目标点仍在同一禁区内 = 回收循环；
+    // 出禁区 = 真的把球带离危险区。这一项决定「禁区里球出不去」的杠杆在哪：
+    // 若绝大多数传球把球留在禁区内，杠杆在接球点分布（谁在禁区里等球），
+    // 而不在传球选择权重。
+    boxPassRecycled: 0,
+    boxPassExited: 0,
+    boxPassUnknown: 0,
+    // 回合开始时禁区内的进攻方人数（球在禁区时有多少人可供短传）。
+    attackersInBoxAtSpellStart: [],
     keeperOffLine: [],
     keeperLateralOffset: [],
     keeperLaneDistance: [],
@@ -191,6 +206,12 @@ export function runBoxPossessionSample(seeds) {
             }
             spell = { team: owner.team, seconds: 0, defendingTeam };
             sample.boxSpells++;
+            let attackersInBox = 0;
+            for (const agent of engine.agents) {
+              if (agent.team !== owner.team || agent.sentOff) continue;
+              if (engine._inOwnFoulBox(defendingTeam, agent.x, agent.y)) attackersInBox++;
+            }
+            sample.attackersInBoxAtSpellStart.push(attackersInBox);
           }
           spell.seconds += elapsed;
           sample.boxSeconds += elapsed;
@@ -284,6 +305,18 @@ export function runBoxPossessionSample(seeds) {
             else if (ending === "pass") sample.unmarkedPasses++;
             pendingChance = false;
           }
+          // 传球结束的回合：按球的目标点判断是留在禁区还是出禁区。
+          if (ending === "pass") {
+            if (Number.isFinite(b.targetX) && Number.isFinite(b.targetY)) {
+              if (engine._inOwnFoulBox(spell.defendingTeam, b.targetX, b.targetY)) {
+                sample.boxPassRecycled++;
+              } else {
+                sample.boxPassExited++;
+              }
+            } else {
+              sample.boxPassUnknown++;
+            }
+          }
           spell = null;
           unmarkedOpen = false;
           unmarkedOwnerId = null;
@@ -319,6 +352,19 @@ const report = {
   medianSpellSeconds: Number(median(sample.spellSeconds).toFixed(2)),
   spellEndingSharePct: Object.fromEntries(
     Object.entries(sample.spellEndings).map(([key, value]) => [key, pct(value, totalEndings)])
+  ),
+  boxPassDestinationPct: {
+    recycledInBox: pct(
+      sample.boxPassRecycled,
+      sample.boxPassRecycled + sample.boxPassExited + sample.boxPassUnknown
+    ),
+    exitedBox: pct(
+      sample.boxPassExited,
+      sample.boxPassRecycled + sample.boxPassExited + sample.boxPassUnknown
+    ),
+  },
+  medianAttackersInBoxAtSpellStart: Number(
+    median(sample.attackersInBoxAtSpellStart).toFixed(2)
   ),
   unmarkedCloseChancesPerMatch: per(sample.unmarkedCloseChances),
   unmarkedChanceOutcomePct: {
