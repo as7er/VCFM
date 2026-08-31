@@ -1921,22 +1921,46 @@ export class SimEngine {
       const vx = b.x - 50,
         vy = b.y - goalY;
       const len = Math.hypot(vx, vy) || 1;
-      // 出击很克制：最多离门 7，避免「门将失踪」
-      const desiredAdvance = clamp(8 - dGoal * 0.2 + sweep * 1.6, 1.1, 7 + sweep * 2);
+      // 封角：门将必须站在「射门点 → 球门中心」这条线上，而不是站在门中间等球。
+      // 旧实现横向只走 advance*0.45，等于几乎不离开中路：实测进攻者杀到 8 米内
+      // 时门将仍在门线前 5.8 米、横向偏移仅 1.6 米，射门线路距离 3.05 米始终小于
+      // 可达范围 5.66 米——引擎判定「够得着」，于是既不出击也不封角，
+      // 但画面上球门两侧全是空的。现在沿这条线站位，越近越贴线。
+      const laneShare = clamp(0.55 + (1 - clamp(dGoal / 22, 0, 1)) * 0.4, 0.55, 0.95);
+
+      // 出击距离：近距离一对一时真正压出去缩小射门角度。
+      // 只有确实是单刀（持球者身边没有己方防守者）才敢大幅出击，
+      // 否则贴着门线附近，避免被一脚分球打成空门。
+      let coverNearBall = 0;
+      for (const d of this.agents) {
+        if (d.team !== a.team || d.role === "GK" || d.sentOff) continue;
+        if (pitchDistanceBetween(d.x, d.y, b.x, b.y) < 3.2) coverNearBall++;
+      }
+      const isolated = coverNearBall === 0;
+      // 无人协防且球已进到 13 米内：出击上限抬到 11（真实门将会主动缩小角度）。
+      // 有人协防时保持原来的克制值 7，让防守者去处理。
+      const advanceCap = isolated && dGoal < 13 ? 11 + sweep * 2 : 7;
+      const desiredAdvance = clamp(
+        (isolated ? 11 : 8) - dGoal * 0.2 + sweep * 1.6,
+        1.1,
+        advanceCap
+      );
       const advance = clamp(
+        // 绝不越过球：越过之后就是真空门
         Math.min(desiredAdvance, Math.max(1.1, dGoal - 1.1)),
         1.1,
-        7
+        advanceCap
       );
-      a.tx = clamp(50 + (vx / len) * (advance * 0.45), 40, 60);
+      a.tx = clamp(50 + (vx / len) * (advance * laneShare), 38, 62);
       a.ty = clampGkY(goalY + facing * advance);
       a.fsm = this._inOwnPenaltyArea(a.team, b.x, b.y, 1) ? "smother" : "press";
       return;
     }
-    // 常规：门线前跟球横向移动
+    // 常规：门线前跟球横向移动。横向跟随收窄到 0.72——门将横移幅度本来就小于
+    // 球的横移，站到与球同一 x 会把近角完全让开。
     const threat = a.team === "home" ? b.y > 78 : b.y < 22;
     const depth = threat ? 7 : 4;
-    a.tx = clamp(b.x, 40, 60);
+    a.tx = clamp(50 + (b.x - 50) * 0.72, 40, 60);
     a.ty = clampGkY(goalY + facing * depth);
     a.fsm = "home";
   }
@@ -3031,7 +3055,15 @@ export class SimEngine {
     const freekick = !!extraMeta?.freekick;
     // 球队级节奏上限：强队长期围攻时也不能每几十秒起脚一次。
     // 这是模拟时间的进攻周期，不是表现层的墙钟等待。
-    this._teamShotUntil[a.team] = this.t + 420 + this.random() * 260;
+    //
+    // 旧值 420 + rand*260（7~11 分钟）是在「禁区盯人只派 1 人、门将不出击」的
+    // 世界里定的：机会本身过量（实测每场 336 次禁区持球回合，真实约 40~60），
+    // 只能靠一个很长的冷却把射门数压回 24/场。副作用是近距离好机会也被压掉——
+    // 实测「离门 10 米内且 3 米内无人防守」每场 20.5 次，其中射门只占 9.8%、
+    // 传球占 58.5%，画面上就是「站在空门前不射」。
+    // 本轮已收紧禁区盯人并让门将真正封角/出击，机会质量由防守压制，
+    // 冷却随之缩短到 3~5 分钟，让球员在门前按机会本身做决定。
+    this._teamShotUntil[a.team] = this.t + 300 + this.random() * 180;
     // 近：finishing；远：shooting。远射噪声更大，容易打飞/被扑
     const skill = freekick
       ? 0.42 * (a.attr.kicking || 0.55) +
@@ -3773,11 +3805,20 @@ export class SimEngine {
       this.ball.y,
       ownGoalY
     );
+    // 名额随危险度递增：球到自家球门 11 米内（约小禁区弧顶到点球点一带）
+    // 派两人，因为这时禁区里通常已有两名以上进攻者插入，一个盯人必然漏一个。
+    // 更远处仍只派一人，避免全队被吸进禁区。
+    //
+    // 上一次尝试放到「20 米 / 2 人」时后台档进球从 2.71 掉到 2.29，于是退回 1 人。
+    // 但那次只收紧了防守、没有同时松开 _shoot 的全队射门冷却，进球必然掉——
+    // 防守变强 + 射门仍被冷却压死 = 机会少且不敢射。本轮三处一起改。
     const markingLimit = defensiveTransition
       ? Math.min(1, profile.markingCount)
-      : pressing >= 5 || ballGoalDistanceMetres < 16.5
-        ? 1
-        : 0;
+      : ballGoalDistanceMetres < 11
+        ? 2
+        : pressing >= 5 || ballGoalDistanceMetres < 16.5
+          ? 1
+          : 0;
     const handoffs = this._assignMarkingJobs(
       team,
       owner,
@@ -3984,19 +4025,37 @@ export class SimEngine {
         const markY = mark.y + goalSide.y + ballSide.y;
         const zoneX = weakSideTargetX({ baseX: a.baseX, ballX: b.x, profile: coordination });
         const zoneY = this._defLineY(a);
+        // markWeight 是「贴人」与「守区域」的混合比。上限 0.66 意味着即使在禁区
+        // 里也有三分之一的权重把人拉回区域位置，实测最近防守者中位 2.03 米——
+        // 混合出来的距离，不是真的贴身。危险区（离门 12 米内）把上限放到 0.86，
+        // 让盯人在门前真正贴住自己的人；禁区外仍保持原来的混合，维持阵型。
+        const dangerZone = goalDistance < 12;
+        // 危险区的贴人权重同样跟意识走：顶级 0.86、平庸 0.7 左右，
+        // 不能一刀切（见下方 minDistance 的同一理由）。
         const markWeight = clamp(
-          (goalDistance < 20 ? 0.58 : 0.38) + awareness.markWeightAdjustment,
+          (dangerZone
+            ? 0.7 + clamp(awareness.awareness - 0.5, -0.2, 0.2) * 0.5
+            : goalDistance < 20
+              ? 0.58
+              : 0.38) + awareness.markWeightAdjustment,
           0.3,
-          0.66
+          dangerZone ? 0.86 : 0.66
         );
         const target = this._defensiveSupportTarget(
           zoneX * (1 - markWeight) + markX * markWeight,
           zoneY * (1 - markWeight) + markY * markWeight,
           ownGoalY,
           // 盯人是贴住自己的人，不是站在离球固定距离的地方：禁区内若仍被推到
-          // 离球 2.8 米，被盯者一旦靠近球，盯人就自动松开。收到 1.9 米，
-          // 保留避免全队塌向球的作用，但不再阻止禁区内的真实贴身。
-          goalDistance < 20 ? 1.9 : 3.7,
+          // 离球 2.8 米，被盯者一旦靠近球，盯人就自动松开。
+          // 危险区按防守意识分级：意识顶级的能贴到约 1.1 米（门前真实贴防的
+          // 量级），意识差的只能到 2.1 米左右。一刀切会把弱队后卫也变成顶级
+          // 中卫，实测强队场均积分从 1.5+ 掉到 1.38——盯得住人本来就是能力差异
+          // 最直接的体现，这里必须跟属性走（与上面 markDistance 同一原则）。
+          dangerZone
+            ? clamp(2.1 - (awareness.awareness - 0.5) * 2.0, 1.1, 2.1)
+            : goalDistance < 20
+              ? 1.9
+              : 3.7,
           mark.x <= b.x ? -1 : 1
         );
         a.tx = target.x;
