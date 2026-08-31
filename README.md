@@ -143,7 +143,7 @@ npm run test:browser
 
 `npm test` 运行语法检查和核心审计，通常需要数分钟；`npm run test:full` 额外运行 24 场固定种子真实性校准。`npm run test:browser` 使用本机 Microsoft Edge，并通过 Python 在 `127.0.0.1:8876` 启动临时测试服务，覆盖桌面/手机布局、导航和弹窗焦点。
 
-比赛真实性审计检查进球、射门距离与转化率、抢断、犯规、点球、角球、伤病、卡死和强弱队差距。直接调用统一入口也受支持：`node scripts/verify.mjs [--full]`。
+比赛真实性审计检查进球、射门距离与转化率、抢断、犯规、点球、角球、伤病、卡死和强弱队差距。禁区持球采样审计（`box-possession-sampling-audit`）另按 0.1 秒间隔采样真实比赛，观察禁区持球时长、回合结束方式、无人盯防机会频率与门将封角距离——合成摆位场景只能验证「摆成这样时会怎样」，测不到「这种局面在真实比赛里出现得多频繁」。直接调用统一入口也受支持：`node scripts/verify.mjs [--full]`。
 
 ### 技术栈
 
@@ -289,7 +289,7 @@ npm run test:browser
 
 `npm test` runs syntax checks and the core audits and can take several minutes. `npm run test:full` adds the seeded 24-match realism calibration. `npm run test:browser` uses the locally installed Microsoft Edge and starts a temporary Python server on `127.0.0.1:8876` to cover desktop/mobile layout, navigation, and modal focus.
 
-The realism audit measures goals, shot distance and conversion, tackles, fouls, penalties, corners, injuries, stalls, and strong-vs-weak performance. The unified runner can also be called directly as `node scripts/verify.mjs [--full]`.
+The realism audit measures goals, shot distance and conversion, tackles, fouls, penalties, corners, injuries, stalls, and strong-vs-weak performance. The box possession sampling audit (`box-possession-sampling-audit`) additionally samples real matches every 0.1s to observe how long the ball dwells in the box, how box spells end, how often unmarked close-range chances occur, and how far the keeper sits off the shooting lane — posed synthetic scenarios can only verify "what happens when set up this way", never "how often this situation actually arises in a real match". The unified runner can also be called directly as `node scripts/verify.mjs [--full]`.
 
 ### Stack
 
