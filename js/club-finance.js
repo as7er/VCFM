@@ -17,7 +17,6 @@ import { clubFinanceObligationSnapshot, ensureFinanceObligations } from "./finan
 import {
   clubCommercialBreakdown,
   ensureWorldSponsorships,
-  sponsorshipMarketWeekly,
 } from "./sponsorships.js";
 import {
   clubDebtSnapshot,
@@ -88,11 +87,6 @@ export function clubSquadWageBill(world, club) {
     total += Math.round(number(player?.wage) * (1 - number(share)));
   }
   return Math.round(total);
-}
-
-/** Sponsorship and commercial income uses public league level and club strength only. */
-export function clubWeeklyCommercialIncome(club) {
-  return sponsorshipMarketWeekly(club);
 }
 
 export function clubWeeklyOperatingSnapshot(world, club) {

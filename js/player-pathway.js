@@ -10,7 +10,7 @@ export const PLAYING_TIME_ROLES = {
 
 const ROLE_ORDER = ["prospect", "squad", "rotation", "important", "star"];
 const DEVELOPMENT_LOG_LIMIT = 48;
-const PLAYING_TIME_HISTORY_LIMIT = 72;
+const PLAYING_TIME_HISTORY_LIMIT = 24;
 const DEVELOPMENT_HISTORY_LIMIT = 12;
 
 export const DEVELOPMENT_ATTR_LABELS = {
@@ -75,6 +75,24 @@ export function ensurePlayerPathway(player, club = null, world = null) {
   }
   const status = player.playingTime;
   if (!Array.isArray(status.history)) status.history = [];
+  if (status.historyFormat === 2 || status.history.some(Array.isArray)) {
+    status.history = status.history.map((entry) => {
+      if (!Array.isArray(entry)) return entry;
+      const [key, season, day, competitionType, flags, minutes, competitionId] = entry;
+      return {
+        key,
+        season,
+        day,
+        competitionId,
+        competitionType: competitionType || "league",
+        started: !!(flags & 1),
+        appeared: !!(flags & 2),
+        minutes: Number(minutes) || 0,
+        available: !!(flags & 4),
+      };
+    });
+    delete status.historyFormat;
+  }
   if (!Array.isArray(status.roleHistory)) status.roleHistory = [];
   if (club?.id && status.clubId && status.clubId !== club.id) {
     status.committed = false;
@@ -305,6 +323,9 @@ export function recordMatchPlayingTime(world, club, context = {}) {
         : 0;
     const registered = availableIds ? availableIds.has(player.id) : (!eligibleIds || eligibleIds.has(player.id));
     const available = appeared || (registered && !(player.injured > 0) && !(player.suspendedMatches > 0));
+    // AI squad planning only needs actual minutes for sharpness. Availability rows are
+    // retained for the managed club because they drive explicit playing-time promises.
+    if (club.id !== world.userClubId && !appeared) continue;
     const entry = {
       key,
       season: world.season,

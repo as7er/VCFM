@@ -16,23 +16,43 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 
 | 说明 | 详情 |
 |------|------|
-| 当前版本 | **v207** · 比赛传球节奏与真实性基准 |
+| 当前版本 | **v233** · 持久化球衣号码偏好与赛季登记 |
 | 设备 | 手机 / 平板 / 电脑浏览器 |
-| 存档 | 当前浏览器 `localStorage`，3 个槽位 |
+| 存档 | 当前浏览器 `IndexedDB` 耐久存储，3 个槽位 |
 | 换机 | 游戏内导出 / 导入 JSON；清理浏览器数据前请先导出 |
 | 安装 | 支持 PWA，可使用浏览器“添加到主屏幕” |
 | 语言与主题 | 中文 / English · 日间 / 夜间 |
 
 仓库：https://github.com/as7er/vcfm
 
-### v207 更新亮点
+### v232 更新亮点
 
-- 接球后的处理节奏读取球队节奏与球员决策属性，减少过快、过密的无意义出球。
-- 明确目标的普通传球按球速、接球队员盘带与决策属性结算停球；传中、拦截和压迫失误继续读取真实空间风险。
-- 真实性审计正式约束传球量、成功率和传中占比，并分别报告完成传球与非传中直塞。
-- 24 场标准样本为 2.63 球、24.83 射门、1144.5 次传球、75.5% 成功率和零停滞；强弱差在 400 场五联赛样本中保持稳定。
+- 赞助合同按签约赛季重新定价，收入不再逐年被工资上涨侵蚀；已签合同保留原价，到期换约时自然跟上。5 赛季样本中位俱乐部重新靠踢球盈利，联赛债务余额下降三分之一。
+- 比赛底栏不再溢出球场盖住解说折叠按钮，替补席空的一侧也不再让整条错位。
+- 打完比赛后回到俱乐部更稳：结算不再因为工作台渲染出错而卡住「继续」按钮或丢失当场赛果。
+- 信箱详情链接的解析开销大幅下降，长赛季的信箱和首页摘要不再随球员总数变慢。
 
-前序版本（v199–v206）：球员特征与定位球职责、职员姓名与国籍因果、后台空间比赛 Worker、多年阵容规划与 AI 建队、球员细分位置与多位置适应性、禁区决策与门将出击、AI 主教练生态与战术身份、发展队比赛与统一比赛锐度。完整条目见 [CHANGELOG.md](./CHANGELOG.md)。
+### v231 更新亮点
+
+- 新档首页增加可跳过、可持久化的首周经理引导：检查阵容、确认战术、安排训练、完成第一场比赛。
+- 引导直接复用现有工作台和页签，不增加隐藏能力或比赛修正；旧存档按已建立生涯自动跳过。
+
+### v230 更新亮点
+
+- 无球跑位目标引入约 1.5 秒路线租约，同一持球人和阶段内不再因相邻决策反复折返；传球换人、阶段切换和首次二过一仍能立即改跑。
+- 接应目标继续以战术几何为基础，只对相距不足 1.8 米的同队预留目标做横向分层；目标坐标、来源和路线租约进入空间快照与运动片段。
+- 运动诊断新增“跑位目标反复”和“接应目标拥挤”，双轨回放球场绘制引擎与显示层实际跑位目标线。
+- 24 场固定种子真实性样本中，标准档 3.17 球/场、81.7% 传球成功率，后台档 2.71 球/场、81.0% 传球成功率，两档均零停滞；强队分别取得 2.08 与 1.92 分/场。
+
+### v229 更新亮点
+
+- 直播画面持续检查非法坐标、球员或球的瞬移、无缘由急停反向、持续重叠、持球脱节及引擎/渲染坐标偏差，并保留最近 12 秒的双轨运动片段。
+- 比赛底栏新增“保存运动片段”入口；诊断界面可逐帧比较引擎坐标与实际渲染坐标、跳转自动标记并导出可复现 JSON，不修改比赛随机流或结果。
+- 门将接高速度来球改为连续减速收球，渲染层在第一脚控制完成前不再提前吸球；扑救不再叠加隐藏坐标侧移，球员碰撞纠正按时间步连续释放。
+- 固定种子完整比赛门禁覆盖 2 场标准直播档与 6 场后台档：标准档零严重异常、零警告，后台档零严重异常，仅保留 4 次粗步长快速反向警告。
+- 24 场真实性样本中，标准档 3.21 球/场、81.1% 传球成功率，后台档 2.92 球/场、81.0% 传球成功率，两档均零停滞。
+
+前序版本（v199–v228）已覆盖球员属性原型、习惯与角色、发展队、长期阵容规划、AI 主教练生态、后台空间 Worker、耐久存档、比赛规则、连续触球、集体防守、球队阶段形态、转播和阶段阵型证据链。完整条目见 [CHANGELOG.md](./CHANGELOG.md) 与 [AGENTS.md](./AGENTS.md)。
 
 ### 快速开始
 
@@ -62,7 +82,7 @@ VCFM（**V**C **F**ootball **M**anager）是一款轻量网页足球经理游戏
 - **真实性与可复现性**：每场比赛保存确定性随机种子；远射、射门高度、门将反应、抢断、点球、角球和强弱队表现经过固定种子批量审计。
 - **统一临场因果**：教练、天气、备战、队内讲话、真实阵容和定位球训练共同进入空间模拟；下半场按 46–60、61–75、76–90 分段计算，换人和战术调整会影响尚未模拟的区间。
 - **赛前票房因果**：上座与门票系数只读取开赛前状态，不受本场赛果倒灌；战报和财政概览展示杯赛、德比、争冠、联赛层级等收入系数。
-- **后台比赛同源**：浏览器日历推进由独立 Worker 执行，AI 场次运行与用户比赛相同的空间引擎与全部因果，只把时间步长降为 0.2 秒并减少投影轮数；性能档随战报持久化，Worker 失败时回退到主线程同一后台档。
+- **后台比赛同源**：浏览器日历推进由独立 Worker 执行，AI 场次运行与用户比赛相同的空间引擎与全部因果；普通决策以 0.3 秒推进，关键球路和门将威胁窗口以 0.1 秒局部积分，性能档随战报持久化，Worker 失败时回退到主线程同一后台档。
 
 ### 球队管理
 
@@ -130,7 +150,7 @@ npm run test:browser
 - HTML + CSS + 原生 ES Modules，无框架、无构建步骤
 - `js/sim/engine.js`：用户比赛空间模拟
 - `js/sim/adapt.js`：比赛系统、统计与高光接入
-- `localStorage`：本地存档
+- `IndexedDB`：三槽耐久存档；`localStorage` 仅保留轻量偏好与旧档迁移入口
 - GitHub Pages：在线部署
 - Web App Manifest + Service Worker：安装与离线缓存
 
@@ -154,23 +174,31 @@ VCFM (**V**C **F**ootball **M**anager) is a lightweight browser football-managem
 
 | | |
 |--|--|
-| Current version | **v207** · passing rhythm and realism baselines |
+| Current version | **v230** · 2D off-ball run continuity |
 | Devices | Phone, tablet, or desktop browser |
-| Saves | Browser `localStorage`, 3 slots |
+| Saves | Durable browser `IndexedDB`, 3 slots |
 | Move devices | In-game JSON export / import; export before clearing browser data |
 | Install | PWA support through “Add to Home Screen” |
 | Language and theme | Chinese / English · day / night |
 
 Repository: https://github.com/as7er/vcfm
 
-### What's new in v207
+### What's new in v230
 
-- A player's first action after receiving the ball now reads team tempo and decision-making, reducing unrealistically rapid and repetitive passing.
-- Ordinary targeted passes resolve control from ball speed, dribbling, and decisions, while crosses, interceptions, and pressure retain their spatial risks.
-- The realism audit now enforces pass volume, completion, and crossing-share ranges while reporting completed passes and non-cross through balls separately.
-- The 24-match standard sample produces 2.63 goals, 24.83 shots, 1,144.5 passes, 75.5% completion, and no stalls; a 400-match five-league sample preserves the ability gap.
+- Off-ball movement targets now use roughly 1.5-second route leases. Players avoid reversals between adjacent decisions within the same carrier and team phase, while a possession change, phase change, or the first explicit one-two can still establish a new route immediately.
+- Support targets retain their tactical geometry and are only layered horizontally when same-team reservations for the same carrier and phase are less than 1.8 metres apart. Target coordinates, provenance, route kind, lease, carrier, and phase are retained in spatial snapshots and motion clips.
+- Motion diagnostics add run-target churn and support-target crowding markers, with target lines drawn in both engine and rendered replay pitches.
+- Seeded full-match motion gates cover two standard and six background matches with zero severe incidents. Across 24-match realism samples, the standard profile averages 3.17 goals with 81.7% pass completion and the background profile averages 2.71 goals with 81.0% pass completion; neither profile stalls.
 
-Earlier releases (v199–v206): player traits and set-piece duties, staff naming and nationality causality, the background spatial match worker, multi-year squad planning with AI squad building, detailed positional aptitude, box/goalkeeper decisions, the AI head-coach ecosystem, and development football with unified match sharpness. See [CHANGELOG.md](./CHANGELOG.md) for full entries.
+### What's new in v229
+
+- Live matches now check invalid coordinates, player and ball teleports, unexplained rapid reversals, persistent overlaps, owner/ball separation, and engine/render divergence while retaining the latest 12 seconds of dual-track motion frames.
+- A new match-toolbar action saves the current motion clip. Its diagnostic view compares engine and rendered coordinates frame by frame, jumps to automatic markers, and exports deterministic JSON without consuming randomness or changing results.
+- Goalkeepers now decelerate incoming balls through a continuous catch phase, the renderer no longer attaches a ball before first-touch control completes, saves no longer add a hidden position jump, and collision corrections are released over consecutive frames.
+- Seeded full-match gates cover two standard live-profile matches and six background matches: the standard profile has zero severe incidents and zero warnings; the background profile has zero severe incidents and four coarse-step reversal warnings.
+- Across 24-match realism samples, the standard profile averages 3.21 goals with 81.1% pass completion, while the background profile averages 2.92 goals with 81.0% pass completion; neither profile stalls.
+
+Earlier releases (v199–v228) cover player attribute archetypes, habits and roles, development football, long-term squad planning, the AI head-coach ecosystem, background spatial workers, durable saves, edge rules, continuous control, collective defending, team phases, broadcast presentation, and phase-shape evidence. See [CHANGELOG.md](./CHANGELOG.md) and [AGENTS.md](./AGENTS.md).
 
 ### Quick start
 
@@ -200,7 +228,7 @@ Earlier releases (v199–v206): player traits and set-piece duties, staff naming
 - **Realism and reproducibility**: every fixture stores a deterministic seed. Long shots, shot height, goalkeeper reactions, tackles, penalties, corners, and strong-vs-weak performance are covered by seeded batch audits.
 - **Unified live causality**: coaching, weather, preparation, team talks, the actual lineup, and set-piece training feed the spatial simulation. The second half is calculated in 46–60, 61–75, and 76–90 windows, so substitutions and tactical changes affect only the remaining play.
 - **Pre-match gate causality**: attendance and gate modifiers use only information known before kickoff; match reports and the finance overview expose cup, derby, title-race, league-tier, and other income factors.
-- **Shared background simulation**: calendar advancement runs in a dedicated Worker, and AI fixtures use the same spatial engine and full causality as user matches — only with a 0.2s timestep and fewer projection passes. The performance profile is stored with each report, and a Worker failure falls back to the same background profile on the main thread.
+- **Shared background simulation**: calendar advancement runs in a dedicated Worker, and AI fixtures use the same spatial engine and full causality as user matches. Ordinary decisions advance at 0.3s, while critical ball-flight and goalkeeper-threat windows use local 0.1s integration. The performance profile is stored with each report, and Worker failure falls back to the same background profile on the main thread.
 
 ### Club management
 
@@ -268,7 +296,7 @@ The realism audit measures goals, shot distance and conversion, tackles, fouls, 
 - HTML + CSS + native ES Modules, with no framework or build step
 - `js/sim/engine.js`: spatial simulation for user matches
 - `js/sim/adapt.js`: match-system, statistics, and highlight integration
-- `localStorage`: local saves
+- `IndexedDB`: durable three-slot saves; `localStorage` only holds lightweight preferences and the legacy migration entry point
 - GitHub Pages: deployment
 - Web App Manifest + Service Worker: installation and offline cache
 

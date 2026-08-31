@@ -33,24 +33,82 @@ function median(values) {
   return percentile(values, 0.5);
 }
 
-function seasonSnapshot(world) {
+/**
+ * Recurring football economics: everything the club earns from playing football
+ * each season, against the wage and upkeep bills it has to cover. Transfers,
+ * financing and owner injections are excluded on purpose — they are one-off
+ * swings, while this difference is the structural one. The season counters are
+ * one per ledger category (see LEGACY_FIELDS in js/finance-ledger.js) so they do
+ * not overlap; wage and facility are stored as positive outflows. Read straight
+ * off the ledger totals so the probe stays free of the `ensure*` side effects
+ * that would perturb the seeded run.
+ */
+function clubRecurringNet(club) {
+  const finance = club.finance || {};
+  const value = (field) => Number(finance[field]) || 0;
+  const income =
+    value("seasonTicketIncome") +
+    value("seasonMatchdayIncome") +
+    value("seasonCommercialIncome") +
+    value("seasonBroadcastIncome") +
+    value("seasonPrizeIncome") +
+    value("seasonCompetitionIncome");
+  return income - value("seasonWageOut") - value("seasonFacilityOut");
+}
+
+function activeDebtFacilities(club) {
+  return (club.finance?.debt?.facilities || []).filter(
+    (facility) => facility.status === "active" && (Number(facility.balance) || 0) > 0
+  );
+}
+
+function seasonSnapshot(world, marketMoves = {}) {
   const clubs = world.clubs || [];
   const players = clubs.flatMap((club) => club.players || []);
   const money = clubs.map((club) => Number(club.money) || 0);
   const wages = players.map((player) => Number(player.wage) || 0).filter((value) => value > 0);
   const values = players.map((player) => Number(player.value) || 0).filter((value) => value > 0);
   const ages = players.map((player) => Number(player.age) || 0).filter((value) => value > 0);
+  const recurringNets = clubs.map(clubRecurringNet);
+  const debtFacilities = clubs.flatMap(activeDebtFacilities);
+  const facilityLevels = clubs.map((club) => {
+    const facilities = club.facilities || {};
+    return (
+      (Number(facilities.stadium) || 1) +
+      (Number(facilities.training) || 1) +
+      (Number(facilities.youth) || 1)
+    ) / 3;
+  });
   return {
     season: world.season,
     clubs: clubs.length,
     players: players.length,
     negativeClubs: money.filter((value) => value < 0).length,
+    // Cash can look healthy while the club only stays solvent on owner loans, so
+    // track the recurring balance and the debt those loans leave behind.
+    recurringDeficitClubs: recurringNets.filter((value) => value < 0).length,
+    medianRecurringNet: median(recurringNets),
+    indebtedClubs: clubs.filter((club) => activeDebtFacilities(club).length > 0).length,
+    debtOutstanding: debtFacilities.reduce((sum, facility) => sum + (Number(facility.balance) || 0), 0),
+    annualDebtInterest: Math.round(
+      debtFacilities.reduce(
+        (sum, facility) => sum + (Number(facility.balance) || 0) * (Number(facility.annualRate) || 0),
+        0
+      )
+    ),
     medianMoney: median(money),
     p10Money: percentile(money, 0.1),
     p90Money: percentile(money, 0.9),
     medianWage: median(wages),
     medianValue: median(values),
     averageAge: ages.reduce((sum, value) => sum + value, 0) / Math.max(1, ages.length),
+    medianFacilityLevel: median(facilityLevels),
+    aiFacilityInvestments: clubs.filter(
+      (club) => club.finance?.lastAiFacilityInvestmentSeason === world.season
+    ).length,
+    aiTransferMoves: Number(marketMoves.transfer) || 0,
+    aiLoanMoves: Number(marketMoves.loan) || 0,
+    aiReleaseMoves: Number(marketMoves.release) || 0,
     missingPositionClubs: clubs.filter((club) =>
       ["GK", "DEF", "MID", "ATT"].some((position) =>
         !(club.players || []).some((player) => player.pos === position)
@@ -80,9 +138,13 @@ function playUserFixturesAsBackground(world, fixtures) {
   }
 }
 
-const seasons = Math.max(3, Number(process.env.VCFM_ECO_SEASONS) || 5);
+const seasons = Math.max(3, Number(process.argv[2]) || Number(process.env.VCFM_ECO_SEASONS) || 5);
 const progressEnabled = process.env.VCFM_ECO_PROGRESS === "1";
 const progressDays = Math.max(1, Number(process.env.VCFM_ECO_PROGRESS_DAYS) || 30);
+// 默认种子保持不变，样本仍可逐字段复现。换种子只用于判断某个指标的变化是
+// 真实效应还是单一种子的混沌发散——任何改变随机抽取次数的改动都会让整份
+// 五赛季样本走进另一个随机世界，单次对比不足以归因。
+const ecoSeed = Number(process.env.VCFM_ECO_SEED) || 0x1692026;
 const startClub = CLUB_TEMPLATES.find((club) => club.division === 3);
 assert.ok(startClub, "ecosystem audit needs a valid starting club");
 
@@ -97,7 +159,12 @@ function logProgress(phase, details = {}) {
 }
 
 const originalRandom = Math.random;
-Math.random = seededRandom(0x1692026);
+const originalNow = Date.now;
+Math.random = seededRandom(ecoSeed);
+// 和 phase-shape-evidence / background-spatial-worker 两个审计一样钉死时间：
+// 实体 id 里只要掺进 Date.now()，被当作稳定种子 hash 出来的教练流派和职员国籍
+// 就会随运行时刻漂移，整个五赛季样本再也对不上第二次运行。
+Date.now = () => 1787061720042;
 
 try {
   const world = createWorld(startClub.id, "Ecosystem Audit");
@@ -136,6 +203,7 @@ try {
     let guard = 0;
     let advanceMs = 0;
     let userMatchMs = 0;
+    const marketMoves = { transfer: 0, loan: 0, release: 0 };
     const seasonStartedAt = performance.now();
     while (!longWorld.seasonOver && guard < 420) {
       if (longWorld.board) {
@@ -144,6 +212,12 @@ try {
       }
       const advanceStartedAt = performance.now();
       const result = advanceDay(longWorld);
+      for (const event of result.events || []) {
+        if (event.type !== "ai_squad_moves") continue;
+        for (const type of Object.keys(marketMoves)) {
+          marketMoves[type] += Number(event.types?.[type]) || 0;
+        }
+      }
       advanceMs += performance.now() - advanceStartedAt;
       const userMatchStartedAt = performance.now();
       playUserFixturesAsBackground(longWorld, result.userMatches);
@@ -160,7 +234,7 @@ try {
       }
     }
     assert.ok(longWorld.seasonOver, `season ${longWorld.season} should complete within 420 days`);
-    const snapshot = seasonSnapshot(longWorld);
+    const snapshot = seasonSnapshot(longWorld, marketMoves);
     snapshots.push(snapshot);
     console.log("ecosystem season", JSON.stringify(snapshot));
     assert.equal(snapshot.clubs, 270, "seven-country club population remains stable");
@@ -170,6 +244,11 @@ try {
     assert.equal(snapshot.invalidFinanceClubs, 0, "all club ledgers remain finite and non-negative");
     assert.ok(snapshot.negativeClubs <= Math.ceil(snapshot.clubs * 0.15), "widespread insolvency detected");
     assert.ok(snapshot.averageAge >= 22 && snapshot.averageAge <= 30, "player age structure left a plausible range");
+    assert.ok(snapshot.aiFacilityInvestments >= 10, "solvent AI clubs should reinvest retained income");
+    assert.ok(
+      snapshot.aiTransferMoves + snapshot.aiLoanMoves + snapshot.aiReleaseMoves > 0,
+      "AI squad movement should produce observable transfer, loan or release events"
+    );
 
     if (index < seasons - 1) {
       const next = startNextSeason(longWorld);
@@ -183,9 +262,17 @@ try {
   assert.ok(last.medianWage <= first.medianWage * 2.5, "median wages inflated too quickly");
   assert.ok(last.medianValue <= first.medianValue * 2.5, "median transfer values inflated too quickly");
   assert.ok(last.p90Money <= Math.max(250_000_000, first.p90Money * 8), "club wealth concentration exploded");
+  assert.ok(last.medianFacilityLevel >= first.medianFacilityLevel, "AI capital investment must remain visible in facilities");
+  if (snapshots.length >= 5) {
+    assert.ok(
+      last.medianMoney <= Math.max(first.medianMoney * 2.25, first.medianMoney + 12_000_000),
+      "median club cash grew faster than wages, values and real investment"
+    );
+  }
 
   console.log(JSON.stringify({ seasons, snapshots }, null, 2));
   console.log("Ecosystem audit passed: shared finances, solvency, squads, ages and inflation");
 } finally {
   Math.random = originalRandom;
+  Date.now = originalNow;
 }

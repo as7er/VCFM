@@ -25,6 +25,7 @@ import {
   DIVISIONS,
   ensureKit,
   assignSquadNumbers,
+  registerSquadNumbers,
   ensurePlayerNumber,
   ensureWorldClubTemplates,
 } from "./models.js";
@@ -156,6 +157,7 @@ import {
   invalidateClubSquadPlan,
   invalidateDivisionSquadPlans,
   selectPlannedLoanCandidate,
+  selectPlannedOverstockedPosition,
   selectPlannedRecruitmentPosition,
   selectPlannedSaleCandidate,
   squadPositionPlan,
@@ -165,6 +167,7 @@ import {
   startFacilityUpgrade,
   upgradeYouthAcademy,
   processFacilityDay,
+  processAiFacilityInvestment,
   matchdayIncome,
   applySeasonLeagueFinance,
   trainingGrowthBonus,
@@ -797,8 +800,15 @@ function beginAdvanceDay(world) {
   // 国际比赛日（约每 50 天，更贴近现实频率）
   if (!world.lastIntlDay) world.lastIntlDay = 0;
   if (world.day - world.lastIntlDay >= 50 && !world.seasonOver) {
-    runInternationalBreak(world);
-    events.push({ type: "international_break", day: world.day });
+    const intl = runInternationalBreak(world);
+    // 征召的代价对玩家可见：被征召人数与因国家队比赛受伤的自家球员。
+    const userPlayerIds = new Set((userClub?.players || []).map((p) => p.id));
+    events.push({
+      type: "international_break",
+      day: world.day,
+      callups: (intl.callups || []).length,
+      injuries: (intl.injuries || []).filter((item) => userPlayerIds.has(item.playerId)),
+    });
   }
 
   ensureCompetitions(world);
@@ -895,6 +905,10 @@ function finishAdvanceDay(world, context) {
     const settlements = settleWorldWeeklyFinances(world);
     const debtActions = processAiDebtActions(world);
     if (debtActions.length) events.push({ type: "ai_debt_actions", actions: debtActions });
+    const facilityInvestments = processAiFacilityInvestment(world);
+    if (facilityInvestments.length) {
+      events.push({ type: "ai_facility_investments", actions: facilityInvestments });
+    }
     const user = clubById(world, world.userClubId);
     const userSettle = settlements.find((item) => item.clubId === world.userClubId);
     const total = userSettle?.operatingOut || 0;
@@ -920,7 +934,20 @@ function finishAdvanceDay(world, context) {
   if (!world.seasonOver && !world.sacked) {
     sackedResult = checkBoardMidSeason(world, getSortedTable);
     if (!world.sacked && isTransferWindowOpen(world)) {
-      processAiTransfers(world);
+      const aiMoves = processAiTransfers(world);
+      if (aiMoves.length) {
+        const types = aiMoves.reduce((counts, move) => {
+          const type = move.type || "transfer";
+          counts[type] = (counts[type] || 0) + 1;
+          return counts;
+        }, {});
+        events.push({
+          type: "ai_squad_moves",
+          day: world.day,
+          count: aiMoves.length,
+          types,
+        });
+      }
     }
   }
 
@@ -1190,6 +1217,8 @@ export function finishSeason(world) {
         const squadLimit = club.id === world.userClubId ? 23 : 25;
         if (plannedPromotion && club.players.length < squadLimit) {
           p.fromYouth = true;
+          // 学院号码只用于青训名单；进入一线队后参加正式赛季登记。
+          p.number = null;
           p.wage = estimateWage(p);
           ensurePlayerHistory(p);
           club.players.push(p);
@@ -1223,9 +1252,11 @@ export function finishSeason(world) {
     const minimumByPosition = { GK: 2, DEF: 5, MID: 5, ATT: 3 };
     for (const [position, minimum] of Object.entries(minimumByPosition)) {
       while (club.players.filter((player) => player.pos === position).length < minimum) {
+        const existingNames = new Set(club.players.map((player) => player.name));
         club.players.push(
           createPlayer(position, club.power - 5 + Math.floor(rng() * 8), club.id, {
             homeNation: club.countryCode,
+            existingNames,
           })
         );
       }
@@ -1234,13 +1265,17 @@ export function finishSeason(world) {
     // 阵容过少则继续补充轮换球员。
     while (club.players.length < 16) {
       const posPick = ["GK", "DEF", "MID", "ATT"][Math.floor(rng() * 4)];
+      const existingNames = new Set(club.players.map((player) => player.name));
       club.players.push(
         createPlayer(posPick, club.power - 5 + Math.floor(rng() * 8), club.id, {
           homeNation: club.countryCode,
+          existingNames,
         })
       );
     }
-    fillYouthSquad(club);
+    // 赛季末新补充球员先保持无号；下一赛季在归队/解约完成后统一登记，
+    // 避免普通补位球员提前占走刚释放的 7/9/10/11 号。
+    fillYouthSquad(club, null, { assignNumbers: false });
     autoLineup(club);
     club.form = [];
   }
@@ -1282,6 +1317,9 @@ export function startNextSeason(world) {
   if (!world.seasonOver) finishSeason(world);
 
   const endedSeason = world.season;
+  const priorNumberEntries = new Map(
+    (world.clubs || []).map((club) => [club.id, { ...(club.numberRegistration?.entries || {}) }])
+  );
 
   // 归档本赛季个人数据到 history + career（在赛季号 +1 之前）
   for (const c of world.clubs) {
@@ -1319,6 +1357,7 @@ export function startNextSeason(world) {
   ensureStaffApproaches(world);
   world.staffApproaches = (world.staffApproaches || []).filter((a) => a.status === "pending");
 
+  const userNumberRegistrationChanges = [];
   for (const c of world.clubs) {
     world.table[c.id] = { played: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
     if (!c.division) c.division = 3;
@@ -1329,6 +1368,13 @@ export function startNextSeason(world) {
       resetSeasonDiscipline(p);
     }
     autoLineup(c);
+    const numberResult = registerSquadNumbers(c, {
+      season: world.season,
+      reason: "new-season",
+      day: 1,
+      protectedEntries: priorNumberEntries.get(c.id) || {},
+    });
+    if (c.id === world.userClubId) userNumberRegistrationChanges.push(...numberResult.changes);
   }
   ensureWorldSponsorships(world);
   const leagueTransitionPayments = processLeagueTransitionPayments(world);
@@ -1346,6 +1392,14 @@ export function startNextSeason(world) {
     day: 1,
     text: `📅 ${world.season} 赛季开始！${user.name} 征战${divName}。国内联赛、杯赛与大陆赛事赛程已生成。${expandedClubs ? ` 世界联赛新增 ${expandedClubs} 家俱乐部。` : ""}`,
   });
+  if (userNumberRegistrationChanges.length) {
+    const changed = userNumberRegistrationChanges.slice(0, 6).map((item) => `${item.name} ${item.from ? `#${item.from}→` : ""}#${item.to}`).join("、");
+    const more = userNumberRegistrationChanges.length > 6 ? ` 等 ${userNumberRegistrationChanges.length} 人` : "";
+    world.news.unshift({
+      day: 1,
+      text: `🔢 新赛季号码登记：${changed}${more}。原有持有人优先保留，空缺重要号码按球员偏好、位置与阵容地位分配。`,
+    });
+  }
   const userTransitionPayment = leagueTransitionPayments.find((item) => item.clubId === user.id);
   if (userTransitionPayment) {
     world.news.unshift({
@@ -2031,8 +2085,12 @@ export function processAiTransfers(world) {
   const moves = [];
   const clubs = world.clubs.filter((c) => c.id !== world.userClubId);
   const shuffled = clubs.slice().sort(() => rng() - 0.5);
-  // 夏窗更活跃
-  let budgetMoves = getTransferPhase(world) === "summer" ? 6 : 3;
+  // 夏窗更活跃。此前这里是全世界每三天 6/3 笔，全年最多百余笔，
+  // 明显低于青训提拔、合同流动和退役带来的正常球员流入，市场因此
+  // 只能限制继续买人，却没有足够吞吐量把真实冗余送出去。提高的是
+  // 市场容量，不是单家俱乐部的购买权限；每家俱乐部在本轮仍最多一笔，
+  // 且继续服从位置需求、预算、财政禁令和最低阵容骨架。
+  let budgetMoves = getTransferPhase(world) === "summer" ? 18 : 9;
 
   for (const club of shuffled) {
     if (budgetMoves <= 0) break;
@@ -2095,8 +2153,13 @@ export function processAiTransfers(world) {
     }
 
     // 卖：只处理计划明确判定为过剩且不会破坏位置最低骨架的球员。
-    if (needCash || tooOld || chance(seasonPlan?.key === "sustainable" || seasonPlan?.key === "rebuild" ? 0.24 : 0.15)) {
-      const victim = selectPlannedSaleCandidate(world, club);
+    // 上限先前的软刹车只是“别买更多”:真正超编时优先松一档上限放冗余走,
+    // 只有结构跌破最低骨架时才撤回普通换血线。
+    const rescueOverstock = !!selectPlannedOverstockedPosition(world, club);
+    if (needCash || tooOld || rescueOverstock || chance(seasonPlan?.key === "sustainable" || seasonPlan?.key === "rebuild" ? 0.24 : 0.15)) {
+      const victim = selectPlannedSaleCandidate(world, club, rescueOverstock
+        ? (player) => !!(squadPositionPlan(ensureClubSquadPlan(world, club), player.pos) || {}).overstock
+        : null);
       if (victim && club.players.length > 15) {
         const buyers = world.clubs
           .filter(
@@ -2149,6 +2212,27 @@ export function processAiTransfers(world) {
             continue;
           }
         }
+
+        // 转会市场没有合适买家时，真实的冗余仍有第二条出口：主动解约。
+        // 只对规划明确为低顺位、位置超出理想深度的球员执行，并支付剩余
+        // 合同补偿；资金不足或会破坏最低骨架时保留球员，等待下一窗口。
+        const release = terminatePlayer(world, club, victim);
+        if (release.ok) {
+          moves.push({
+            ...release,
+            type: "release",
+            clubId: club.id,
+            playerId: victim.id,
+          });
+          budgetMoves -= 1;
+          if (chance(0.3)) {
+            world.news.unshift({
+              day: world.day,
+              text: `📝 ${club.name} 与 ${victim.name} 解约，球员进入自由市场`,
+            });
+          }
+          continue;
+        }
       }
     }
 
@@ -2156,7 +2240,11 @@ export function processAiTransfers(world) {
     const transferBudget = clubTransferBudget(world, club);
     if (club.finance?.debtPlan?.transferEmbargo || club.finance?.compliance?.transferEmbargo) continue;
     const needPos = selectPlannedRecruitmentPosition(world, club);
-    if (!needPos || transferBudget < 150000 || club.players.length >= 25) continue;
+    // 任何位置超编时先停买,优先让窗口清结构再进人。若不限购,``别买更多''
+    // 的软刹车挡不住高需求位置的第七人反复被买回。(本循环只遍历 AI 俱乐部,
+    // 玩家的阵容增长不受此约束。)
+    if (selectPlannedOverstockedPosition(world, club) || club.players.length >= 25) continue;
+    if (!needPos || transferBudget < 150000 || needPos === selectPlannedOverstockedPosition(world, club)) continue;
 
     const minOvr = Math.max(6, Math.floor((club.power || 50) / 8) - 1);
     const candidates = [];

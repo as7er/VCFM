@@ -880,6 +880,14 @@ tr:hover td { background: var(--row-hover); }
   line-height: 1.45;
   color: var(--muted);
 }
+.inbox-entity-link {
+  display: inline;
+  color: var(--primary);
+  font-weight: 700;
+  line-height: inherit;
+}
+.inbox-entity-link .club-link-crest { display: none; }
+button.club-link.inbox-entity-link { display: inline; vertical-align: baseline; }
 .inbox-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1145,6 +1153,53 @@ html[data-theme="light"] .pitch {
 .tac-summary strong {
   color: var(--text);
 }
+.tac-phase-shapes {
+  margin: 0.15rem 0 0.85rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+.tac-phase-shapes h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+.tac-phase-shape-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+.tac-phase-shape-grid label {
+  margin-bottom: 0;
+}
+.tac-phase-shapes > .hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+.tac-shape-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+  margin: 0.1rem 0 0.2rem;
+}
+.tac-shape-fact {
+  min-width: 0;
+  display: grid;
+  gap: 0.16rem;
+  padding: 0.48rem 0.52rem;
+  border-left: 3px solid var(--border);
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+}
+.tac-shape-fact[data-shape-phase="in-possession"] { border-left-color: var(--good); }
+.tac-shape-fact[data-shape-phase="out-of-possession"] { border-left-color: var(--primary); }
+.tac-shape-fact[data-shape-phase="transition"] { border-left-color: var(--warn); }
+.tac-shape-fact strong { font-size: 0.72rem; }
+.tac-shape-fact span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
 .tactics-workspace {
   grid-template-columns: minmax(27rem, 1.15fr) minmax(20rem, 0.85fr);
   align-items: start;
@@ -1247,6 +1302,8 @@ html[data-theme="light"] .pitch {
 @media (max-width: 560px) {
   .pitch { max-width: 360px; }
   .player-dot { width: 72px; }
+  .tac-shape-grid { grid-template-columns: 1fr; }
+  .tac-phase-shape-grid { grid-template-columns: 1fr; }
   .tac-role-list { grid-template-columns: 1fr; }
   .tac-role-badge { max-width: 70px; font-size: 0.54rem; }
 }
@@ -1742,8 +1799,10 @@ html[data-theme="light"] .fm-scoreboard {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  max-height: 70vh;
-  max-height: 70dvh;
+  /* 同时受视口和父容器约束：只写 70vh 时，窗口一高就会撑出 .fm-match-body，
+     底栏溢出到下面的解说栏上，把折叠按钮盖住点不到。 */
+  max-height: min(70vh, 100%);
+  max-height: min(70dvh, 100%);
 }
 .fm-commentary,
 .fmm-commentary {
@@ -1751,13 +1810,39 @@ html[data-theme="light"] .fm-scoreboard {
   flex-direction: column;
   flex: 0 0 auto;
   min-height: 0;
-  max-height: min(26vh, 200px);
+  max-height: min(14vh, 116px);
   background: linear-gradient(180deg, #121820 0%, #0e141c 100%);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
 }
+.fmm-commentary.is-collapsed {
+  max-height: 2.35rem;
+}
+.fmm-commentary.is-collapsed .match-log {
+  display: none;
+}
+.fm-com-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.fm-com-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  min-width: 1.7rem;
+  padding: 0;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.12);
+  color: inherit;
+  cursor: pointer;
+  line-height: 1;
+}
+.fm-com-toggle:hover { background: rgba(148, 163, 184, 0.24); }
 html[data-theme="light"] .fm-commentary {
   background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
   border-color: var(--border);
@@ -1766,7 +1851,7 @@ html[data-theme="light"] .fm-commentary {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 0.75rem;
+  padding: 0.34rem 0.6rem;
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -1793,9 +1878,16 @@ html[data-theme="light"] .fm-com-head {
 .fm-com-badge.live { background: rgba(248, 113, 113, 0.2); color: #fca5a5; }
 .fm-com-badge.ht { background: rgba(251, 191, 36, 0.2); color: #fcd34d; }
 .fm-com-badge.ft { background: rgba(148, 163, 184, 0.25); color: #cbd5e1; }
+/* 浅色主题：上面几条是「浅色文字 + 20% 半透明底」，为深色面板配的。
+   叠到白底上底色变成近白，文字仍是浅粉/浅黄，就成了粉字白底、黄字白底。
+   这里给浅色主题换成实底 + 深色文字。 */
+html[data-theme="light"] .fm-com-badge { background: rgba(37, 99, 235, 0.14); color: #1d4ed8; }
+html[data-theme="light"] .fm-com-badge.live { background: rgba(220, 38, 38, 0.14); color: #b91c1c; }
+html[data-theme="light"] .fm-com-badge.ht { background: rgba(180, 83, 9, 0.14); color: #92400e; }
+html[data-theme="light"] .fm-com-badge.ft { background: rgba(71, 85, 105, 0.16); color: #334155; }
 .match-log.fm-com-log {
   flex: 1 1 auto;
-  min-height: 72px;
+  min-height: 0;
   max-height: none;
   overflow-y: auto;
   background: transparent;
@@ -1894,6 +1986,176 @@ html[data-theme="light"] .fmm-match-bar {
   line-height: 1;
 }
 .fmm-match-bar .btn.icon-btn.is-muted .mtb-glyph { opacity: 0.5; }
+.fmm-match-bar #btn-match-motion-capture[data-motion-incidents]:not([data-motion-incidents="0"]) {
+  position: relative;
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.55);
+  background: rgba(120, 53, 15, 0.28);
+}
+.fmm-match-bar #btn-match-motion-capture[data-motion-incidents]:not([data-motion-incidents="0"])::after {
+  content: attr(data-motion-incidents);
+  position: absolute;
+  top: -0.28rem;
+  right: -0.28rem;
+  display: grid;
+  place-items: center;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.18rem;
+  border-radius: 50%;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.58rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.match-motion-review {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  overflow: auto;
+  padding: max(0.75rem, env(safe-area-inset-top)) max(0.75rem, env(safe-area-inset-right)) max(0.75rem, env(safe-area-inset-bottom)) max(0.75rem, env(safe-area-inset-left));
+  background: rgba(5, 9, 14, 0.94);
+  color: #e5edf6;
+}
+.match-motion-review.hidden { display: none; }
+.motion-review-surface {
+  width: min(1040px, 100%);
+  min-height: calc(100vh - 1.5rem);
+  min-height: calc(100dvh - 1.5rem);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.motion-review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}
+.motion-review-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: 0;
+}
+.motion-review-head p {
+  margin: 0.2rem 0 0;
+  color: #9caec2;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.motion-review-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.3rem;
+}
+.motion-review-actions .icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  min-width: 2rem;
+  padding: 0;
+}
+.motion-review-summary {
+  min-height: 1.8rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.9rem;
+  color: #cbd5e1;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+.motion-review-summary strong { color: #fff; }
+.motion-review-pitches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.motion-review-pitches figure {
+  min-width: 0;
+  margin: 0;
+}
+.motion-review-pitches figcaption {
+  margin-bottom: 0.35rem;
+  color: #d5dfeb;
+  font-size: 0.78rem;
+  font-weight: 750;
+  text-align: center;
+}
+.motion-review-pitch {
+  width: min(100%, 350px);
+  aspect-ratio: 68 / 105;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.42);
+  border-radius: 6px;
+  background: #17633a;
+}
+.motion-review-pitch svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.motion-review-timeline {
+  display: grid;
+  grid-template-columns: 4.8rem minmax(0, 1fr) 4.8rem;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+.motion-review-timeline output:last-child { text-align: right; }
+.motion-review-timeline input { width: 100%; }
+.motion-review-incidents {
+  min-height: 2.4rem;
+  max-height: 7.5rem;
+  overflow: auto;
+  padding-top: 0.55rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.24);
+  color: #b8c6d5;
+  font-size: 0.73rem;
+}
+.motion-review-incident {
+  appearance: none;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 4.4rem minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: baseline;
+  padding: 0.24rem 0;
+  border: 0;
+  border-left: 2px solid transparent;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.motion-review-incident:hover,
+.motion-review-incident.active {
+  border-left-color: #60a5fa;
+  background: rgba(96, 165, 250, 0.08);
+}
+.motion-review-incident strong { color: #fbbf24; }
+.motion-review-incident[data-severity="severe"] strong { color: #f87171; }
+.motion-review-empty { color: #94a3b8; }
+
+@media (max-width: 620px) {
+  .match-motion-review { padding: 0.55rem; }
+  .motion-review-surface { min-height: calc(100dvh - 1.1rem); }
+  .motion-review-head { align-items: stretch; flex-direction: column; }
+  .motion-review-actions { justify-content: flex-end; }
+  .motion-review-pitches { grid-template-columns: minmax(0, 1fr); }
+  .motion-review-pitch { width: min(100%, 300px); }
+  .motion-review-timeline { grid-template-columns: 3.8rem minmax(0, 1fr) 3.8rem; }
+  .motion-review-incident { grid-template-columns: 3.8rem minmax(0, 1fr); }
+  .motion-review-incident span:last-child { grid-column: 2; }
+}
 .btn.tiny {
   font-size: 0.68rem;
   padding: 0.12rem 0.4rem;
@@ -1969,9 +2231,44 @@ html[data-theme="light"] .fmm-match-bar {
   font-size: 0.72rem;
   font-weight: 700;
   padding: 0.26rem 0.34rem;
-  min-width: 1.7rem;
+  /* "0.5" 是三个字符，1.7rem 装不下：工具条一挤，首字符「0」就被裁掉，
+     画面上看到的是「.5」，像是另一档倍速。给足宽度并禁止收缩。 */
+  min-width: 2.1rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
+}
+.fmm-match-bar .match-camera-bar {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.1);
+}
+.fmm-match-bar .match-camera-bar .btn {
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  min-width: 2.8rem;
+  padding: 0.26rem 0.42rem;
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+/* 倍速条与镜头条是并排的两个分段控件，选中态必须长一样：
+   原来倍速用 var(--primary) 蓝、镜头用 #166534 绿，同一排两种「已选中」颜色，
+   看上去像两种不同性质的开关。统一到主题强调色 + 内描边。 */
+.fmm-match-bar .match-speed-bar .btn.active,
+.fmm-match-bar .match-camera-bar .btn.active {
+  color: #f8fafc;
+  background: var(--primary);
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 
 /* 开赛后：模拟模式按钮已无意义，只留「赛后继续」，把底栏压到两行内 */
@@ -1992,6 +2289,11 @@ html[data-theme="light"] .fmm-match-bar {
 }
 .match-layout.ft-kick .fmm-match-bar #btn-match-continue {
   flex: 1 1 auto;
+}
+/* 赛前「赛后继续」是 disabled 的，但 .match-actions 会换行，它独占一整行灰按钮，
+   既点不动又白占高度。禁用期间直接收起，启用时（完场）自动回来。 */
+.fmm-match-bar #btn-match-continue:disabled {
+  display: none;
 }
 
 /* 中场底部抽屉 */
@@ -2200,6 +2502,15 @@ html[data-theme="light"] .mp-boards {
   gap: 0.1rem;
 }
 .report-motm-info strong { font-size: 1rem; }
+/* 浅色主题：卡片底是「半透明深绿」，叠到白底上变成浅绿，
+   而标签字色 #86efac 也是浅绿——白底浅绿卡 + 浅绿字，「本场最佳」几个字看不见。
+   浅色下换成实底浅绿 + 深绿字。 */
+html[data-theme="light"] .report-motm-card {
+  background: linear-gradient(120deg, rgba(16, 185, 129, 0.12), rgba(59, 130, 246, 0.1));
+  border-color: rgba(5, 150, 105, 0.35);
+}
+html[data-theme="light"] .report-motm-label { color: #047857; }
+html[data-theme="light"] .report-motm-pos { color: #475569; }
 .report-motm-rating em {
   font-style: normal;
   font-size: 1.35rem;
@@ -2475,6 +2786,17 @@ html[data-theme="light"] .ht-role-tips, html[data-theme="light"] .ht-role-tip {
   font-weight: 800;
   color: #fbbf24;
 }
+/* 浅色主题：上面整块是按深色面板配的（半透明深底 + 近白正文 + 亮黄强调）。
+   叠到白底上底色变浅，#e2e8f0 正文和 #fde047 黄标题就成了白底白字 / 白底黄字。 */
+html[data-theme="light"] .ht-tips {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: var(--border);
+}
+html[data-theme="light"] .ht-tip { color: var(--text); }
+html[data-theme="light"] .ht-tip strong { color: #1d4ed8; }
+html[data-theme="light"] .ht-tip.warn strong { color: #b45309; }
+html[data-theme="light"] .ht-tip.card strong { color: #a16207; }
+html[data-theme="light"] .ht-tip em { color: #b45309; }
 
 /* 中场首发体能条 */
 .ht-fitness {
@@ -2718,7 +3040,7 @@ html[data-theme="light"] .ht-role-tips, html[data-theme="light"] .ht-role-tip {
   position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
-  grid-template-rows: auto;
+  grid-template-rows: auto auto;
   align-items: center;
   gap: 0.2rem 0.45rem;
   margin: 0.2rem 0 0;
@@ -2731,6 +3053,48 @@ html[data-theme="light"] .ht-role-tips, html[data-theme="light"] .ht-role-tip {
   color: #0f172a;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
+.mp-bench-strip {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.22rem;
+  min-height: 1.35rem;
+  padding: 0.12rem 0.18rem 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.1);
+}
+.mp-bench-strip.empty { display: none; }
+.mp-bench-side {
+  width: 1rem;
+  color: #64748b;
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-align: center;
+}
+.mp-bench-side.home { color: #166534; }
+.mp-bench-side.away { color: #b91c1c; }
+.mp-bench-list {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.2rem;
+  min-width: 0;
+  /* 替补席不再截断到 7 人，人数随阵容浮动（可能十几个），
+     必须能横向滚动，否则 overflow:hidden 会把多出来的人整块切掉。 */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.mp-bench-list::-webkit-scrollbar { display: none; }
+.mp-bench-list > * { flex: 0 0 auto; }
+.mp-bench-list.away { justify-content: flex-end; }
+.mp-bench-divider {
+  width: 1px;
+  height: 1rem;
+  background: rgba(100, 116, 139, 0.35);
+}
 .mp-fmm-ticker {
   grid-column: 1;
   grid-row: 1;
@@ -2739,10 +3103,19 @@ html[data-theme="light"] .ht-role-tips, html[data-theme="light"] .ht-role-tip {
   text-align: center;
   color: #1e293b;
   min-height: 1.15em;
+  /* 长事件句会把这一格撑成三四行，向下压到替补席条上。
+     限制两行并省略，超长文案不再挤走别的东西。 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
 }
+.mp-fmm-ticker:not(.show) { display: none; }
 .mp-fmm-ticker.show {
   opacity: 1;
 }
@@ -2790,17 +3163,20 @@ html[data-theme="light"] .ht-role-tips, html[data-theme="light"] .ht-role-tip {
   color: #334155;
 }
 .mp-fmm-poss-bar {
+  /* 底色 = 客队份额，填充 = 主队份额；两者都由 JS 按球衣色覆盖
+     （_applyPossessionBarKit）。这里只留中性兜底，不再写死红/灰，
+     否则没有球衣数据时会重现「主队红衣却显示浅灰」的对调观感。 */
   flex: 1;
   height: 10px;
   border-radius: 2px;
-  background: #c62828;
+  background: #94a3b8;
   overflow: hidden;
 }
 .mp-fmm-poss-bar > i {
   display: block;
   height: 100%;
   background: #e8eaed;
-  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  border-right: 2px solid rgba(15, 23, 42, 0.55);
   transition: width 0.35s ease;
 }
 .mp-fmm-dock-meta {
@@ -2910,12 +3286,10 @@ html[data-theme="dark"] .mp-fmm-dock {
   bottom: 6px;
   left: 6px;
 }
-/* 控球半场高亮默认更淡，减少脏感 */
-.fmm-match .mp-poss-half {
-  opacity: 0.22 !important;
-}
+/* Ball, carrier and live movement carry the hierarchy; remove duplicate direction washes. */
+.fmm-match .mp-poss-half,
 .fmm-match .mp-attack-arrow {
-  opacity: 0.35 !important;
+  display: none !important;
 }
 /* 角球状态：角旗微亮 + 禁区呼吸，让「角球」一眼可认 */
 .mp-field.mp-corner-active::before {
@@ -2986,21 +3360,10 @@ html[data-theme="dark"] .mp-fmm-dock {
   55% { transform: scale(0.97, 1.08); }
   100% { transform: scale(1, 1); filter: brightness(1); }
 }
-/* 入网轻闪：只提示球门区域，避免整块球场被颜色遮住。 */
-.mp-field.mp-goal-flash::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 12;
-  pointer-events: none;
-  background: radial-gradient(
-    ellipse 28% 16% at 50% var(--goal-flash-y, 8%),
-    rgba(255, 255, 255, 0.12) 0%,
-    rgba(255, 255, 255, 0.04) 36%,
-    transparent 62%
-  );
-  animation: mp-goal-flash 0.26s ease-out forwards;
-}
+/* 入网轻闪已改为独立元素 .mp-goal-flash-fx（见下方）。
+   原来这里是 .mp-field.mp-goal-flash::after，与 .mp-field.mp-replay-slow::after
+   （"慢镜"角标）抢同一个伪元素；进球时两个 class 同时挂着，后写的慢镜规则胜出，
+   结果闪光在进球那一刻恰好不显示。 */
 @keyframes mp-goal-flash {
   0% { opacity: 0; }
   30% { opacity: 1; }
@@ -3009,8 +3372,10 @@ html[data-theme="dark"] .mp-fmm-dock {
 /* 半场方向标签 */
 .mp-end-label {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  /* 原来是 left:50% 居中，正好落在球门口（43%–57%）上，而门将也站在那儿：
+     球门网 + 队名 + 门将圆点三层叠在同一小块区域。挪到端线左侧的空白角，
+     那里既不在球门带里，也不在大禁区（22%–78%）里。 */
+  left: 4%;
   z-index: 5;
   font-size: 0.55rem;
   font-weight: 900;
@@ -3092,23 +3457,9 @@ html[data-theme="dark"] .mp-fmm-dock {
 .mp-zone.away.pos-att { background: rgba(252, 165, 165, 0.2); }
 .mp-field.mp-pre .mp-zone,
 .mp-field.mp-paused .mp-zone { opacity: 0.32; }
-/* 替补席 */
-.mp-bench-lane {
-  position: absolute;
-  top: 12%;
-  bottom: 12%;
-  width: 7%;
-  z-index: 4;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 3px;
-  padding: 4px 2px;
-  pointer-events: auto;
-}
-.mp-bench-lane.home { left: -1.5%; }
-.mp-bench-lane.away { right: -1.5%; }
-.mp-bench-lane.empty { display: none; }
+/* 替补席：底栏横向排布，避免把号码误读成场上球员。
+   空的一侧保留占位：整条是五列网格，display:none 会让后面的元素前移一列，
+   把分隔线挤进替补席的位置。两边都空时由 .mp-bench-strip.empty 整条隐藏。 */
 .mp-bench-chip {
   display: flex;
   justify-content: center;
@@ -3117,11 +3468,11 @@ html[data-theme="dark"] .mp-fmm-dock {
 }
 .mp-bench-chip:hover { opacity: 1; transform: scale(1.08); }
 .mp-bench-dot {
-  width: 16px;
-  height: 16px;
+  width: 17px;
+  height: 17px;
   border-radius: 50%;
   border: 1.5px solid rgba(255, 255, 255, 0.75);
-  font-size: 0.48rem;
+  font-size: 0.5rem;
   font-weight: 900;
   display: grid;
   place-items: center;
@@ -3160,12 +3511,14 @@ html[data-theme="dark"] .mp-fmm-dock {
 .mp-field.mp-replay-slow::after {
   content: "慢镜";
   position: absolute;
-  /* 与 mp-goal-flash 共存时，必须清掉其 inset:0；否则小徽章会被拉成全场遮罩。 */
+  /* 这几条 auto 是历史包袱：以前入网闪光也画在 .mp-field::after 上并带 inset:0，
+     两者共存时小徽章会被拉成全场遮罩。闪光现在是独立元素，这里保留 auto 只为
+     防止将来又有别的规则给 ::after 加 inset。 */
   left: auto;
   bottom: auto;
   width: auto;
   height: auto;
-  top: 36px;
+  top: 8px;
   right: 8px;
   z-index: 13;
   font-size: 0.52rem;
@@ -3599,21 +3952,12 @@ html[data-theme="dark"] .mp-fmm-dock {
   outline-offset: -2px;
   box-shadow: inset 0 0 40px rgba(139, 92, 246, 0.18);
 }
-.mp-field.mp-replay::after {
-  content: "REPLAY";
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  z-index: 12;
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  color: rgba(233, 213, 255, 0.95);
-  background: rgba(76, 29, 149, 0.75);
-  padding: 0.15rem 0.4rem;
-  border-radius: 4px;
-  pointer-events: none;
-}
+/* 这里原有一条 .mp-field.mp-replay::after{content:"REPLAY"} 已删除，两个原因：
+   1) 与 .mp-replay-badge 元素重复——那个元素由 JS 控制，写的是「重播 / 角球」，
+      同一时刻画面右上角是英文 REPLAY、正上方是中文重播，等于同一状态两块角标；
+   2) 它和下面的 .mp-field.mp-replay-slow::after{content:"慢镜"} 抢同一个 ::after，
+      特异度相同而它在后面，导致回放+慢镜同时生效时「慢镜」永远画不出来。
+   现在 ::after 只归慢镜用，回放状态只保留本规则的描边。 */
 @keyframes mp-pop {
   from { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
   to { transform: translate(-50%, -50%) scale(1); opacity: 1; }
@@ -3896,9 +4240,9 @@ html[data-theme="light"] .mp-name {
 }
 .mp-ball {
   position: absolute;
-  width: 11px;
-  height: 11px;
-  margin: -5.5px 0 0 -5.5px;
+  width: 13px;
+  height: 13px;
+  margin: -6.5px 0 0 -6.5px;
   border-radius: 50%;
   background:
     radial-gradient(circle at 30% 28%, #ffffff 0 22%, #f8fafc 24% 48%, #e2e8f0 50% 100%);
@@ -3978,6 +4322,33 @@ html[data-theme="light"] .mp-name {
   42% { transform: scale(0.96, 1.04); opacity: 0.85; }
   70% { transform: scale(1.04, 1.06); opacity: 0.55; }
   100% { transform: scale(1, 1); opacity: 0; }
+}
+/* 入网轻闪：独立元素，只提示球门区域。
+   亮度/时长保持原来的克制值（0.12 / 0.26s）——加亮到 0.3 试过，太抢眼。
+   之所以从 .mp-field.mp-goal-flash::after 改成独立元素，是因为那个伪元素被
+   .mp-field.mp-replay-slow::after（"慢镜"角标）整条盖掉，进球时闪光根本不显示。 */
+.mp-goal-flash-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  pointer-events: none;
+  animation: mp-goal-flash 0.26s ease-out forwards;
+}
+.mp-goal-flash-fx.top {
+  background: radial-gradient(
+    ellipse 28% 16% at 50% 6%,
+    rgba(255, 255, 255, 0.12) 0%,
+    rgba(255, 255, 255, 0.04) 36%,
+    transparent 62%
+  );
+}
+.mp-goal-flash-fx.bottom {
+  background: radial-gradient(
+    ellipse 28% 16% at 50% 94%,
+    rgba(255, 255, 255, 0.12) 0%,
+    rgba(255, 255, 255, 0.04) 36%,
+    transparent 62%
+  );
 }
 .mp-goal-ring {
   position: absolute;
@@ -4066,10 +4437,10 @@ html[data-theme="light"] .mp-name {
   min-height: 240px;
 }
 .fmm-match .mp-dot {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
 }
-.fmm-match .mp-num { font-size: 0.78rem; }
+.fmm-match .mp-num { font-size: 0.7rem; }
 .fmm-match .mp-name {
   font-size: 0.5rem;
   max-width: 44px;
@@ -4103,19 +4474,20 @@ html[data-theme="light"] .mp-name {
   font-size: 0.62rem;
   padding: 0.12rem 0.32rem;
 }
-/* 镜头更稳：接近 FMM 全场观感 */
+/* JS already uses time-based interpolation; a second CSS transition adds camera lag. */
 .fmm-match .mp-camera {
-  transition: transform 0.35s ease-out;
+  transition: none;
 }
 
 @media (max-width: 520px) {
   .match-layout.fm-match.fmm-match { width: 100%; border-radius: 0; }
   .fmm-match .mp-field { min-height: 210px; }
-  .fmm-match .mp-dot { width: 24px; height: 24px; }
-  .fmm-match .mp-num { font-size: 0.68rem; }
+  .fmm-match .mp-dot { width: 22px; height: 22px; }
+  .fmm-match .mp-num { font-size: 0.64rem; }
   .fmm-match .mp-name { font-size: 0.46rem; max-width: 36px; }
-  .fmm-match .mp-ball { width: 10px; height: 10px; margin: -5px 0 0 -5px; }
+  .fmm-match .mp-ball { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; }
   .fmm-commentary { max-height: min(22vh, 150px); }
+  .fmm-commentary.is-collapsed { max-height: 2.25rem; }
   .fm-sb-name { font-size: 0.78rem; }
   .fm-sb-score { font-size: 1.45rem; }
   .fm-sb-comp { max-width: 6rem; font-size: 0.62rem; }
@@ -4127,7 +4499,16 @@ html[data-theme="light"] .mp-name {
   .fmm-match-bar .match-speed-bar .btn {
     font-size: 0.68rem;
     padding: 0.24rem 0.26rem;
-    min-width: 1.5rem;
+    min-width: 1.9rem;
+  }
+  .match-transport { flex-wrap: wrap; }
+  .fmm-match-bar .match-camera-bar {
+    flex: 1 0 100%;
+    justify-content: stretch;
+    order: 3;
+  }
+  .fmm-match-bar .match-camera-bar .btn {
+    flex: 1 1 0;
   }
   .fmm-match-bar .btn.icon-btn {
     width: 1.9rem;
@@ -4427,6 +4808,61 @@ html[data-theme="light"] .fm-com-log .event.ft {
   font-weight: 700;
   letter-spacing: 0;
 }
+.shape-usage-grid {
+  max-width: 40rem;
+  margin: 0 auto 0.9rem;
+}
+.shape-usage {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.shape-usage-total {
+  padding: 0.4rem 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+.shape-usage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 1.8rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.76rem;
+}
+.shape-usage-row span { color: var(--muted); }
+.shape-usage-row strong { font-variant-numeric: tabular-nums; }
+.shape-position-grid { margin-top: 0.25rem; }
+.analysis-average-position circle {
+  fill: #f8fafc;
+  stroke: #111827;
+  stroke-width: 0.7;
+}
+.analysis-average-position text {
+  fill: #111827;
+  font-size: 2.8px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+.shape-timeline-heading {
+  margin: 1rem 0 0.4rem;
+  font-size: 0.8rem;
+}
+.shape-timeline { border-bottom: 1px solid var(--border); }
+.shape-timeline-row {
+  display: grid;
+  grid-template-columns: 2.8rem minmax(5rem, 0.7fr) minmax(7rem, 0.9fr) minmax(11rem, 1.4fr) minmax(9rem, 1.2fr);
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.35rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.74rem;
+}
+.shape-timeline-row time { font-variant-numeric: tabular-nums; color: var(--muted); }
+.shape-timeline-row span,
+.shape-timeline-row small { color: var(--muted); }
+.shape-timeline-forms { color: var(--text) !important; font-variant-numeric: tabular-nums; }
 .analysis-empty {
   display: grid;
   place-items: center;
@@ -4440,6 +4876,15 @@ html[data-theme="light"] .fm-com-log .event.ft {
   .analysis-tabs { width: 100%; }
   .analysis-side-grid { gap: 0.5rem; }
   .analysis-compare-row { grid-template-columns: minmax(3.5rem, 1fr) minmax(7.5rem, 1.8fr) minmax(3.5rem, 1fr); }
+  .shape-timeline-row {
+    grid-template-columns: 2.6rem minmax(0, 1fr);
+    gap: 0.2rem 0.55rem;
+    padding: 0.45rem 0;
+  }
+  .shape-timeline-row time { grid-row: 1 / span 4; align-self: start; }
+  .shape-timeline-row strong,
+  .shape-timeline-row span,
+  .shape-timeline-row small { grid-column: 2; }
 }
 
 /* Modal */
@@ -6768,6 +7213,17 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
   min-height: 2rem;
 }
 .tab { padding: 0.3rem 0.72rem; font-size: 0.82rem; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 .topbar-more { position: relative; }
 .topbar-more > summary {
   list-style: none;
@@ -6801,6 +7257,10 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
   flex-shrink: 0;
 }
 .topbar-continue-main {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
   font-size: 0.85rem;
@@ -6808,6 +7268,16 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
   padding: 0.4rem 0.8rem;
   white-space: nowrap;
 }
+.topbar-continue-main[data-advance-busy]::before {
+  content: "";
+  width: 0.78rem;
+  height: 0.78rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: calendar-spin 0.8s linear infinite;
+}
+@keyframes calendar-spin { to { transform: rotate(360deg); } }
 /* 比赛日：换个色，一眼看出该踢球了 */
 .topbar-continue-main.is-matchday {
   background: var(--good);
@@ -6858,6 +7328,7 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
   gap: 1rem;
 }
 .dashboard-workbench-card { grid-column: 1 / -1; }
+.dashboard-onboarding-card { grid-column: 1 / -1; }
 .dashboard-match-card { grid-column: span 8; }
 .dashboard-pulse-card { grid-column: span 4; }
 .dashboard-operations-card { grid-column: span 8; }
@@ -6915,6 +7386,48 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
 .dashboard-workbench-status.warning { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 48%, var(--border)); }
 .dashboard-workbench-status.critical { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--border)); }
 .dashboard-priorities { display: grid; gap: 0.5rem; }
+
+/* 今日焦点:把最高优先级的一件事放大到行首,给整页一个“现在该干嘛”的主心骨。 */
+.dashboard-focus {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.9rem;
+  margin-bottom: 0.7rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--focus-tone, var(--primary)) 13%, var(--card)), var(--card));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--focus-tone, var(--primary)) 8%, transparent);
+}
+.dashboard-focus.critical { --focus-tone: var(--bad); }
+.dashboard-focus.warning { --focus-tone: var(--warn); }
+.dashboard-focus.info { --focus-tone: var(--primary); }
+.dashboard-focus-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.dashboard-focus-kicker {
+  display: block;
+  margin-bottom: 0.14rem;
+  color: var(--focus-tone, var(--primary));
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.dashboard-focus-title {
+  font-size: 1.08rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+.dashboard-focus-detail {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.dashboard-focus-action .btn { margin: 0; }
 .dashboard-priority-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -6958,6 +7471,7 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
   background: color-mix(in srgb, var(--good) 7%, var(--card));
 }
 .dashboard-priority-empty span { color: var(--muted); font-size: 0.78rem; }
+.dashboard-priority-empty-secondary { border-style: solid; color: var(--text); }
 .dashboard-workbench-foot {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
@@ -6989,6 +7503,59 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
 .dashboard-quick-icon { font-size: 1rem; }
 .dashboard-advance-summary,
 .dashboard-advance-empty { min-height: 4.5rem; }
+
+.dashboard-onboarding {
+  display: grid;
+  gap: 0.7rem;
+}
+.dashboard-onboarding-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.dashboard-onboarding-head h2 { margin: 0; }
+.dashboard-onboarding-progress {
+  flex: 0 0 auto;
+  padding: 0.22rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--primary);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+.dashboard-onboarding-intro {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.dashboard-onboarding-steps {
+  display: grid;
+  gap: 0.45rem;
+}
+.dashboard-onboarding-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg2);
+}
+.dashboard-onboarding-step.current {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 16%, transparent);
+}
+.dashboard-onboarding-step.done { opacity: 0.72; }
+.dashboard-onboarding-icon { font-size: 1.05rem; }
+.dashboard-onboarding-copy { min-width: 0; }
+.dashboard-onboarding-copy strong,
+.dashboard-onboarding-copy small { display: block; overflow-wrap: anywhere; }
+.dashboard-onboarding-copy small { margin-top: 0.14rem; color: var(--muted); font-size: 0.76rem; }
+.dashboard-onboarding-state { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
+.dashboard-onboarding-dismiss { justify-self: start; }
 .dashboard-advance-empty {
   display: grid;
   align-content: center;
@@ -7262,9 +7829,12 @@ html[data-theme="light"] ::-webkit-scrollbar-track {
   box-shadow: 1px 0 0 var(--border);
 }
 #squad-table thead th:first-child,
-#squad-table thead th:nth-child(2) { z-index: 4; }
+#squad-table thead th:nth-child(2) { z-index: 4; top: 0; position: sticky; }
+#squad-table thead th { position: sticky; top: 0; background: var(--card); }
+#squad-table thead th:nth-child(-n + 2) { z-index: 5; }
 #squad-table tr.me td:first-child,
 #squad-table tr.me td:nth-child(2) { background: color-mix(in srgb, var(--primary) 12%, var(--card)); }
+#squad-table thead th { color: var(--muted); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.02em; }
 
 .btn:focus-visible,
 .tab:focus-visible,
@@ -7319,6 +7889,7 @@ summary:focus-visible {
   .dashboard-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-layout > .card { grid-column: span 1; }
   .dashboard-workbench-card,
+  .dashboard-onboarding-card,
   .dashboard-match-card,
   .dashboard-operations-card,
   .dashboard-news-card { grid-column: 1 / -1 !important; }
@@ -7356,6 +7927,8 @@ summary:focus-visible {
   .dashboard-quick-actions { grid-template-columns: minmax(0, 1fr); }
   .dashboard-priority-item { grid-template-columns: auto minmax(0, 1fr); }
   .dashboard-issue-action { grid-column: 2; justify-self: start; }
+  .dashboard-onboarding-step { grid-template-columns: auto minmax(0, 1fr); }
+  .dashboard-onboarding-state { grid-column: 2; justify-self: start; white-space: normal; }
   .dashboard-ops-grid { grid-template-columns: minmax(0, 1fr); }
   .dashboard-match-card .next-match { min-height: 7rem; }
   .finance-budget-controls label { grid-template-columns: minmax(6.8rem, auto) minmax(5rem, 1fr) minmax(4rem, auto); }

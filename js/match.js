@@ -88,6 +88,7 @@ import {
   shouldStaffHandleMatchday,
 } from "./delegation.js";
 import {
+  applyCoachPhaseFormations,
   applyCoachTacticalIdentity,
   ensureCoachIdentity,
 } from "./manager-ecosystem.js";
@@ -104,6 +105,71 @@ function clubById(world, id) {
 }
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
+}
+
+function effectivePhaseFormation(tactics, key) {
+  const base = FORMATIONS[tactics?.formation] ? tactics.formation : "4-3-3";
+  return FORMATIONS[tactics?.[key]] ? tactics[key] : base;
+}
+
+function phaseShapeReason(source, plan, minute, scoreGap, changed) {
+  if (source === "player") return changed ? "manual-adjustment" : "manual-plan";
+  if (Number(plan?.facts?.adaptability || 0) < 5) return "coach-stable";
+  if (minute === 0 && plan?.selectionSuppressed) return "pre-match-guard";
+  if (scoreGap < 0) return "chasing-game";
+  if (scoreGap > 0) return "protecting-lead";
+  return changed ? "structural-review" : "shape-maintained";
+}
+
+function phaseShapeDecision(club, opponent, plan, options = {}) {
+  const tactics = club?.tactics || {};
+  const baseFormation = FORMATIONS[plan?.baseFormation]
+    ? plan.baseFormation
+    : (FORMATIONS[tactics.formation] ? tactics.formation : "4-3-3");
+  const possessionFormation = FORMATIONS[plan?.effectivePossessionFormation]
+    ? plan.effectivePossessionFormation
+    : effectivePhaseFormation(tactics, "possessionFormation");
+  const outOfPossessionFormation = FORMATIONS[plan?.effectiveOutOfPossessionFormation]
+    ? plan.effectiveOutOfPossessionFormation
+    : effectivePhaseFormation(tactics, "outOfPossessionFormation");
+  const minute = clamp(Math.round(Number(options.minute) || 0), 0, 90);
+  const scoreGap = Number(options.scoreGap) || 0;
+  const source = options.source === "player" ? "player" : "coach";
+  const changed = !!plan?.changed || !!options.changed;
+  return {
+    minute,
+    team: options.team || null,
+    teamId: club?.id || null,
+    trigger: options.trigger || (minute ? "review" : "pre-match"),
+    source,
+    reason: phaseShapeReason(source, plan, minute, scoreGap, changed),
+    changed,
+    selectionSuppressed: !!plan?.selectionSuppressed,
+    baseFormation,
+    possessionFormation,
+    outOfPossessionFormation,
+    scoreGap,
+    coachId: source === "coach" ? club?.staff?.coach?.id || null : null,
+    facts: plan?.facts || {
+      opponent: {
+        formation: opponent?.tactics?.formation || null,
+        possessionFormation: opponent?.tactics?.possessionFormation || null,
+        outOfPossessionFormation: opponent?.tactics?.outOfPossessionFormation || null,
+        width: Number(opponent?.tactics?.width) || 3,
+      },
+    },
+  };
+}
+
+function recordPhaseShapeDecision(state, club, opponent, plan, options = {}) {
+  if (!state || !club) return null;
+  if (!Array.isArray(state.phaseShapeTimeline)) state.phaseShapeTimeline = [];
+  const entry = phaseShapeDecision(club, opponent, plan, {
+    ...options,
+    team: club === state.home ? "home" : "away",
+  });
+  state.phaseShapeTimeline.push(entry);
+  return entry;
 }
 
 // ---------- 情境 ----------
@@ -662,6 +728,16 @@ export function createMatchSession(world, fixture, opts = {}) {
   // 用户保留手动/上次首发；AI 强制重排
   ensureMatchLineup(home, { forceAuto: home.id !== world.userClubId, day: world.day, importance, eligibleIds: homeEligibleIds });
   ensureMatchLineup(away, { forceAuto: away.id !== world.userClubId, day: world.day, importance, eligibleIds: awayEligibleIds });
+  const homeCoachShapes = home.id !== world.userClubId || isFullyDelegated(world, home, "tactics");
+  const awayCoachShapes = away.id !== world.userClubId || isFullyDelegated(world, away, "tactics");
+  const homeOpponentSnapshot = { id: away.id, power: away.power, tactics: { ...away.tactics } };
+  const awayOpponentSnapshot = { id: home.id, power: home.power, tactics: { ...home.tactics } };
+  const homePhasePlan = homeCoachShapes
+    ? applyCoachPhaseFormations(home, home.staff?.coach, { opponent: homeOpponentSnapshot })
+    : null;
+  const awayPhasePlan = awayCoachShapes
+    ? applyCoachPhaseFormations(away, away.staff?.coach, { opponent: awayOpponentSnapshot })
+    : null;
   // 主客都保证有核心（用户已指定则保留；AI / 未指定则自动选进攻最强的）
   // 避免「只有用户队会回撤内切/绝对进攻权」的单方面表现
   ensureCorePlayer(home);
@@ -712,6 +788,7 @@ export function createMatchSession(world, fixture, opts = {}) {
     matchSeed,
     previousRandom,
     random,
+    importance,
     derby,
     bigMatch,
     events: [],
@@ -742,6 +819,20 @@ export function createMatchSession(world, fixture, opts = {}) {
       home: [...(home.tactics.lineup || [])],
       away: [...(away.tactics.lineup || [])],
     },
+    phaseShapeTimeline: [
+      phaseShapeDecision(home, awayOpponentSnapshot, homePhasePlan, {
+        team: "home",
+        minute: 0,
+        trigger: "pre-match",
+        source: homeCoachShapes ? "coach" : "player",
+      }),
+      phaseShapeDecision(away, homeOpponentSnapshot, awayPhasePlan, {
+        team: "away",
+        minute: 0,
+        trigger: "pre-match",
+        source: awayCoachShapes ? "coach" : "player",
+      }),
+    ],
   };
 
   recomputeSides(state);
@@ -1364,6 +1455,7 @@ async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighl
   period.frames = null;
 
   if (state.simEngineMeta) {
+    state.simEngineMeta.integration = state.simEng.integrationSummary();
     state.simEngineMeta.halves.push({
       tStart,
       tEnd,
@@ -1405,13 +1497,24 @@ async function simulatePeriodWithSim(state, fromMin, toMin, { onEvent, playHighl
         }
         recomputeSides(state);
       }
-      if (!silent && onEvent) {
-        const snap = liveSnap(state, minute, null);
-        // 分钟边界事件也要带模拟时刻，直播数据条才能按画面进度切片统计。
-        snap.simT = minute * 60;
-        for (const ev of state.events.slice(mark)) {
-          ev._simLive = true;
-          onEvent(ev, snap);
+      if (onEvent) {
+        // 跳过平淡时段时 silent=true，旧实现把这一分钟产生的事件全部咽掉——
+        // 换人/黄红牌/伤停恰恰多半发生在平淡段里，于是整场看不到一次换人播报，
+        // 球员却在场上悄悄换了。这类「必须让人知道」的事件即使在跳过段也要播，
+        // 其余流水账（抢断/拦截等）继续静默。
+        const ANNOUNCE_WHEN_SKIPPING = ["sub", "card", "red", "injury"];
+        const fresh = state.events.slice(mark);
+        const list = silent
+          ? fresh.filter((ev) => ANNOUNCE_WHEN_SKIPPING.includes(ev.type))
+          : fresh;
+        if (list.length) {
+          const snap = liveSnap(state, minute, null);
+          // 分钟边界事件也要带模拟时刻，直播数据条才能按画面进度切片统计。
+          snap.simT = minute * 60;
+          for (const ev of list) {
+            ev._simLive = true;
+            onEvent(ev, snap);
+          }
         }
       }
     };
@@ -1569,6 +1672,7 @@ function simulatePeriodWithSimSync(state, fromMin, toMin) {
     byMin[minute].push({ kind: "flavor", ...f, minute });
   }
   if (state.simEngineMeta) {
+    state.simEngineMeta.integration = state.simEng.integrationSummary();
     state.simEngineMeta.halves.push({
       tStart,
       tEnd,
@@ -2033,6 +2137,8 @@ export function aiHalfTime(state) {
       tempo: t.tempo,
       width: t.width,
       defensiveLine: t.defensiveLine,
+      possessionFormation: t.possessionFormation ?? null,
+      outOfPossessionFormation: t.outOfPossessionFormation ?? null,
     };
     let reason = "比分与场上结构稳定，保持原计划";
     if (myG < opG) {
@@ -2049,6 +2155,18 @@ export function aiHalfTime(state) {
       t.tempo = Math.max(1, (t.tempo || 3) - 1);
       reason = "两球以上领先，降低比赛风险并保护体能";
     }
+    const opponent = club === state.home ? state.away : state.home;
+    const phasePlan = applyCoachPhaseFormations(club, club.staff?.coach, {
+      opponent,
+      scoreGap: myG - opG,
+      minute: 45,
+    });
+    recordPhaseShapeDecision(state, club, opponent, phasePlan, {
+      minute: 45,
+      trigger: "half-time",
+      source: "coach",
+      scoreGap: myG - opG,
+    });
     // 换下疲劳/受伤
     const sk = sideKey(state, club);
     const xi = activeXi(state, club);
@@ -2062,13 +2180,17 @@ export function aiHalfTime(state) {
         state,
         45,
         "coach",
-        `🧠 主教练中场决定：${changed ? `${t.formation} · ${styleLabel(t.style)} · 压迫 ${t.pressing} · 节奏 ${t.tempo}` : "维持现有战术"}。${reason}`,
+        `🧠 主教练中场决定：${changed ? `${t.formation} · 持球 ${phasePlan.effectivePossessionFormation} · 无球 ${phasePlan.effectiveOutOfPossessionFormation} · ${styleLabel(t.style)} · 压迫 ${t.pressing} · 节奏 ${t.tempo}` : "维持现有战术"}。${reason}`,
         {
           teamId: club.id,
           managedDecision: true,
           phase: "ht",
           reason,
           tactics: { ...t },
+          phaseShapes: {
+            possession: phasePlan.effectivePossessionFormation,
+            outOfPossession: phasePlan.effectiveOutOfPossessionFormation,
+          },
         }
       );
     }
@@ -2100,6 +2222,26 @@ function coachInMatchReview(state, minute) {
       decisions.push("比分领先，降低风险并保护体能");
     }
 
+    const opponent = club === state.home ? state.away : state.home;
+    const phasePlan = applyCoachPhaseFormations(club, club.staff?.coach, {
+      opponent,
+      scoreGap,
+      minute,
+    });
+    recordPhaseShapeDecision(state, club, opponent, phasePlan, {
+      minute,
+      trigger: "review",
+      source: "coach",
+      scoreGap,
+    });
+    if (phasePlan.changed) {
+      decisions.push(`调整阶段阵型为持球 ${phasePlan.effectivePossessionFormation}、无球 ${phasePlan.effectiveOutOfPossessionFormation}`);
+    }
+
+    // 换人事件由 aiAutoSub 在循环里逐条 push，而「主教练评估」文案要等决定
+    // 全部做完才能拼出来。按追加顺序写日志的话，读到的是「换人完成」在前、
+    // 「教练决定换人」在后，因果颠倒。先记下插入点，最后把评估条插回这里。
+    const reviewMark = state.events.length;
     const targetCount = aiSubTargetCount(state, club, minute, scoreGap);
     const replaced = [];
     while (state.subsUsed[sk] < targetCount) {
@@ -2122,12 +2264,18 @@ function coachInMatchReview(state, minute) {
     if (!decisions.length) decisions.push("维持场上阵容，继续观察");
 
     if (managedUser) {
-      pushEv(state, minute, "coach", `🧠 ${minute}' 主教练评估：${decisions.join("；")}`, {
-        teamId: club.id,
-        managedDecision: true,
-        phase: "matchday",
+      const reviewEv = pushEv(
+        state,
         minute,
-      });
+        "coach",
+        `🧠 ${minute}' 主教练评估：${decisions.join("；")}`,
+        { teamId: club.id, managedDecision: true, phase: "matchday", minute }
+      );
+      // 挪到本轮换人之前：先看到教练的决定，再看到换人落地。
+      if (state.events[state.events.length - 1] === reviewEv) {
+        state.events.pop();
+        state.events.splice(reviewMark, 0, reviewEv);
+      }
     }
     recomputeSides(state);
   }
@@ -2232,6 +2380,14 @@ export function applyUserHalfTime(state, orders = {}) {
       }
     );
     msgs.push(formChanged ? "阵型与战术已更新" : "战术已更新");
+    const opponent = club === state.home ? state.away : state.home;
+    recordPhaseShapeDecision(state, club, opponent, null, {
+      minute: 45,
+      trigger: "half-time",
+      source: "player",
+      changed: true,
+      scoreGap: club === state.home ? state.hg - state.ag : state.ag - state.hg,
+    });
   }
   for (const s of orders.subs || []) {
     const res = applySubstitution(state, club, s.outId, s.inId, 46);
@@ -2405,6 +2561,14 @@ export function applyLiveTactics(state, orders = {}) {
       formationChanged: formChanged,
     }
   );
+  const opponent = club === state.home ? state.away : state.home;
+  recordPhaseShapeDecision(state, club, opponent, null, {
+    minute,
+    trigger: "live",
+    source: "player",
+    changed: true,
+    scoreGap: club === state.home ? state.hg - state.ag : state.ag - state.hg,
+  });
   recomputeSides(state);
   return {
     ok: true,
@@ -2674,6 +2838,10 @@ function buildReport(state, { compactAnalysis = false } = {}) {
         compact: compactAnalysis,
       })
     : null;
+  const spatialShapeEvidence = state.spatialShapeEvidence
+    || (typeof state.simEng?.tacticalShapeEvidence === "function"
+      ? state.simEng.tacticalShapeEvidence({ compact: compactAnalysis })
+      : null);
   return {
     matchSeed: state.matchSeed,
     engine: state.simEng ? "spatial-v2" : "probability-v1",
@@ -2737,6 +2905,11 @@ function buildReport(state, { compactAnalysis = false } = {}) {
       })),
     ratings: state.matchRatings || null,
     analysis,
+    phaseShapes: {
+      version: 1,
+      timeline: Array.isArray(state.phaseShapeTimeline) ? state.phaseShapeTimeline : [],
+      usage: spatialShapeEvidence,
+    },
     narrative,
     ticketIncome: state.ticketIncome != null ? state.ticketIncome : null,
     matchdayRetailIncome: state.matchdayRetailIncome || 0,
@@ -3335,6 +3508,8 @@ const PREPARED_MATCH_STATE_FIELDS = Object.freeze([
   "teamTalkMods",
   "teamTalks",
   "startingLineups",
+  "phaseShapeTimeline",
+  "spatialShapeEvidence",
   "minute",
   "preMatchStrength",
   "homeAtk",
@@ -3418,6 +3593,11 @@ function runMatchSimulationSync(state, opts = {}) {
 }
 
 function serializePreparedMatch(state, { completed = false } = {}) {
+  if (completed && typeof state.simEng?.tacticalShapeEvidence === "function") {
+    state.spatialShapeEvidence = state.simEng.tacticalShapeEvidence({
+      compact: state.simulationProfile === "background",
+    });
+  }
   const fields = {};
   for (const key of PREPARED_MATCH_STATE_FIELDS) {
     if (state[key] !== undefined) fields[key] = state[key];
@@ -3471,6 +3651,25 @@ function compactBackgroundAnalysis(analysis) {
 function compactBackgroundReport(report) {
   if (!report) return report;
   report.analysis = compactBackgroundAnalysis(report.analysis);
+  if (report.phaseShapes) {
+    report.phaseShapes.timeline = (report.phaseShapes.timeline || []).map((entry) => ({
+      minute: entry.minute,
+      team: entry.team,
+      trigger: entry.trigger,
+      source: entry.source,
+      reason: entry.reason,
+      changed: !!entry.changed,
+      selectionSuppressed: !!entry.selectionSuppressed,
+      baseFormation: entry.baseFormation,
+      possessionFormation: entry.possessionFormation,
+      outOfPossessionFormation: entry.outOfPossessionFormation,
+      scoreGap: entry.scoreGap || 0,
+    }));
+    for (const side of [report.phaseShapes.usage?.home, report.phaseShapes.usage?.away]) {
+      if (side) delete side.averagePositions;
+    }
+    if (report.phaseShapes.usage) report.phaseShapes.usage.compact = true;
+  }
   if (report.ratings) {
     report.ratings = { motm: report.ratings.motm || null, compact: true };
   }

@@ -1,6 +1,21 @@
 /** 国家队：征召、国际赛事与个人国际数据。 */
 
 import { NATIONALITIES, DIVISIONS } from "./data.js";
+import { diagnoseInjury, injuryRiskMultiplier } from "./injuries.js";
+
+/**
+ * 每名整场出战球员的单场伤病基准概率。
+ *
+ * 与俱乐部比赛同量级：`match.js` 的 `tryInjury` 每分钟以 0.005 抽一次、
+ * 每次随机选一队，90 分钟约合每队每场 0.22 次，摊到 11 人即约 0.02/人。
+ * 征召之所以更让俱乐部头疼，不是这里的基准更高，而是国家队没有俱乐部的
+ * 队医与康复设施减免（`doctorInjuryMod` / `trainingInjuryMod`），
+ * 再加上长途奔波的额外体能消耗。
+ */
+const CALLUP_INJURY_BASE = 0.02;
+
+/** 长途奔波带来的额外体能消耗，叠加在与俱乐部比赛同量级的基础消耗之上。 */
+const INTL_TRAVEL_DRAIN = 2;
 
 const EUROPEAN_CODES = new Set([
   "ENG",
@@ -690,7 +705,37 @@ function addNationResult(competition, home, away, ga, gb) {
   }
 }
 
-function simIntlMatch(xiA, xiB) {
+/**
+ * 征召的俱乐部代价：整场出战的球员消耗体能并承担一次伤病判定。
+ *
+ * 体能消耗与 `match.js` 的 `drainFitness` 同量级（4–9），另加长途奔波的
+ * 固定项；下限与俱乐部比赛一致取 35。伤病沿用 `injuries.js` 既有的诊断与
+ * 复发风险，不新增伤病类型，也不写入任何能力或胜率修正。
+ *
+ * @returns {Array<{player: Object, injury: Object}>} 本场因征召受伤的球员
+ */
+function applyCallupCost(world, xi) {
+  const injuries = [];
+  for (const p of xi) {
+    const drain = 4 + Math.floor(rng() * 6) + INTL_TRAVEL_DRAIN;
+    p.fitness = Math.round(Math.max(35, (p.fitness ?? 100) - drain));
+
+    const risk = CALLUP_INJURY_BASE * (p.fitness < 55 ? 1.6 : 1) * injuryRiskMultiplier(p);
+    if (!chance(risk)) continue;
+    const injury = diagnoseInjury(p, {
+      cause: p.fitness < 62 ? "fatigue" : "contact",
+      day: world.day,
+      season: world.season,
+      random: rng,
+    });
+    // 与俱乐部比赛伤退一致：带伤离场的球员体能封顶 45
+    p.fitness = Math.round(Math.min(p.fitness, 45));
+    injuries.push({ player: p, injury });
+  }
+  return injuries;
+}
+
+function simIntlMatch(world, xiA, xiB) {
   const sa = xiStrength(xiA) || 10;
   const sb = xiStrength(xiB) || 10;
   const xgA = Math.max(0.3, (sa / Math.max(sb, 1)) * 1.2);
@@ -731,6 +776,8 @@ function simIntlMatch(xiA, xiB) {
     ensureIntl(p).caps++;
     p.morale = Math.min(100, (p.morale || 70) + 2);
   }
+  // 出场的代价与荣誉同时结算：先记出场数与士气，再扣体能并判伤。
+  const injuries = [...applyCallupCost(world, xiA), ...applyCallupCost(world, xiB)];
   const gkA = xiA.find((p) => p.pos === "GK");
   const gkB = xiB.find((p) => p.pos === "GK");
   if (gkA) {
@@ -741,7 +788,7 @@ function simIntlMatch(xiA, xiB) {
     ensureIntl(gkB).goalsConceded += ga;
     if (ga === 0) ensureIntl(gkB).cleanSheets++;
   }
-  return { ga, gb, scorersA, scorersB, assistsA, assistsB, xiA, xiB };
+  return { ga, gb, scorersA, scorersB, assistsA, assistsB, xiA, xiB, injuries };
 }
 
 function playerById(world, id) {
@@ -756,7 +803,7 @@ function recordMatch(world, competition, codeA, codeB, roundLabel, knockout = fa
   const entries = playersByNation(world);
   const xiA = pickXi(world, codeA, entries.get(codeA) || []);
   const xiB = pickXi(world, codeB, entries.get(codeB) || []);
-  const result = simIntlMatch(xiA, xiB);
+  const result = simIntlMatch(world, xiA, xiB);
   const match = {
     id: uid("intl_match"),
     competitionId: competition.id,
@@ -782,6 +829,15 @@ function recordMatch(world, competition, codeA, codeB, roundLabel, knockout = fa
       home: result.assistsA.map((id) => playerSnapshot(playerById(world, id) || { id, name: id, nationality: codeA })),
       away: result.assistsB.map((id) => playerSnapshot(playerById(world, id) || { id, name: id, nationality: codeB })),
     },
+    // 征召代价与比赛结果存在同一条记录里，战报、信箱和审计读同一份事实。
+    callupInjuries: result.injuries.map(({ player, injury }) => ({
+      playerId: player.id,
+      playerName: player.name,
+      nationality: player.nationality || null,
+      label: injury.label,
+      labelEn: injury.labelEn,
+      days: injury.totalDays,
+    })),
   };
   if (knockout && match.homeGoals === match.awayGoals) {
     const homePen = 3 + Math.floor(rng() * 3);
@@ -886,6 +942,7 @@ function appendInternationalNews(world, competition, matches) {
       const score = isHome
         ? `${match.homeGoals}-${match.awayGoals}`
         : `${match.awayGoals}-${match.homeGoals}`;
+      const hurt = (match.callupInjuries || []).find((item) => item.playerId === id) || null;
       callups.push({
         player,
         nation: isHome ? match.home : match.away,
@@ -893,12 +950,20 @@ function appendInternationalNews(world, competition, matches) {
         assists,
         opponent: isHome ? match.away : match.home,
         score,
+        fitness: Math.round(Number(player.fitness ?? 100)),
+        injury: hurt,
       });
       const detail = [`出场`, goals ? `${goals}球` : "", assists ? `${assists}助` : ""].filter(Boolean).join(" · ");
       world.news.unshift({
         day: world.day,
-        text: `🌍 ${competition.name}：${player.name}（${nationFlag(player.nationality)}${nationName(player.nationality)}）对阵 ${nationName(isHome ? match.away : match.home)} ${score}，${detail}`,
+        text: `🌍 ${competition.name}：${player.name}（${nationFlag(player.nationality)}${nationName(player.nationality)}）对阵 ${nationName(isHome ? match.away : match.home)} ${score}，${detail}，回队体能 ${Math.round(Number(player.fitness ?? 100))}`,
       });
+      if (hurt) {
+        world.news.unshift({
+          day: world.day,
+          text: `🏥 ${player.name} 在国家队比赛中${hurt.label}，预计缺席约 ${hurt.days} 天`,
+        });
+      }
     }
   }
   if (competition.completed && competition.champion) {
@@ -916,7 +981,7 @@ export function runInternationalBreak(world) {
   const byNation = playersByNation(world);
   const nations = [...byNation.entries()].filter(([code, list]) => pickXi(world, code, list).length >= 6);
   world.lastIntlDay = world.day;
-  if (nations.length < 2) return { matches: 0, callups: [] };
+  if (nations.length < 2) return { matches: 0, callups: [], injuries: [] };
 
   let competition = state.competitions[state.activeCompetitionId] || ensureSeasonCompetition(world);
   if (competition.completed) {
@@ -933,7 +998,8 @@ export function runInternationalBreak(world) {
   }
   const matches = state.matches.slice(before);
   const callups = appendInternationalNews(world, competition, matches);
-  return { matches: matches.length, callups };
+  const injuries = matches.flatMap((match) => match.callupInjuries || []);
+  return { matches: matches.length, callups, injuries };
 }
 
 export function internationalLeaders(world, competitionId) {

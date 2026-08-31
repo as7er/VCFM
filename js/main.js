@@ -26,6 +26,7 @@ import {
   teamTalkDesc,
 } from "./data.js";
 import { ensureMedia, mediaSeasonKickoff } from "./media.js";
+import { ensureDistinctClubPlayerNames } from "./models.js";
 import {
   nextDisplayedMinute,
   PENALTY_SETUP_SEC,
@@ -48,6 +49,7 @@ import {
   roleSuitability,
   rolesForDetailedPosition,
 } from "./player-roles.js";
+import { teamShapeSummary } from "./team-shapes.js";
 import {
   availableHabitTraining,
   cancelHabitTraining,
@@ -55,8 +57,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=216";
-import { clubCrestHtml } from "./club-crest.js?v=216";
+import { nationFlagHtml } from "./flags.js?v=238";
+import { clubCrestHtml } from "./club-crest.js?v=238";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -149,6 +151,7 @@ import {
   assignSquadNumbers,
   kitBackground,
   ensurePlayerNumber,
+  numberPreferenceLabel,
   swapLineupSlots,
   setLineupSlot,
   ensureLineupRoles,
@@ -315,7 +318,12 @@ import {
   ensureDiscipline,
   isAvailable,
 } from "./engine.js";
-import { ensureClubSquadPlan } from "./squad-planning.js?v=216";
+import {
+  ensureClubSquadPlan,
+  selectPlannedSaleCandidate,
+  squadPlayerPlan,
+  squadPositionPlan,
+} from "./squad-planning.js?v=238";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -367,6 +375,7 @@ import {
   SLOT_COUNT,
   exportSaveDownload,
   importSaveText,
+  initializeSaveStorage,
   migrateLegacySave,
   clearSave,
 } from "./save.js";
@@ -381,8 +390,15 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=216";
+} from "./avatar.js?v=238";
 import { attributeArchetypeLabel } from "./player-attributes.js";
+import {
+  MANAGER_ONBOARDING_TAB_STEPS,
+  completeManagerOnboardingStep,
+  dismissManagerOnboarding,
+  ensureManagerOnboarding,
+  managerOnboardingView,
+} from "./manager-onboarding.js";
 
 /** DOM 更新后对齐正式肖像球衣主色（debounced） */
 let _avatarHydrateTimer = 0;
@@ -474,7 +490,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=216").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=238").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -813,6 +829,11 @@ let matchSpeed = (() => {
   if (!MATCH_SPEEDS.includes(raw)) return 1;
   return raw;
 })();
+const MATCH_CAMERAS = ["full", "tv", "tactical"];
+let matchCamera = (() => {
+  const raw = readPref("vcfm-match-camera", null, "tv");
+  return MATCH_CAMERAS.includes(raw) ? raw : "tv";
+})();
 /** 导出提醒：上次导出时间戳 */
 const EXPORT_TIP_KEY = "vcfm-last-export";
 const OLD_EXPORT_TIP_KEY = "vc-fm-last-export";
@@ -862,6 +883,285 @@ const screens = {
 function showScreen(name) {
   Object.values(screens).forEach((el) => el.classList.remove("active"));
   screens[name].classList.add("active");
+}
+
+const motionReviewState = {
+  clip: null,
+  index: 0,
+  timer: 0,
+  resumePlayback: false,
+  returnFocus: null,
+};
+
+function safeMotionColor(value, fallback) {
+  return /^#[0-9a-f]{3,8}$/i.test(String(value || "")) ? value : fallback;
+}
+
+function motionIncidentLabel(type, en = getLang() === "en") {
+  const labels = en
+    ? {
+        "invalid-coordinate": "Invalid coordinate",
+        "player-teleport": "Player displacement",
+        "player-acceleration": "Acceleration spike",
+        "player-oscillation": "Direction oscillation",
+        "player-target-churn": "Run target churn",
+        "player-overlap": "Persistent overlap",
+        "support-target-crowding": "Support target crowding",
+        "owner-ball-gap": "Owner/ball separation",
+        "ball-teleport": "Ball displacement",
+        "display-divergence": "Engine/display divergence",
+      }
+    : {
+        "invalid-coordinate": "坐标越界",
+        "player-teleport": "球员异常位移",
+        "player-acceleration": "加速度突变",
+        "player-oscillation": "方向反复切换",
+        "player-target-churn": "跑位目标反复",
+        "player-overlap": "持续重叠",
+        "support-target-crowding": "接应目标拥挤",
+        "owner-ball-gap": "持球人与球分离",
+        "ball-teleport": "球异常位移",
+        "display-divergence": "引擎与画面偏离",
+      };
+  return labels[type] || type || (en ? "Motion incident" : "运动异常");
+}
+
+function motionIncidentValue(incident, en = getLang() === "en") {
+  if (Number.isFinite(Number(incident.speedMps))) return `${Number(incident.speedMps).toFixed(1)} m/s`;
+  if (Number.isFinite(Number(incident.accelerationMps2))) return `${Number(incident.accelerationMps2).toFixed(1)} m/s²`;
+  if (Number.isFinite(Number(incident.gapMetres))) return `${Number(incident.gapMetres).toFixed(2)} m`;
+  if (Number.isFinite(Number(incident.distanceMetres))) return `${Number(incident.distanceMetres).toFixed(2)} m`;
+  if (Number.isFinite(Number(incident.turns))) return en ? `${incident.turns} turns` : `${incident.turns} 次转向`;
+  if (Number.isFinite(Number(incident.changes))) return en ? `${incident.changes} changes` : `${incident.changes} 次改跑`;
+  return incident.entityId || "";
+}
+
+function motionPitchSvg(frame, metadata = {}) {
+  const homeColor = safeMotionColor(metadata.home?.color, "#22c55e");
+  const awayColor = safeMotionColor(metadata.away?.color, "#ef4444");
+  const targets = (frame?.players || []).map((player) => {
+    if (!player.movementTarget || player.sentOff) return "";
+    const x = Math.max(1, Math.min(99, Number(player.x) || 0));
+    const y = Math.max(1, Math.min(99, Number(player.y) || 0));
+    const tx = Math.max(1, Math.min(99, Number(player.movementTarget.x) || 0));
+    const ty = Math.max(1, Math.min(99, Number(player.movementTarget.y) || 0));
+    const color = player.team === "home" ? homeColor : awayColor;
+    return `<g class="motion-target"><line x1="${x}" y1="${y}" x2="${tx}" y2="${ty}" stroke="${color}" stroke-width=".42" stroke-dasharray="1.5 1.2" opacity=".72"/><circle cx="${tx}" cy="${ty}" r=".72" fill="none" stroke="${color}" stroke-width=".42" opacity=".9"/></g>`;
+  }).join("");
+  const players = (frame?.players || []).map((player) => {
+    const x = Math.max(1, Math.min(99, Number(player.x) || 0));
+    const y = Math.max(1, Math.min(99, Number(player.y) || 0));
+    const color = player.team === "home" ? homeColor : awayColor;
+    const number = Number.isFinite(Number(player.num)) ? String(player.num) : "";
+    const opacity = player.sentOff ? 0.28 : 1;
+    return `<g opacity="${opacity}"><circle cx="${x}" cy="${y}" r="2.45" fill="${color}" stroke="#f8fafc" stroke-width="0.55"/><text x="${x}" y="${y + 0.78}" text-anchor="middle" fill="#fff" font-size="2.15" font-weight="800">${escapeHtml(number)}</text></g>`;
+  }).join("");
+  const ballX = Math.max(0.7, Math.min(99.3, Number(frame?.ball?.x) || 0));
+  const ballY = Math.max(0.7, Math.min(99.3, Number(frame?.ball?.y) || 0));
+  const ball = `<circle cx="${ballX}" cy="${ballY}" r="1.15" fill="#fff" stroke="#111827" stroke-width="0.65"/>`;
+  return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+    <rect x="1" y="1" width="98" height="98" fill="#17633a" stroke="rgba(255,255,255,.82)" stroke-width=".55"/>
+    <line x1="1" y1="50" x2="99" y2="50" stroke="rgba(255,255,255,.72)" stroke-width=".45"/>
+    <circle cx="50" cy="50" r="9.15" fill="none" stroke="rgba(255,255,255,.72)" stroke-width=".45"/>
+    <rect x="20" y="1" width="60" height="16" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
+    <rect x="35" y="1" width="30" height="6" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
+    <rect x="20" y="83" width="60" height="16" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
+    <rect x="35" y="93" width="30" height="6" fill="none" stroke="rgba(255,255,255,.7)" stroke-width=".45"/>
+    ${targets}${players}${ball}
+  </svg>`;
+}
+
+function stopMotionReviewPlayback() {
+  if (motionReviewState.timer) window.clearInterval(motionReviewState.timer);
+  motionReviewState.timer = 0;
+  const button = $("#btn-motion-review-play");
+  if (button) {
+    button.innerHTML = '<span aria-hidden="true">▶</span>';
+    button.title = getLang() === "en" ? "Play" : "播放";
+    button.setAttribute("aria-label", button.title);
+  }
+}
+
+function renderMotionReviewFrame(index = motionReviewState.index) {
+  const clip = motionReviewState.clip;
+  if (!clip?.frames?.length) return;
+  const frameIndex = Math.max(0, Math.min(clip.frames.length - 1, Number(index) || 0));
+  motionReviewState.index = frameIndex;
+  const frame = clip.frames[frameIndex];
+  const enginePitch = $("#match-motion-engine-pitch");
+  const displayPitch = $("#match-motion-display-pitch");
+  if (enginePitch) enginePitch.innerHTML = motionPitchSvg(frame.engine, clip.metadata);
+  if (displayPitch) displayPitch.innerHTML = motionPitchSvg(frame.display, clip.metadata);
+  const range = $("#match-motion-review-range");
+  if (range) {
+    range.max = String(Math.max(0, clip.frames.length - 1));
+    range.value = String(frameIndex);
+  }
+  const time = $("#match-motion-review-time");
+  if (time) time.textContent = `${Number(frame.t || 0).toFixed(2)}s`;
+  const count = $("#match-motion-review-frame");
+  if (count) count.textContent = `${frameIndex + 1} / ${clip.frames.length}`;
+
+  const incidentsRoot = $("#match-motion-review-incidents");
+  if (incidentsRoot) {
+    const incidents = clip.incidents || [];
+    const en = getLang() === "en";
+    incidentsRoot.innerHTML = incidents.length
+      ? incidents.map((incident) => {
+          const nearest = clip.frames.reduce((best, candidate, candidateIndex) =>
+            Math.abs(Number(candidate.t) - Number(incident.t)) < best.distance
+              ? { index: candidateIndex, distance: Math.abs(Number(candidate.t) - Number(incident.t)) }
+              : best,
+          { index: 0, distance: Infinity });
+          const active = nearest.index === frameIndex;
+          return `<button type="button" class="motion-review-incident${active ? " active" : ""}" data-motion-frame="${nearest.index}" data-severity="${escapeHtml(incident.severity || "warning")}">
+            <time>${Number(incident.t || 0).toFixed(2)}s</time>
+            <strong>${escapeHtml(motionIncidentLabel(incident.type, en))}</strong>
+            <span>${escapeHtml(motionIncidentValue(incident, en))}</span>
+          </button>`;
+        }).join("")
+      : `<div class="motion-review-empty">${en ? "No automatic incident in this clip" : "该片段没有自动异常标记"}</div>`;
+  }
+}
+
+function toggleMotionReviewPlayback() {
+  const clip = motionReviewState.clip;
+  if (!clip?.frames?.length) return;
+  if (motionReviewState.timer) {
+    stopMotionReviewPlayback();
+    return;
+  }
+  const button = $("#btn-motion-review-play");
+  if (button) {
+    button.innerHTML = '<span aria-hidden="true">⏸</span>';
+    button.title = getLang() === "en" ? "Pause" : "暂停";
+    button.setAttribute("aria-label", button.title);
+  }
+  if (motionReviewState.index >= clip.frames.length - 1) motionReviewState.index = 0;
+  motionReviewState.timer = window.setInterval(() => {
+    if (motionReviewState.index >= clip.frames.length - 1) {
+      stopMotionReviewPlayback();
+      return;
+    }
+    renderMotionReviewFrame(motionReviewState.index + 1);
+  }, 80);
+}
+
+function motionClipFileName(clip) {
+  const fixture = String(clip?.metadata?.fixtureId || "match").replace(/[^a-z0-9_-]+/gi, "-");
+  const at = Number(clip?.range?.to);
+  return `vcfm-motion-${fixture}-${Number.isFinite(at) ? at.toFixed(1) : "clip"}.json`;
+}
+
+function downloadMotionClip(clip) {
+  if (!clip?.frames?.length) return false;
+  const blob = new Blob([JSON.stringify(clip, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = motionClipFileName(clip);
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  return true;
+}
+
+export function showMotionDiagnostic(clip, options = {}) {
+  if (!clip?.frames?.length) return false;
+  stopMotionReviewPlayback();
+  motionReviewState.clip = clip;
+  motionReviewState.index = Math.max(0, clip.frames.length - 1);
+  motionReviewState.returnFocus = document.activeElement;
+  motionReviewState.resumePlayback = !!(matchPlayback.controlsEnabled && !matchPlayback.paused);
+  if (motionReviewState.resumePlayback) {
+    matchPlayback.paused = true;
+    matchView?.setFrozen?.(true);
+    updateMatchPlaybackUI();
+  }
+  const en = getLang() === "en";
+  const root = $("#match-motion-review");
+  root?.classList.remove("hidden");
+  const title = $("#match-motion-review-title");
+  if (title) title.textContent = en ? "Motion clip diagnostics" : "运动片段诊断";
+  const meta = $("#match-motion-review-meta");
+  if (meta) {
+    const home = clip.metadata?.home?.name || clip.metadata?.home?.id || (en ? "Home" : "主队");
+    const away = clip.metadata?.away?.name || clip.metadata?.away?.id || (en ? "Away" : "客队");
+    meta.textContent = `${home} - ${away} · seed ${clip.metadata?.matchSeed ?? "—"}`;
+  }
+  const engineLabel = $("#motion-engine-label");
+  const displayLabel = $("#motion-display-label");
+  if (engineLabel) engineLabel.textContent = en ? "Engine coordinates" : "引擎坐标";
+  if (displayLabel) displayLabel.textContent = en ? "Rendered coordinates" : "画面坐标";
+  const summary = $("#match-motion-review-summary");
+  if (summary) {
+    summary.innerHTML = en
+      ? `<span><strong>${clip.frames.length}</strong> frames</span><span><strong>${Number(clip.range?.durationSeconds || 0).toFixed(2)}s</strong></span><span><strong>${clip.incidents?.length || 0}</strong> incidents</span>`
+      : `<span><strong>${clip.frames.length}</strong> 帧</span><span><strong>${Number(clip.range?.durationSeconds || 0).toFixed(2)} 秒</strong></span><span><strong>${clip.incidents?.length || 0}</strong> 个自动标记</span>`;
+  }
+  renderMotionReviewFrame(motionReviewState.index);
+  $("#btn-motion-review-close")?.focus();
+  if (options.download) downloadMotionClip(clip);
+  return true;
+}
+
+export function closeMotionDiagnostic() {
+  const root = $("#match-motion-review");
+  if (!root || root.classList.contains("hidden")) return;
+  stopMotionReviewPlayback();
+  root.classList.add("hidden");
+  if (motionReviewState.resumePlayback) {
+    matchPlayback.paused = false;
+    matchView?.setFrozen?.(false);
+    updateMatchPlaybackUI();
+  }
+  motionReviewState.resumePlayback = false;
+  motionReviewState.returnFocus?.focus?.();
+}
+
+function updateMotionCaptureUI(status = null) {
+  const button = $("#btn-match-motion-capture");
+  if (!button) return;
+  const frames = Number(status?.frames) || 0;
+  // incidents 是「当前滚动窗口内」的数量，会被 _trimFrames 裁掉，所以徽章会
+  // 自己涨上去又归零；totalIncidents 才是本场累计。徽章继续表示「现在按下去
+  // 能导出几个标记」（这才是按钮的真实行为），但提示里补上累计数，
+  // 免得用户刚看到 3 个、回头发现清零了以为漏了。
+  const incidents = Number(status?.incidents) || 0;
+  const total = Number(status?.totalIncidents) || 0;
+  const base = t("match.motionCaptureHint");
+  const en = getLang() === "en";
+  let detail = "";
+  if (incidents) {
+    detail = en ? ` · ${incidents} marked` : ` · 可导出 ${incidents} 个标记`;
+  }
+  if (total > incidents) {
+    detail += en ? ` (${total} this match)` : `（本场累计 ${total}）`;
+  }
+  button.disabled = frames < 2;
+  button.dataset.motionIncidents = String(Math.min(99, incidents));
+  button.title = `${base}${detail}`;
+  button.setAttribute("aria-label", button.title);
+}
+
+function captureCurrentMotionClip() {
+  const clip = matchView?.createMotionClip?.({
+    reason: "manual",
+    metadata: {
+      fixtureId: pendingMatch?.id || null,
+      matchSeed: matchState?.matchSeed ?? pendingMatch?.matchSeed ?? null,
+      minute: displayedMatchMinute,
+      score: `${matchState?.hg ?? pendingMatch?.homeGoals ?? 0}-${matchState?.ag ?? pendingMatch?.awayGoals ?? 0}`,
+      cameraPreset: matchCamera,
+    },
+  });
+  if (!clip?.frames?.length || clip.frames.length < 2) {
+    toast(getLang() === "en" ? "No motion frames to save yet" : "当前还没有可保存的比赛帧");
+    return;
+  }
+  showMotionDiagnostic(clip, { download: true });
+  toast(getLang() === "en" ? "Motion clip saved" : "比赛片段已保存");
 }
 
 // ---------- Start ----------
@@ -1087,6 +1387,7 @@ function initStart() {
       ensureTransferWindow(world);
       processTransferWindowDay(world);
       ensureActiveCareer(world);
+      ensureManagerOnboarding(world);
       saveGame(world, slot);
       enterMain();
     } catch (err) {
@@ -1097,9 +1398,9 @@ function initStart() {
     }
   };
 
-  $("#btn-load-game").onclick = () => {
+  $("#btn-load-game").onclick = async () => {
     const slot = getActiveSlot();
-    const data = loadGame(slot);
+    const data = await loadGame(slot);
     if (!data) {
       $("#start-hint").textContent = t("start.noSave", { n: slot });
       return;
@@ -1110,13 +1411,13 @@ function initStart() {
     enterMain();
   };
 
-  $("#btn-export-save").onclick = () => {
+  $("#btn-export-save").onclick = async () => {
     const slot = getActiveSlot();
     if (!hasSave(slot)) {
       $("#start-hint").textContent = t("start.noExport", { n: slot });
       return;
     }
-    const data = loadGame(slot);
+    const data = await loadGame(slot);
     if (exportSaveDownload(data)) {
       markExportDone();
       toast(t("toast.exportedOk"));
@@ -1175,6 +1476,7 @@ function repairWorldFields(w) {
   ensureActiveCareer(w);
   ensureWorldFinances(w);
   ensureWorldDelegation(w);
+  ensureManagerOnboarding(w);
   if (!Array.isArray(w.poachBids)) w.poachBids = [];
   if (w.board && w.board.sackWarnings == null) w.board.sackWarnings = 0;
   for (const c of w.clubs || []) {
@@ -1195,11 +1497,11 @@ function repairWorldFields(w) {
     ensureYouthAcademy(c);
     ensureKit(c);
     ensureTactics(c);
-    assignSquadNumbers(c);
     ensureTraining(c);
     ensureFacilities(c);
     ensureClubHonors(c);
     if (!c.youth.players.length) fillYouthSquad(c);
+    ensureDistinctClubPlayerNames(c);
     for (const p of c.players || []) {
       if (p.potential == null) p.potential = Math.min(20, (p.ovr || 10) + 1);
       ensureRealisticPlayerTalent(p);
@@ -1221,6 +1523,8 @@ function repairWorldFields(w) {
       ensureHonors(p);
       ensurePlayerInjury(p);
     }
+    // 先补齐详细位置与持久化号码偏好，再做旧档号码修复/当前赛季登记。
+    assignSquadNumbers(c, { season: w.season, reason: "save-migration" });
     if (c.id === w.userClubId) {
       for (const p of c.players || []) ensurePlayerPathway(p, c, w);
     }
@@ -1305,19 +1609,31 @@ function syncMainNavigation(tab) {
     const active = button.dataset.navGroup === group;
     button.classList.toggle("active", active);
     button.setAttribute("aria-selected", active ? "true" : "false");
+    button.setAttribute("aria-current", active ? "page" : "false");
   });
   $$(".tab").forEach((button) => {
+    const active = button.dataset.tab === tab;
     button.hidden = !MAIN_NAV_GROUPS[group].includes(button.dataset.tab);
-    button.classList.toggle("active", button.dataset.tab === tab);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+    button.setAttribute("aria-current", active ? "page" : "false");
   });
 }
 
 function activateMainTab(tab, { refresh = true } = {}) {
   if (!document.querySelector(`[data-tab="${tab}"]`)) return;
+  if (world && MANAGER_ONBOARDING_TAB_STEPS.includes(tab)) {
+    if (completeManagerOnboardingStep(world, tab)) autosave(`onboarding-${tab}`);
+  }
   syncMainNavigation(tab);
   $$(".tab-panel").forEach((panel) => panel.classList.remove("active"));
   if (tab === "table") $(`#tab-${selectedLeagueCentreView}`)?.classList.add("active");
   else $(`#tab-${tab}`)?.classList.add("active");
+  if (!refresh) {
+    // 进入具体页签后再凑齐该页内容;停在概览时不预先铺满其余页。
+    if (tab === "inbox") renderInbox();
+    else if (tab === "dashboard") renderDashboard();
+  }
   if (refresh) refreshAll();
 }
 
@@ -1351,11 +1667,31 @@ function bindMainOnce() {
   if (dashInboxBtn) {
     dashInboxBtn.onclick = () => goToInboxTab();
   }
-  $("#tab-dashboard")?.addEventListener("click", (event) => {
+  $("#tab-dashboard")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-dashboard-link]");
-    if (!button) return;
-    const target = button.dataset.dashboardLink;
-    if (target) activateMainTab(target);
+    if (button) {
+      const target = button.dataset.dashboardLink;
+      if (target) activateMainTab(target);
+      return;
+    }
+    const dismiss = event.target.closest("[data-dashboard-onboarding-dismiss]");
+    if (dismiss && world && dismissManagerOnboarding(world)) {
+      autosave("onboarding-dismiss");
+      renderDashboard();
+      return;
+    }
+    const play = event.target.closest("[data-dashboard-onboarding-match]");
+    if (play && world) {
+      const next = getNextUserMatch(world);
+      if (next && next.day <= world.day) {
+        try {
+          await openMatch();
+        } catch (error) {
+          console.error(error);
+          toast(getLang() === "en" ? "Match view failed to load" : "比赛画面加载失败");
+        }
+      } else activateMainTab("fixtures");
+    }
   });
   document.querySelectorAll("[data-squad-view]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1468,6 +1804,24 @@ function bindMainOnce() {
     });
   });
 
+  document.querySelectorAll("[data-match-camera]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const next = btn.dataset.matchCamera;
+      matchCamera = MATCH_CAMERAS.includes(next) ? next : "tv";
+      try {
+        localStorage.setItem("vcfm-match-camera", matchCamera);
+      } catch {
+        /* ignore */
+      }
+      matchView?.setCameraPreset?.(matchCamera);
+      syncMatchCameraUI();
+      const labels = getLang() === "en"
+        ? { full: "Full pitch", tv: "TV", tactical: "Tactical" }
+        : { full: "全场", tv: "电视", tactical: "战术" };
+      toast(getLang() === "en" ? `Camera: ${labels[matchCamera]}` : `镜头：${labels[matchCamera]}`);
+    });
+  });
+
   // FMM：xG / 控球 / 射门 折叠
   $("#btn-match-stats-toggle")?.addEventListener("click", () => toggleMatchStatsPanel());
 
@@ -1476,6 +1830,35 @@ function bindMainOnce() {
   $("#btn-match-sfx")?.addEventListener("click", () => toggleMatchSfx());
   $("#btn-match-step")?.addEventListener("click", () => requestMatchStep());
   $("#btn-match-step-mode")?.addEventListener("click", () => toggleMatchStepMode());
+  $("#btn-match-motion-capture")?.addEventListener("click", () => captureCurrentMotionClip());
+  $("#btn-motion-review-close")?.addEventListener("click", () => closeMotionDiagnostic());
+  $("#btn-motion-review-play")?.addEventListener("click", () => toggleMotionReviewPlayback());
+  $("#btn-motion-review-prev")?.addEventListener("click", () => {
+    stopMotionReviewPlayback();
+    renderMotionReviewFrame(motionReviewState.index - 1);
+  });
+  $("#btn-motion-review-next")?.addEventListener("click", () => {
+    stopMotionReviewPlayback();
+    renderMotionReviewFrame(motionReviewState.index + 1);
+  });
+  $("#btn-motion-review-export")?.addEventListener("click", () => {
+    if (downloadMotionClip(motionReviewState.clip)) {
+      toast(getLang() === "en" ? "Motion clip saved" : "比赛片段已保存");
+    }
+  });
+  $("#match-motion-review-range")?.addEventListener("input", (event) => {
+    stopMotionReviewPlayback();
+    renderMotionReviewFrame(Number(event.currentTarget.value));
+  });
+  $("#match-motion-review-incidents")?.addEventListener("click", (event) => {
+    const incident = event.target.closest("[data-motion-frame]");
+    if (!incident) return;
+    stopMotionReviewPlayback();
+    renderMotionReviewFrame(Number(incident.dataset.motionFrame));
+  });
+  $("#match-motion-review")?.addEventListener("click", (event) => {
+    if (event.target.id === "match-motion-review") closeMotionDiagnostic();
+  });
   // FMM 顶栏「跳过」重播
   $("#btn-match-fmm-skip")?.addEventListener("click", () => {
     if (!matchView) return;
@@ -1489,6 +1872,21 @@ function bindMainOnce() {
   });
 
   // 事件流 / 赛后报告：点进球再看回放
+  const commentary = document.querySelector(".fmm-commentary");
+  const commentaryToggle = $("#match-com-toggle");
+  commentaryToggle?.addEventListener("click", (event) => {
+    event.preventDefault();
+    // expanded 指点击前的状态：展开着就收起，收起着就展开。
+    const expanded = !commentary?.classList.contains("is-collapsed");
+    commentary?.classList.toggle("is-collapsed", expanded);
+    commentaryToggle.setAttribute("aria-expanded", expanded ? "false" : "true");
+    // 同时写 data-i18n-title，切换语言时 applyI18n 才能重新翻译当前状态。
+    const titleKey = expanded ? "match.commentaryExpand" : "match.commentaryCollapse";
+    commentaryToggle.setAttribute("data-i18n-title", titleKey);
+    commentaryToggle.title = t(titleKey);
+    const icon = commentaryToggle.querySelector("span");
+    if (icon) icon.textContent = expanded ? "⌄" : "⌃";
+  });
   $("#match-log")?.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-goal-replay]");
     if (!btn) return;
@@ -1590,6 +1988,39 @@ function bindMainOnce() {
     htForm.innerHTML = Object.keys(FORMATIONS)
       .map((k) => `<option value="${k}">${FORMATIONS[k].name}</option>`)
       .join("");
+  }
+
+  const phaseShapeSelectors = [
+    { id: "#possession-formation-select", key: "possessionFormation" },
+    { id: "#out-possession-formation-select", key: "outOfPossessionFormation" },
+  ];
+  const fillPhaseShapeOptions = () => {
+    const followLabel = t("tac.followBaseFormation");
+    const lang = getLang();
+    for (const { id } of phaseShapeSelectors) {
+      const select = $(id);
+      if (!select || select.dataset.optionsLang === lang) continue;
+      select.innerHTML = [
+        `<option value="">${escapeHtml(followLabel)}</option>`,
+        ...Object.keys(FORMATIONS).map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(FORMATIONS[k].name)}</option>`),
+      ].join("");
+      select.dataset.optionsLang = lang;
+    }
+  };
+  fillPhaseShapeOptions();
+  for (const { id, key } of phaseShapeSelectors) {
+    const select = $(id);
+    if (!select) continue;
+    select.onchange = (e) => {
+      const club = getUserClub(world);
+      ensureTactics(club);
+      const value = e.target.value;
+      club.tactics[key] = FORMATIONS[value] ? value : null;
+      club.tactics.coachPhaseIdentityId = null;
+      club.tactics.coachPhaseIdentityVersion = null;
+      renderTactics();
+      saveGame(world);
+    };
   }
 
   formSel.onchange = () => {
@@ -1790,6 +2221,38 @@ function bindMainOnce() {
     if (e.target.id === "modal") closeModal();
   };
   document.addEventListener("keydown", (e) => {
+    const motionReviewOpen = !$("#match-motion-review")?.classList.contains("hidden");
+    if (motionReviewOpen && e.key === "Escape") {
+      e.preventDefault();
+      closeMotionDiagnostic();
+      return;
+    }
+    if (motionReviewOpen && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      const tag = e.target?.tagName?.toLowerCase();
+      if (tag !== "input") {
+        e.preventDefault();
+        stopMotionReviewPlayback();
+        renderMotionReviewFrame(motionReviewState.index + (e.key === "ArrowLeft" ? -1 : 1));
+        return;
+      }
+    }
+    if (motionReviewOpen && e.key === "Tab") {
+      const focusable = [...$("#match-motion-review")?.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ) || []].filter((element) => element.offsetParent !== null);
+      if (focusable.length) {
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+      return;
+    }
     const modalOpen = !$("#modal")?.classList.contains("hidden");
     if (e.key === "Escape" && modalOpen) {
       e.preventDefault();
@@ -1841,6 +2304,7 @@ function bindMainOnce() {
   $("#btn-sim-instant").onclick = () => runMatch("instant");
   $("#btn-match-continue").onclick = () => {
     const wasReview = !!matchPlayback.reviewMode;
+    closeMotionDiagnostic();
     if (!wasReview) autosave("after-match");
     destroyLoadedMatchView();
     matchView = null;
@@ -1852,6 +2316,7 @@ function bindMainOnce() {
     pendingMatch = null;
     matchState = null;
     pendingSubs = [];
+    updateMotionCaptureUI(null);
     refreshAll();
     if (wasReview) {
       // 回到赛程页，方便连续回看
@@ -2545,12 +3010,195 @@ function goToInboxTab() {
   activateMainTab("inbox");
 }
 
+/**
+ * 把邮件引用解析为详情链接所需的实体。
+ * 引用字段会随邮件类型变化，这里集中兼容旧存档和新邮件，避免让信箱
+ * 重新猜测正文中的名字，也避免为详情页复制一套展示逻辑。
+ */
+/**
+ * 单次渲染内共享的实体索引。信箱一次最多渲染 50 封邮件，每封都要按 id 回查
+ * 球员和俱乐部；没有索引时每次回查都要扫遍 270 家俱乐部的全部名单，
+ * 而且解析失败的 id 不会进 seen，同一个 id 还会被重复扫描。
+ * 构建顺序与原来的查找顺序一致：同一俱乐部先一队后青训，最后才是已退役球员。
+ */
+function buildInboxEntityIndex(world) {
+  const players = new Map();
+  const clubs = new Map();
+  for (const club of world?.clubs || []) {
+    clubs.set(club.id, club);
+    for (const player of club.players || []) {
+      if (player?.id && !players.has(player.id)) players.set(player.id, { player, clubId: club.id });
+    }
+    for (const player of club.youth?.players || []) {
+      if (player?.id && !players.has(player.id)) players.set(player.id, { player, clubId: club.id });
+    }
+  }
+  for (const player of world?.retiredPlayers || []) {
+    if (player?.id && !players.has(player.id)) players.set(player.id, { player, clubId: null });
+  }
+  return { players, clubs };
+}
+
+function inboxEntityRefs(mail, index = null) {
+  if (!world || !mail) return [];
+  const entityIndex = index || buildInboxEntityIndex(world);
+  const ref = mail.ref || {};
+  const entities = [];
+  const seen = new Set();
+  const add = (type, id, context = {}) => {
+    if (!id) return;
+    const key = `${type}:${id}`;
+    if (seen.has(key)) return;
+    let item = null;
+    if (type === "club") {
+      item = entityIndex.clubs.get(id) || null;
+    } else if (type === "player") {
+      const found = entityIndex.players.get(id);
+      item = found?.player || null;
+      if (item && found.clubId) context = { ...context, clubId: found.clubId };
+    } else if (type === "nation") {
+      // 这里只用得到国家的名字和代码，都是静态数据；listNationalTeams 会给每个
+      // 国家重新分组全部球员并选出首发，代价远高于这一次查名字。
+      item = NATIONALITIES.find((nation) => nation.code === id) || null;
+    } else if (type === "staff") {
+      const found = findStaffById(id, context.clubId || null);
+      item = found?.staff || null;
+      if (found?.club?.id) context = { ...context, clubId: found.club.id };
+    }
+    if (!item) return;
+    const aliases = new Set();
+    if (type === "club") {
+      aliases.add(clubDisplayName(item));
+      aliases.add(item.name);
+      aliases.add(item.nameZh);
+      aliases.add(item.nameEn);
+      aliases.add(item.short);
+      aliases.add(item.shortName);
+    } else if (type === "player") {
+      aliases.add(item.name);
+      aliases.add(item.nameEn);
+    } else if (type === "nation") {
+      aliases.add(nationName(item.code, getLang()));
+      aliases.add(item.name);
+      aliases.add(item.nameEn);
+      aliases.add(item.code);
+    } else if (type === "staff") {
+      aliases.add(item.name);
+      aliases.add(item.nameEn);
+    }
+    const usableAliases = [...aliases].filter((alias) => String(alias || "").trim().length >= 2);
+    if (!usableAliases.length) return;
+    seen.add(key);
+    entities.push({ type, id, item, aliases: usableAliases, clubId: context.clubId || null });
+  };
+  const addIds = (value, type, context = {}) => {
+    const ids = Array.isArray(value) ? value : [value];
+    ids.forEach((id) => add(type, typeof id === "object" ? id.id : id, context));
+  };
+
+  // 先补充谈判/挖角记录中的关联对象，旧邮件只保存了记录 ID 也能正常回溯。
+  if (ref.kind === "poach") {
+    const bid = world.poachBids?.find((item) => item.id === ref.bidId);
+    add("player", ref.playerId || bid?.playerId, { clubId: ref.fromClubId || bid?.fromClubId || null });
+    add("club", ref.buyerId || bid?.buyerId);
+    add("club", ref.fromClubId || bid?.fromClubId);
+  } else if (ref.kind === "transfer_negotiation") {
+    const negotiation = world.transferNegotiations?.find((item) => item.id === ref.negotiationId);
+    add("player", ref.playerId || negotiation?.playerId);
+    add("club", ref.sellerClubId || negotiation?.sellerClubId);
+    add("club", ref.buyerClubId || negotiation?.buyerClubId);
+  } else if (ref.kind === "deal_negotiation") {
+    const negotiation = world.dealNegotiations?.find((item) => item.id === ref.negotiationId);
+    add("player", ref.playerId || negotiation?.playerId);
+    add("club", ref.ownerClubId || negotiation?.ownerClubId);
+    add("club", ref.hostClubId || negotiation?.hostClubId);
+  } else if (ref.kind === "scout_report") {
+    addIds(ref.playerIds, "player");
+  }
+
+  // 通用引用字段给新邮件和第三方模块使用，旧 kind 不需要额外适配。
+  addIds(ref.playerId, "player", { clubId: ref.playerClubId || ref.clubId || null });
+  addIds(ref.playerIds, "player");
+  addIds(ref.clubId, "club");
+  addIds(ref.clubIds, "club");
+  addIds(ref.buyerId, "club");
+  addIds(ref.sellerClubId, "club");
+  addIds(ref.ownerClubId, "club");
+  addIds(ref.hostClubId, "club");
+  addIds(ref.nationCode, "nation");
+  addIds(ref.nationCodes, "nation");
+  addIds(ref.staffId, "staff", { clubId: ref.staffClubId || ref.clubId || null });
+  addIds(ref.staffIds, "staff", { clubId: ref.staffClubId || ref.clubId || null });
+  // 球员和职员所属单位也是邮件中的常见上下文；有明确对象事实时一并开放查阅。
+  for (const entity of [...entities]) {
+    if ((entity.type === "player" || entity.type === "staff") && entity.clubId) {
+      add("club", entity.clubId);
+    }
+    if (entity.type === "player" && entity.item?.nationality) {
+      add("nation", entity.item.nationality);
+    }
+  }
+  return entities;
+}
+
+function inboxEntityLink(entity, label) {
+  const className = "inbox-entity-link";
+  if (entity.type === "club") return clubLinkHtml(entity.id, label, className);
+  if (entity.type === "player") return playerLinkHtml(entity.id, label, className);
+  if (entity.type === "staff") {
+    const clubAttr = entity.clubId ? ` data-staff-club="${escapeHtml(entity.clubId)}"` : "";
+    return `<button type="button" class="staff-link ${className}" data-staff-link="${escapeHtml(entity.id)}"${clubAttr} data-inbox-entity="staff">${escapeHtml(label)}</button>`;
+  }
+  return `<button type="button" class="nation-link ${className}" data-nation="${escapeHtml(entity.id)}" data-inbox-entity="nation">${escapeHtml(label)}</button>`;
+}
+
+function renderInboxEntityText(value, entities) {
+  const text = String(value || "");
+  if (!text) return "";
+  const aliases = [];
+  const aliasMap = new Map();
+  for (const entity of entities || []) {
+    for (const alias of entity.aliases || []) {
+      const normalized = String(alias || "").trim();
+      if (normalized.length < 2) continue;
+      const key = normalized.toLocaleLowerCase();
+      if (!aliasMap.has(key)) aliasMap.set(key, entity);
+      else if (aliasMap.get(key) !== entity) aliasMap.set(key, null);
+      aliases.push(normalized);
+    }
+  }
+  const uniqueAliases = [...new Set(aliases)].sort((a, b) => b.length - a.length);
+  if (!uniqueAliases.length) return escapeHtml(text).replace(/\r?\n/g, "<br>");
+  const escaped = uniqueAliases.map((alias) => alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const matcher = new RegExp(escaped.join("|"), "gi");
+  let html = "";
+  let cursor = 0;
+  for (const match of text.matchAll(matcher)) {
+    const index = match.index ?? 0;
+    html += escapeHtml(text.slice(cursor, index)).replace(/\r?\n/g, "<br>");
+    const entity = aliasMap.get(String(match[0]).toLocaleLowerCase()) || null;
+    const before = index > 0 ? text[index - 1] : "";
+    const after = text[index + match[0].length] || "";
+    const needsLeftBoundary = /^[A-Za-z0-9]/.test(match[0]);
+    const needsRightBoundary = /[A-Za-z0-9]$/.test(match[0]);
+    const insideWord =
+      (needsLeftBoundary && /[A-Za-z0-9]/.test(before)) ||
+      (needsRightBoundary && /[A-Za-z0-9]/.test(after));
+    html += entity && !insideWord ? inboxEntityLink(entity, match[0]) : escapeHtml(match[0]);
+    cursor = index + match[0].length;
+  }
+  html += escapeHtml(text.slice(cursor)).replace(/\r?\n/g, "<br>");
+  return html;
+}
+
 function renderInbox() {
   if (!world) return;
   ensureInbox(world);
   syncPoachBidsToInbox(world);
   syncTransferNegotiationsToInbox(world);
   syncDealNegotiationsToInbox(world);
+  const tab = document.querySelector("#tab-inbox");
+  if (tab && !tab.classList.contains("active")) return;
   const en = getLang() === "en";
   const pendingOnly = inboxFilter === "pending";
   const list = listInbox(world, { pendingOnly, limit: 50 });
@@ -2582,8 +3230,10 @@ function renderInbox() {
     return;
   }
 
+  const entityIndex = buildInboxEntityIndex(world);
   box.innerHTML = list
     .map((m) => {
+      const entities = inboxEntityRefs(m, entityIndex);
       const cat = inboxCatLabel(m.category, en ? "en" : "zh");
       const st =
         m.status === "pending"
@@ -2626,8 +3276,8 @@ function renderInbox() {
           <span class="muted inbox-day">D${m.day}</span>
           <span class="inbox-status">${escapeHtml(st)}</span>
         </header>
-        <h3 class="inbox-title">${escapeHtml(en && m.titleEn ? m.titleEn : m.title)}</h3>
-        ${en && m.bodyEn ? `<p class="inbox-body">${escapeHtml(m.bodyEn)}</p>` : m.body ? `<p class="inbox-body">${escapeHtml(m.body)}</p>` : ""}
+        <h3 class="inbox-title">${renderInboxEntityText(en && m.titleEn ? m.titleEn : m.title, entities)}</h3>
+        ${en && m.bodyEn ? `<p class="inbox-body">${renderInboxEntityText(m.bodyEn, entities)}</p>` : m.body ? `<p class="inbox-body">${renderInboxEntityText(m.body, entities)}</p>` : ""}
         <div class="inbox-actions">${actions}</div>
       </article>`;
     })
@@ -2663,7 +3313,7 @@ function renderInbox() {
   // 点标题标已读
   box.querySelectorAll(".inbox-item").forEach((el) => {
     el.addEventListener("click", (ev) => {
-      if (ev.target.closest("[data-inbox-act]")) return;
+      if (ev.target.closest("[data-inbox-act], .inbox-entity-link")) return;
       const id = el.dataset.mailId;
       if (markInboxRead(world, id)) {
         saveGame(world);
@@ -3624,6 +4274,7 @@ function syncTopbarContinue({ seasonDone = false, matchReady = false } = {}) {
     btn.textContent = t("dash.advance");
     btn.title = en ? "Advance one day" : "推进一天";
   }
+  btn.setAttribute("aria-label", btn.title);
   btn.classList.toggle("is-matchday", topbarContinueMode === "match");
   btn.disabled = calendarAdvanceBusy;
 
@@ -3784,6 +4435,28 @@ function collectDashboardWorkbench(club, next) {
     addAction("transfer", "📝", en ? "Contracts" : "合同", en ? `${contracts.length} need attention` : `${contracts.length} 份待处理`);
   }
 
+  // 将多年阵容规划中的真实冗余变成一个可处理的管理提醒：说明依据，
+  // 但不替玩家自动出售或解约，避免把规划建议变成隐藏的后台动作。
+  const squadPlan = ensureClubSquadPlan(world, club);
+  const saleCandidate = selectPlannedSaleCandidate(world, club);
+  if (saleCandidate && club.players.length > 15) {
+    const decision = squadPlayerPlan(squadPlan, saleCandidate.id);
+    const positionPlan = squadPositionPlan(squadPlan, saleCandidate.pos);
+    const positionName = en ? positionPlan?.labelEn || saleCandidate.pos : positionPlan?.label || saleCandidate.pos;
+    const excess = Math.max(0, Number(positionPlan?.current || 0) - Number(positionPlan?.ideal || 0));
+    issues.push({
+      severity: "info",
+      icon: "↔",
+      title: en ? `Squad exit available: ${saleCandidate.name}` : `阵容有可处理出口：${saleCandidate.name}`,
+      detail: en
+        ? `${positionName} is ${excess || 1} over ideal depth; ${decision?.reasonEn || "the player is outside the realistic rotation"}.`
+        : `${positionName} 超过理想深度 ${excess || 1} 人；${decision?.reason || "球员不在现实轮换顺位内"}。`,
+      target: "squad",
+      actionLabel: en ? "Review squad" : "查看阵容",
+    });
+    addAction("squad", "↔", en ? "Squad exits" : "阵容出口", en ? "Review planned sale" : "查看规划建议");
+  }
+
   ensureSquadRelations(club);
   const atmosphere = clubAtmosphere(club);
   if (atmosphere < 45) {
@@ -3802,7 +4475,7 @@ function collectDashboardWorkbench(club, next) {
     addAction("training", "🏋️", en ? "Training" : "训练", en ? "Prepare the squad" : "安排球队准备");
     addAction("squad", "👥", en ? "Squad" : "球队阵容", en ? "Review availability" : "检查球员状态");
   }
-  return { issues, actions, digest: dashboardAdvanceDigest };
+  return { issues, actions, digest: dashboardAdvanceDigest, onboarding: managerOnboardingView(world) };
 }
 
 function renderDashboard() {
@@ -3979,10 +4652,11 @@ function renderDashboard() {
     if (!n && !top.length) {
       dashIb.innerHTML = `<span class="muted">${escapeHtml(en ? "No pending mail" : "暂无待办")}</span>`;
     } else {
+      const dashEntityIndex = buildInboxEntityIndex(world);
       const lines = top
         .map(
           (m) =>
-            `<div class="dash-inbox-row"><span class="inbox-cat mini">${escapeHtml(inboxCatLabel(m.category, en ? "en" : "zh"))}</span> ${escapeHtml(en && m.titleEn ? m.titleEn : m.title)}</div>`
+            `<div class="dash-inbox-row"><span class="inbox-cat mini">${escapeHtml(inboxCatLabel(m.category, en ? "en" : "zh"))}</span> ${renderInboxEntityText(en && m.titleEn ? m.titleEn : m.title, inboxEntityRefs(m, dashEntityIndex))}</div>`
         )
         .join("");
       dashIb.innerHTML = `<div class="dash-inbox-count">${en ? `${n} pending` : `${n} 封待办`}</div>${lines}`;
@@ -4470,21 +5144,21 @@ function renderSquad() {
       return `<tr class="${xi.has(p.id) ? "me" : ""} ${!isAvailable(p) ? "row-unavailable" : ""} ${needsContractAttention(p) && !p.loan ? "row-contract" : ""}">
         <td class="num-cell"><span class="kit-num" style="${kitBadgeStyle(club)}">${num}</span></td>
         <td class="name-with-avatar">${playerAvatarHtml(p, club, 32)} <span>${playerLinkHtml(p.id, p.name)} ${statusBadges}</span></td>
-        <td class="squad-detail">${nationLabel(p)}</td>
         <td title="${escapeHtml(detailedPosition)}"><span class="badge ${p.pos}">${en ? p.pos : POS_LABEL[p.pos]}</span><small class="muted squad-position-detail">${escapeHtml(detailedPosition)}</small></td>
-        <td class="squad-detail">${p.age}</td>
         <td class="${ovrClass(ovr)}"><strong>${ovr}</strong></td>
+        <td class="num-stat rating-cell ${formClass(form)}" title="${escapeHtml(formTitle)}">${formatForm(form)}</td>
+        <td>${Math.round(p.fitness ?? 0)}%</td>
+        <td class="contract-cell">${contractCell}</td>
+        <td class="squad-detail">${nationLabel(p)}</td>
+        <td class="squad-detail">${p.age}</td>
         <td class="num-stat squad-detail" title="${escapeHtml(t("squad.appsTitle") || "本赛季出场")}">${apps}</td>
         <td class="num-stat squad-detail ${gCls}" title="${escapeHtml(gTitle)}">${colG}</td>
         <td class="num-stat squad-detail ${aCls}" title="${escapeHtml(aTitle)}">${colA}</td>
         <td class="num-stat rating-cell squad-detail ${ratingClass(avgR)}" title="${escapeHtml(t("squad.avgRTitle") || "本赛季场均评分")}">${formatRating(avgR)}</td>
         <td class="num-stat rating-cell squad-detail ${ratingClass(lastR)}" title="${escapeHtml(t("squad.lastRTitle") || "最近一场评分")}">${formatRating(lastR)}</td>
-        <td class="num-stat rating-cell ${formClass(form)}" title="${escapeHtml(formTitle)}">${formatForm(form)}</td>
-        <td>${Math.round(p.fitness ?? 0)}%</td>
         <td class="squad-detail">${Math.round(p.morale ?? 0)}</td>
         <td class="rel-cell squad-detail rel-${relationTone(p.relation)}">${escapeHtml(relationLabel((ensurePlayerRelation(p), p.relation), getLang() === "en" ? "en" : "zh"))}</td>
         <td class="squad-detail" title="${escapeHtml(playingTitle)}"><span class="badge ${playingProgress.fulfilment >= 0.9 ? "DEF" : playingProgress.fulfilment >= 0.7 ? "MID" : "ATT"}">${escapeHtml(playingTimeRoleLabel(playingTime.role, en ? "en" : "zh"))}</span></td>
-        <td class="contract-cell">${contractCell}</td>
         <td class="squad-detail">${formatMoney(p.value)}</td>
         <td class="squad-detail">${formatMoney(p.wage)}</td>
         <td><button class="btn small" data-pid="${p.id}">${en ? "Info" : "详情"}</button></td>
@@ -4570,6 +5244,15 @@ function showPlayerModal(playerId, context = {}) {
   const intl = player.intl || {};
   const isGk = player.pos === "GK";
   const detailedPosition = positionSummary(player, en ? "en" : "zh");
+  const numberPreference = numberPreferenceLabel(player);
+  const numberPreferenceStrength = numberPreference.strength === "strong"
+    ? (en ? "strong" : "强烈")
+    : numberPreference.strength === "light"
+      ? (en ? "light" : "一般")
+      : (en ? "normal" : "明确");
+  const numberPreferenceText = numberPreference.numbers.length
+    ? `${en ? "Preferred numbers" : "钟情号码"} ${numberPreference.numbers.map((number) => `#${number}`).join(" / ")}（${numberPreferenceStrength}）`
+    : "";
 
   // 分赛季历史 + 当前未归档赛季
   const curAvgR = seasonAvgRating(player);
@@ -4650,6 +5333,7 @@ function showPlayerModal(playerId, context = {}) {
        · ${nationLabel(player)}
        · ${en ? `Age ${player.age}` : `${player.age} 岁`} · ${en ? "Ability" : "能力"} <strong class="${isOther ? "" : ovrClass(player.ovr)}">${escapeHtml(ovrShow)}</strong>
        · ${en ? "Potential" : "潜力"} <strong>${escapeHtml(String(pot))}</strong>
+       ${numberPreferenceText ? ` · ${escapeHtml(numberPreferenceText)}` : ""}
        · ${en ? "Foot" : "惯用脚"} ${escapeHtml(preferredFootLabel(player.preferredFoot, en))}
        · ${en ? "Height" : "身高"} ${Number(player.heightCm) || "—"}cm
        ${isYouth ? ` · <span class="badge MID">${en ? "Academy" : "青训学院"}</span>` : player.fromYouth ? ` · <span class="badge MID">${en ? "Youth graduate" : "青训"}</span>` : ""}
@@ -5589,6 +6273,19 @@ function renderTacticsSummary() {
       ? `<strong>${form.name}</strong>${form.desc ? ` · ${form.desc}` : ""}`
       : `<strong>${form.name}</strong>${form.desc ? ` · ${form.desc}` : ""}`
   );
+  const shapes = teamShapeSummary(tac, en ? "en" : "zh");
+  bits.push(`
+    <div class="tac-shape-grid">
+      ${shapes
+        .map(
+          (shape) => `<div class="tac-shape-fact" data-shape-phase="${escapeHtml(shape.key)}">
+            <strong>${escapeHtml(shape.title)}</strong>
+            <span>${escapeHtml(shape.detail)}</span>
+          </div>`
+        )
+        .join("")}
+    </div>
+  `);
   bits.push(
     en
       ? `Attack bias ${atkBias >= 0 ? "+" : ""}${atkBias.toFixed(0)}% · Defend ${defBias >= 0 ? "+" : ""}${defBias.toFixed(0)}%`
@@ -5952,6 +6649,25 @@ function renderTactics() {
   const formSel = $("#formation-select");
   if (formSel) formSel.value = tac.formation;
   if (formSel) formSel.disabled = coachControlled;
+  const phaseShapeSelectors = [
+    { id: "#possession-formation-select", key: "possessionFormation" },
+    { id: "#out-possession-formation-select", key: "outOfPossessionFormation" },
+  ];
+  const followLabel = t("tac.followBaseFormation");
+  const lang = getLang();
+  for (const { id, key } of phaseShapeSelectors) {
+    const select = $(id);
+    if (!select) continue;
+    if (select.dataset.optionsLang !== lang) {
+      select.innerHTML = [
+        `<option value="">${escapeHtml(followLabel)}</option>`,
+        ...Object.keys(FORMATIONS).map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(FORMATIONS[k].name)}</option>`),
+      ].join("");
+      select.dataset.optionsLang = lang;
+    }
+    select.value = tac[key] || "";
+    select.disabled = coachControlled;
+  }
   const styleSel = $("#style-select");
   if (styleSel) styleSel.value = tac.style;
   if (styleSel) styleSel.disabled = coachControlled;
@@ -6655,6 +7371,8 @@ function showClubModal(clubId) {
     .sort((a, b) => b.scouting.ovrEstimate - a.scouting.ovrEstimate)
     .slice(0, 16);
   const formation = club.tactics?.formation || "4-3-3";
+  const possessionFormation = club.tactics?.possessionFormation || formation;
+  const outOfPossessionFormation = club.tactics?.outOfPossessionFormation || formation;
   const styleKey = club.tactics?.style || "balanced";
   const styleLabel = t("style." + styleKey) || styleKey;
   const staffRoles = ["coach", "scout", "doctor"];
@@ -6754,7 +7472,10 @@ function showClubModal(clubId) {
           ${escapeHtml(t("clubs.money"))} ${formatMoney(club.money || 0)}
           · ${escapeHtml(t("clubs.squadAvg"))} <strong class="${ovrClass(avg.estimate)}">${escapeHtml(avg.text)}</strong>
           · ${escapeHtml(t("clubs.power"))} ${club.power ?? "—"}
-          · ${escapeHtml(t("tac.formation"))} ${escapeHtml(formation)} · ${escapeHtml(styleLabel)}
+          · ${escapeHtml(t("tac.formation"))} ${escapeHtml(formation)}
+          · ${escapeHtml(t("tac.possessionFormation"))} ${escapeHtml(possessionFormation)}
+          · ${escapeHtml(t("tac.outOfPossessionFormation"))} ${escapeHtml(outOfPossessionFormation)}
+          · ${escapeHtml(styleLabel)}
         </p>
         <div style="margin-top:0.4rem">${formatFormHtml(club.form)} <span class="muted" style="font-size:0.8rem">${escapeHtml(t("clubs.formHint"))}</span></div>
       </div>
@@ -7962,14 +8683,55 @@ function advanceEventLines(events) {
           priority: 2,
         });
         break;
-      case "international_break":
+      case "ai_squad_moves": {
+        const transfer = Number(ev.types?.transfer) || 0;
+        const loan = Number(ev.types?.loan) || 0;
+        const release = Number(ev.types?.release) || 0;
+        const parts = en
+          ? [
+              transfer ? `${transfer} transfer${transfer === 1 ? "" : "s"}` : "",
+              loan ? `${loan} loan${loan === 1 ? "" : "s"}` : "",
+              release ? `${release} release${release === 1 ? "" : "s"}` : "",
+            ].filter(Boolean)
+          : [
+              transfer ? `${transfer} 笔转会` : "",
+              loan ? `${loan} 笔租借` : "",
+              release ? `${release} 人解约` : "",
+            ].filter(Boolean);
         lines.push({
           day,
-          icon: "🌍",
-          text: en ? "International break" : "国际比赛日",
+          icon: "↔",
+          text: en ? `AI squad movement: ${parts.join(", ")}` : `AI 阵容流动：${parts.join("、")}`,
           priority: 2,
         });
         break;
+      }
+      case "international_break": {
+        const callups = Number(ev.callups) || 0;
+        lines.push({
+          day,
+          icon: "🌍",
+          text: en
+            ? callups
+              ? `International break · ${callups} of your players featured`
+              : "International break"
+            : callups
+              ? `国际比赛日 · 你有 ${callups} 人出场`
+              : "国际比赛日",
+          priority: 2,
+        });
+        for (const item of ev.injuries || []) {
+          lines.push({
+            day,
+            icon: "🏥",
+            text: en
+              ? `${item.playerName} returned injured from national duty (${item.labelEn} · ~${item.days}d)`
+              : `${item.playerName} 从国家队带伤回队（${item.label} · 约 ${item.days} 天）`,
+            priority: 3,
+          });
+        }
+        break;
+      }
       case "key_matches":
         for (const m of ev.matches || []) {
           lines.push({
@@ -8054,6 +8816,13 @@ let calendarAdvanceBusy = false;
 
 function setCalendarAdvanceBusy(busy) {
   calendarAdvanceBusy = !!busy;
+  const en = getLang() === "en";
+  const status = $("#calendar-advance-status");
+  if (status) {
+    status.textContent = busy
+      ? (en ? "Advancing the calendar…" : "正在推进日历…")
+      : (en ? "Calendar ready" : "日历已准备好");
+  }
   for (const id of [
     "#btn-advance",
     "#btn-advance-matchday",
@@ -8064,13 +8833,37 @@ function setCalendarAdvanceBusy(busy) {
     "#btn-topbar-advance-season-end",
   ]) {
     const button = $(id);
-    if (button) button.disabled = calendarAdvanceBusy;
+    if (button) {
+      button.disabled = calendarAdvanceBusy;
+      button.setAttribute("aria-busy", calendarAdvanceBusy ? "true" : "false");
+      button.toggleAttribute("data-advance-busy", calendarAdvanceBusy);
+    }
   }
 }
 
 async function runCalendarAdvance(task) {
   if (calendarAdvanceBusy) return null;
   setCalendarAdvanceBusy(true);
+  let lastProgressAt = 0;
+  const onProgress = (event) => {
+    const now = performance.now();
+    const completed = Number(event.detail?.completed) || 0;
+    const total = Number(event.detail?.total) || 0;
+    if (!total || (completed < total && now - lastProgressAt < 700)) return;
+    lastProgressAt = now;
+    toast(
+      getLang() === "en"
+        ? `Running spatial matches ${completed}/${total}`
+        : `正在运行空间比赛 ${completed}/${total}`
+    );
+    const status = $("#calendar-advance-status");
+    if (status) {
+      status.textContent = getLang() === "en"
+        ? `Running spatial matches ${completed}/${total}`
+        : `正在运行空间比赛 ${completed}/${total}`;
+    }
+  };
+  window.addEventListener("vcfm-calendar-progress", onProgress);
   toast(
     getLang() === "en"
       ? "Running headless spatial matches…"
@@ -8083,6 +8876,7 @@ async function runCalendarAdvance(task) {
     toast(getLang() === "en" ? "Calendar advance failed" : "日历推进失败");
     return null;
   } finally {
+    window.removeEventListener("vcfm-calendar-progress", onProgress);
     setCalendarAdvanceBusy(false);
   }
 }
@@ -8285,6 +9079,15 @@ function syncMatchSpeedUI() {
   }
 }
 
+function syncMatchCameraUI() {
+  document.querySelectorAll("[data-match-camera]").forEach((btn) => {
+    const active = btn.dataset.matchCamera === matchCamera;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  matchView?.setCameraPreset?.(matchCamera, { persist: false });
+}
+
 /**
  * 高光观赛：细播段落用实时动画速度（rate=1，不抖）。
  * 平淡时段 skip，整场墙钟目标约 ≤10 分钟（见 adapt.buildHighlightWindows）。
@@ -8350,7 +9153,16 @@ function handleSimLiveEvent(ev, snap) {
   if (!ev || ev.type === "tick" || ev.type === "sim_frame") return;
   const spd = Math.max(0.25, Number(matchSpeed) || 1);
   const fixture = pendingMatch;
-  if (snap?.minute != null) setMatchMinute(snap.minute);
+  // 半场/完场是真实的时钟边界，必须显式 reset 才能落回 45'/90'：
+  // 顶栏走 nextDisplayedMinute 的单调保护（Math.max，防止迟到事件把时钟拨回去），
+  // 而上半场结束时快照分钟已经滚到 46，ht 事件写的是 45，
+  // Math.max(46, 45) 恒为 46 —— 于是「中场休息」时顶栏挂着 46'。
+  // 单调保护本身是对的（有审计钉着），所以只在这两个边界上开 reset。
+  const evMin = Number.isFinite(ev.minute) ? ev.minute : null;
+  const isBoundary = ev.type === "ht" || ev.type === "ft";
+  if (isBoundary && evMin != null) setMatchMinute(evMin, { reset: true });
+  else if (snap?.minute != null) setMatchMinute(snap.minute);
+  else if (evMin != null) setMatchMinute(evMin);
   if (snap?.homeGoals != null) setMatchScore(snap.homeGoals, snap.awayGoals);
   // 高光事件的 snap 带的是整段模拟统计，按事件时刻切片后再显示。
   if (snap?.home) {
@@ -8443,8 +9255,28 @@ function handleSimLiveEvent(ev, snap) {
       setTimeout(() => matchView?.setBanner?.(""), holdMs * 0.75);
     } else if (ev.text && !["tick", "sim_frame", "goal"].includes(ev.type)) {
       // 一般事件：短时 ticker
-      const clean = String(ev.text).replace(/^\[.*?\]\s*/, "").slice(0, 48);
-      if (clean) matchView.setFmmTicker?.(clean, "info", eventTickerMs(ev.type, spd));
+      // 旧实现所有杂项事件一律 "info"，于是「裁判示意有利」和「VAR 复核完成」
+      // 长得一模一样——一条是继续比赛的提示，一条是改判结果，轻重完全不同。
+      // 按性质分级：判罚争议 / 需要留意 / 普通信息。
+      const kindMap = {
+        var_decision: "dispute",
+        offside: "dispute",
+        handball: "warn",
+        card: "warn",
+        red: "warn",
+        injury: "warn",
+        backpass: "warn",
+      };
+      const raw = String(ev.text).replace(/^\[.*?\]\s*/, "");
+      // 截断要留省略号，否则句子被硬切在半路，看着像文案出错
+      const clean = raw.length > 48 ? raw.slice(0, 47) + "…" : raw;
+      if (clean) {
+        matchView.setFmmTicker?.(
+          clean,
+          kindMap[ev.type] || "info",
+          eventTickerMs(ev.type, spd)
+        );
+      }
     }
     matchView.onEvent(ev, snap, fixture);
     const holdMap = {
@@ -8562,13 +9394,23 @@ async function playHighlightPlanBridge(spec) {
   const fast = !!(matchState && !matchState._liveMode);
 
   // 开场提示一次
-  if (segs.some((s) => s.kind === "play") && matchView?.setCaption) {
+  // 旧实现每调用一次 playHighlightPlanBridge 就弹一遍，一场比赛按高光批次能弹五六次；
+  // 且文案写死「倍速生效」，而倍速选择器读数是 ×1，看着像系统自作主张改了倍速。
+  // 改成：整场只提示一次，并直接报出当前实际倍速。
+  if (
+    segs.some((s) => s.kind === "play") &&
+    matchView?.setCaption &&
+    matchState &&
+    !matchState._hlIntroShown
+  ) {
+    matchState._hlIntroShown = true;
     const en = getLang() === "en";
+    const spd = getSpeed();
     matchView.setCaption(
       fast
         ? en
-          ? "Fast highlights · goals in motion · speed applies"
-          : "快速高光 · 进球动态细看 · 倍速生效"
+          ? `Fast highlights · goals in motion · ×${spd}`
+          : `快速高光 · 进球动态细看 · 当前 ×${spd}`
         : en
           ? "Highlights mode · dull passages skipped"
           : "高光观赛 · 平淡时段已跳过",
@@ -8814,11 +9656,15 @@ async function driveMatchEvent(ev, snap, { live = true } = {}) {
   }
 
   // 顶栏与评论：快速/直播都写（高光 _simLive 事件不经过本函数）
+  // ht/ft 是真实时钟边界，要显式 reset 才能落回 45'/90'：顶栏分钟是单调的
+  // （Math.max），而半场末快照已经滚到 46，不 reset 就永远显示 46'。
+  const clockBoundary = ev.type === "ht" || ev.type === "ft";
   if (snap) {
     setMatchScore(snap.homeGoals, snap.awayGoals);
-    setMatchMinute(ev.minute ?? snap.minute);
+    const m = ev.minute ?? snap.minute;
+    setMatchMinute(m, clockBoundary && ev.minute != null ? { reset: true } : undefined);
   } else if (ev.minute != null) {
-    setMatchMinute(ev.minute);
+    setMatchMinute(ev.minute, clockBoundary ? { reset: true } : undefined);
   }
   if (ev.text) appendMatchEvent(ev);
   if (ev.type === "ht") setMatchLiveState("ht");
@@ -9123,6 +9969,7 @@ async function openMatch() {
   hideHtPanel();
   hideMatchReport();
   syncMatchSpeedUI();
+  syncMatchCameraUI();
   // 2D 球场：赛前站位（可点球员）
   await ensureMatchPitch(true);
   $("#btn-sim-fast").disabled = false;
@@ -9182,6 +10029,7 @@ function setMatchScore(hg, ag) {
   if (a) a.textContent = String(ag ?? 0);
   const legacy = $("#match-score");
   if (legacy) legacy.textContent = `${hg ?? 0} - ${ag ?? 0}`;
+  matchView?.setBroadcastState?.({ homeGoals: hg ?? 0, awayGoals: ag ?? 0 });
 }
 
 let displayedMatchMinute = 0;
@@ -9190,6 +10038,7 @@ function setMatchMinute(min, { reset = false } = {}) {
   displayedMatchMinute = nextDisplayedMinute(displayedMatchMinute, min, { reset });
   const el = $("#match-minute");
   if (el) el.textContent = `${Math.floor(displayedMatchMinute)}'`;
+  matchView?.setBroadcastState?.({ minute: displayedMatchMinute });
 }
 
 /**
@@ -9502,13 +10351,41 @@ async function ensureMatchPitch(remount = false) {
     // 完整资料弹窗（暂停时最合适，进行中也可点）
     showPlayerModal(playerId);
   };
+  const onMotionStatus = (status) => updateMotionCaptureUI(status);
+  const report = pendingMatch.matchReport || matchState?.report || null;
+  const broadcastContext = {
+    derby: !!(matchState?.derby ?? pendingMatch.derby),
+    bigMatch: !!matchState?.bigMatch,
+    knockout: !!(
+      matchState?.isKnockout ||
+      ["domestic-cup", "continental-knockout"].includes(pendingMatch.competitionType)
+    ),
+    importance: Number(matchState?.importance) || 0.62,
+    attendance: report?.ticketAttendance,
+    capacity: report?.ticketCapacity,
+    attendanceRatio: report?.ticketFillPct ? Number(report.ticketFillPct) / 100 : 0.84,
+  };
   if (!matchView || remount || !matchView._built) {
     matchView = getMatchView(pitchRoot);
-    matchView.mount(home, away, { onPlayerClick });
+    matchView.mount(home, away, {
+      onPlayerClick,
+      onMotionStatus,
+      cameraPreset: matchCamera,
+      broadcastContext,
+    });
   } else {
     matchView.setOnPlayerClick(onPlayerClick);
+    matchView.setOnMotionStatus?.(onMotionStatus);
+    matchView.setBroadcastContext?.(broadcastContext);
+    matchView.setCameraPreset?.(matchCamera, { persist: false });
   }
+  matchView.setBroadcastState?.({
+    minute: displayedMatchMinute,
+    homeGoals: matchState?.hg ?? pendingMatch.homeGoals ?? 0,
+    awayGoals: matchState?.ag ?? pendingMatch.awayGoals ?? 0,
+  });
   matchView?.refreshLayout?.();
+  updateMotionCaptureUI(matchView?.getMotionDiagnosticStatus?.());
 }
 
 function hideHtPanel() {
@@ -9792,7 +10669,7 @@ function renderHtTips() {
   }
   if (tips.avgFit != null) {
     parts.push(
-      `<div class="ht-tip fit"><strong>${en ? "Avg fitness" : "首发体能"}</strong> ${tips.avgFit}%</div>`
+      `<div class="ht-tip fit"><strong>${en ? "Avg fitness" : "首发体能均"}</strong> ${tips.avgFit}%</div>`
     );
   }
   if (tips.fitness?.length) {
@@ -9848,7 +10725,9 @@ function renderHtFitnessBars() {
     return;
   }
   const en = getLang() === "en";
-  const title = en ? "XI fitness" : "首发体能";
+  // 标题不能再叫「首发体能」：上面的 ht-tip 摘要行已经占了这个词，
+  // 同一块面板里出现两个一模一样的标题。这里是逐人明细，叫「各队员体能」。
+  const title = en ? "Player fitness" : "各队员体能";
   const rows = xi
     .map((p) => {
       const fit = Math.round(p.fitness ?? 100);
@@ -10258,6 +11137,7 @@ function reportAnalysisLabels() {
         pressing: "Pressing",
         heatmap: "Action zones",
         network: "Pass network",
+        shapes: "Shapes",
         xg: "xG",
         openPlayXg: "Open-play xG",
         avgXg: "xG / shot",
@@ -10281,6 +11161,29 @@ function reportAnalysisLabels() {
         offTarget: "Off target",
         noShots: "No shots",
         noNetwork: "No completed passing links",
+        noPositions: "No spatial position sample",
+        actualUsage: "Actual phase usage",
+        averagePositions: "Average positions",
+        baseShape: "Base",
+        possessionShape: "In possession",
+        outOfPossessionShape: "Out of possession",
+        transitionAttack: "Attacking transition",
+        transitionDefend: "Defensive transition",
+        phaseTimeline: "Decision timeline",
+        preMatch: "Pre-match",
+        halfTime: "Half-time",
+        review: "Match review",
+        live: "Touchline",
+        coach: "Coach",
+        player: "Player",
+        manualPlan: "Player plan",
+        manualAdjustment: "Player adjustment",
+        coachStable: "Coach kept the base shape",
+        preMatchGuard: "Pre-match movement guard",
+        chasingGame: "Chasing the game",
+        protectingLead: "Protecting the lead",
+        structuralReview: "Structural review",
+        shapeMaintained: "Shape maintained",
       }
     : {
         title: "战术分析",
@@ -10290,6 +11193,7 @@ function reportAnalysisLabels() {
         pressing: "压迫",
         heatmap: "行动热区",
         network: "传球网络",
+        shapes: "阵型",
         xg: "期望进球",
         openPlayXg: "运动战 xG",
         avgXg: "每次射门 xG",
@@ -10313,7 +11217,97 @@ function reportAnalysisLabels() {
         offTarget: "偏出",
         noShots: "没有射门",
         noNetwork: "没有完成传球线路",
+        noPositions: "没有空间站位样本",
+        actualUsage: "实际阶段用时",
+        averagePositions: "真实平均站位",
+        baseShape: "基础",
+        possessionShape: "持球",
+        outOfPossessionShape: "无球",
+        transitionAttack: "进攻转换",
+        transitionDefend: "防守转换",
+        phaseTimeline: "调整时间线",
+        preMatch: "赛前",
+        halfTime: "中场",
+        review: "临场复核",
+        live: "场边调整",
+        coach: "主教练",
+        player: "玩家",
+        manualPlan: "玩家方案",
+        manualAdjustment: "玩家调整",
+        coachStable: "主教练保持基础阵型",
+        preMatchGuard: "赛前限制大幅移动",
+        chasingGame: "比分落后加强进攻",
+        protectingLead: "比分领先加强保护",
+        structuralReview: "结构性复核",
+        shapeMaintained: "维持阶段阵型",
       };
+}
+
+function phaseShapeReasonLabel(reason, labels) {
+  return labels[reason] || reason || labels.shapeMaintained;
+}
+
+function phaseShapeTriggerLabel(trigger, labels) {
+  return labels[
+    trigger === "half-time"
+      ? "halfTime"
+      : trigger === "review"
+        ? "review"
+        : trigger === "live"
+          ? "live"
+          : "preMatch"
+  ];
+}
+
+function shapeUsageSummary(usage, labels) {
+  if (!usage) return `<p class="muted analysis-empty">${escapeHtml(labels.noPositions)}</p>`;
+  const pct = usage.phasePct || {};
+  const rows = [
+    [labels.possessionShape, pct["in-possession"]],
+    [labels.outOfPossessionShape, pct["out-of-possession"]],
+    [labels.transitionAttack, pct["attacking-transition"]],
+    [labels.transitionDefend, pct["defensive-transition"]],
+  ];
+  const body = rows
+    .map(([label, value]) => `<div class="shape-usage-row"><span>${escapeHtml(label)}</span><strong>${Number(value || 0).toFixed(1)}%</strong></div>`)
+    .join("");
+  return `<div class="shape-usage"><div class="shape-usage-total">${escapeHtml(labels.actualUsage)} · ${(Number(usage.totalSeconds || 0) / 60).toFixed(1)} min</div>${body}</div>`;
+}
+
+function averagePositionsSvg(side, labels) {
+  const positions = side?.averagePositions || [];
+  if (!positions.length) return `<p class="muted analysis-empty">${escapeHtml(labels.noPositions)}</p>`;
+  const dots = positions
+    .map((position) => {
+      const cx = Math.max(5, Math.min(95, Number(position.x) || 50));
+      const cy = 105 - Math.max(5, Math.min(95, Number(position.y) || 50));
+      const number = position.number == null ? "?" : String(position.number);
+      const title = `${position.name || position.playerId || "?"} · ${number} · ${cx.toFixed(1)}, ${position.y?.toFixed?.(1) || "0.0"}`;
+      return `<g class="analysis-average-position"><circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="3.2" /><text x="${cx.toFixed(1)}" y="${(cy + 1.1).toFixed(1)}" text-anchor="middle">${escapeHtml(number)}</text><title>${escapeHtml(title)}</title></g>`;
+    })
+    .join("");
+  return `<svg class="analysis-pitch analysis-average-pitch" viewBox="0 0 100 110" role="img" aria-label="${escapeHtml(labels.averagePositions)}">${analysisPitchBase()}${dots}</svg>`;
+}
+
+function phaseShapeTimelineHtml(phaseShapes, report, labels) {
+  const timeline = Array.isArray(phaseShapes?.timeline) ? phaseShapes.timeline : [];
+  if (!timeline.length) return `<p class="muted analysis-empty">${escapeHtml(labels.noPositions)}</p>`;
+  const names = {
+    home: report.home.short || report.home.name,
+    away: report.away.short || report.away.name,
+  };
+  const rows = timeline
+    .slice()
+    .sort((left, right) => Number(left.minute) - Number(right.minute) || String(left.team).localeCompare(String(right.team)))
+    .map((entry) => {
+      const teamName = names[entry.team] || entry.team || "?";
+      const source = labels[entry.source] || entry.source || labels.coach;
+      const scoreGap = Number(entry.scoreGap) || 0;
+      const scoreText = scoreGap === 0 ? "0" : scoreGap > 0 ? `+${scoreGap}` : String(scoreGap);
+      return `<div class="shape-timeline-row"><time>${Number(entry.minute) || 0}'</time><strong>${escapeHtml(teamName)}</strong><span>${escapeHtml(phaseShapeTriggerLabel(entry.trigger, labels))} · ${escapeHtml(source)}</span><span class="shape-timeline-forms">${escapeHtml(`${entry.baseFormation || "4-3-3"} → ${entry.possessionFormation || entry.baseFormation || "4-3-3"} / ${entry.outOfPossessionFormation || entry.baseFormation || "4-3-3"}`)}</span><small>${escapeHtml(phaseShapeReasonLabel(entry.reason, labels))} · ${escapeHtml(scoreText)}</small></div>`;
+    })
+    .join("");
+  return `<div class="shape-timeline">${rows}</div>`;
 }
 
 function analysisCompareRow(label, homeValue, awayValue, suffix = "") {
@@ -10476,8 +11470,10 @@ function tacticalInsights(analysis, report, labels) {
     lines.push(en ? "Neither side produced a high regain." : "双方都没有形成前场夺回球权。 ");
   }
 
-  const hubSide = (home.network.hub?.passes || 0) + (home.network.hub?.received || 0) >=
-    (away.network.hub?.passes || 0) + (away.network.hub?.received || 0) ? [hn, home.network.hub] : [an, away.network.hub];
+  const homeHub = home.network?.hub || null;
+  const awayHub = away.network?.hub || null;
+  const hubSide = (homeHub?.passes || 0) + (homeHub?.received || 0) >=
+    (awayHub?.passes || 0) + (awayHub?.received || 0) ? [hn, homeHub] : [an, awayHub];
   if (hubSide[1]) {
     lines.push(en
       ? `${hubSide[1].name} was ${hubSide[0]}'s main passing hub (${hubSide[1].passes} completed passes, ${hubSide[1].received} received).`
@@ -10498,6 +11494,7 @@ function matchAnalysisHtml(analysis, report) {
     <section><h5>${escapeHtml(awayName)}</h5>${render(away)}</section>
   </div>`;
   const tabs = ["overview", "shots", "progression", "pressing", "heatmap", "network"];
+  if (report.phaseShapes) tabs.push("shapes");
   const tabHtml = tabs.map((key, index) => `<button type="button" class="analysis-tab${index ? "" : " active"}" role="tab" aria-selected="${index ? "false" : "true"}" data-analysis-tab="${key}">${escapeHtml(labels[key])}</button>`).join("");
   const overviewRows = [
     analysisCompareRow(labels.xg, Number(home.xg).toFixed(2), Number(away.xg).toFixed(2)),
@@ -10521,6 +11518,16 @@ function matchAnalysisHtml(analysis, report) {
   ].join("");
   const insights = tacticalInsights(analysis, report, labels).map((line) => `<li>${escapeHtml(line)}</li>`).join("");
   const shotLegend = ["goal", "saved", "blocked", "offTarget"].map((key) => `<span><i class="analysis-legend-dot ${key}"></i>${escapeHtml(labels[key])}</span>`).join("");
+  const phaseShapes = report.phaseShapes || null;
+  const shapeSidePlots = phaseShapes?.usage
+    ? `<div class="analysis-side-grid shape-position-grid">
+        <section><h5>${escapeHtml(homeName)} · ${escapeHtml(labels.averagePositions)}</h5>${averagePositionsSvg(phaseShapes.usage.home, labels)}</section>
+        <section><h5>${escapeHtml(awayName)} · ${escapeHtml(labels.averagePositions)}</h5>${averagePositionsSvg(phaseShapes.usage.away, labels)}</section>
+      </div>`
+    : `<p class="muted analysis-empty">${escapeHtml(labels.noPositions)}</p>`;
+  const shapeUsage = phaseShapes?.usage
+    ? `<div class="analysis-side-grid shape-usage-grid"><section><h5>${escapeHtml(homeName)}</h5>${shapeUsageSummary(phaseShapes.usage.home, labels)}</section><section><h5>${escapeHtml(awayName)}</h5>${shapeUsageSummary(phaseShapes.usage.away, labels)}</section></div>`
+    : "";
 
   return `<section class="match-analysis">
     <div class="analysis-heading"><h4>${escapeHtml(labels.title)}</h4><div class="analysis-tabs" role="tablist">${tabHtml}</div></div>
@@ -10530,6 +11537,7 @@ function matchAnalysisHtml(analysis, report) {
     <div class="analysis-panel hidden" data-analysis-panel="pressing"><div class="analysis-compare">${pressingRows}</div></div>
     <div class="analysis-panel hidden" data-analysis-panel="heatmap">${sidePlots((side) => heatmapSvg(side, labels))}</div>
     <div class="analysis-panel hidden" data-analysis-panel="network">${sidePlots((side) => passNetworkSvg(side, labels))}</div>
+    ${phaseShapes ? `<div class="analysis-panel hidden" data-analysis-panel="shapes"><div class="shape-panel-heading"><h5>${escapeHtml(labels.actualUsage)}</h5>${shapeUsage}</div>${shapeSidePlots}<h5 class="shape-timeline-heading">${escapeHtml(labels.phaseTimeline)}</h5>${phaseShapeTimelineHtml(phaseShapes, report, labels)}</div>` : ""}
   </section>`;
 }
 
@@ -10537,25 +11545,39 @@ function matchAnalysisHtml(analysis, report) {
  * @param {object} report
  * @param {{ review?: boolean }} [opts]
  */
-function showMatchReport(report, opts = {}) {
+export function showMatchReport(report, opts = {}) {
   const el = $("#match-report");
   if (!el || !report) return;
   const review = !!opts.review || !!matchPlayback.reviewMode;
   const h = report.home;
   const a = report.away;
-  const row = (label, hv, av, bar) => {
+  /**
+   * @param {string} label
+   * @param {number|string} hv
+   * @param {number|string} av
+   * @param {boolean} bar 是否画对比条
+   * @param {((n: number) => string)|null} [fmt] 数值格式化
+   *
+   * 战报表格原来直接输出原始值，于是控球写成 80.4、xG 写成 1.2345，
+   * 而同一场比赛的实时面板用的是 Math.round(...)% 和 toFixed(2)——
+   * 同一个指标在两块界面上格式和读数都对不上。这里补上与实时面板一致的格式化。
+   */
+  const row = (label, hv, av, bar, fmt = null) => {
     let barHtml = "";
     if (bar && typeof hv === "number" && typeof av === "number") {
       const t = hv + av || 1;
       const hp = Math.round((hv / t) * 100);
       barHtml = `<div class="report-bar-wrap"><div class="report-bar-h" style="width:${hp}%"></div></div>`;
     }
+    const show = (v) => (fmt && typeof v === "number" ? fmt(v) : v);
     return `<tr>
-      <td class="num">${hv}</td>
+      <td class="num">${show(hv)}</td>
       <td class="stat-label">${label}${barHtml}</td>
-      <td class="num">${av}</td>
+      <td class="num">${show(av)}</td>
     </tr>`;
   };
+  const fmtXgCell = (n) => (Number(n) || 0).toFixed(2);
+  const fmtPossCell = (n) => `${Math.round(Number(n) || 0)}%`;
   const meta = [
     report.weather ? `${report.weather.icon} ${report.weather.name}` : "",
     report.derby ? "🔥 德比" : "",
@@ -10671,10 +11693,10 @@ function showMatchReport(report, opts = {}) {
         <th>${escapeHtml(a.short || a.name)}</th>
       </tr></thead>
       <tbody>
-        ${row(t("match.xg"), h.xg, a.xg, true)}
+        ${row(t("match.xg"), h.xg, a.xg, true, fmtXgCell)}
         ${row(t("match.shots"), h.shots, a.shots, true)}
         ${row(t("match.shotsOn"), h.shotsOn, a.shotsOn, true)}
-        ${row(t("match.poss"), h.possession, a.possession, true)}
+        ${row(t("match.poss"), h.possession, a.possession, true, fmtPossCell)}
         ${row(t("match.corners"), h.corners, a.corners, true)}
         ${row(t("match.fouls"), h.fouls, a.fouls, false)}
         ${row(t("match.yellows"), h.yellows, a.yellows, false)}
@@ -10747,6 +11769,14 @@ function formatRoleReviewHtml(rev) {
 }
 
 function finishMatchUI() {
+  // 首周引导的比赛步骤在这里落定，随后由调用方的 saveGame 落盘。
+  // 工作台此刻不可见（激活屏是比赛画面），点「继续」时 refreshAll 会重渲染，
+  // 所以这里只改状态不渲染；也不能让异常冒出去，后面还要解锁「继续」按钮。
+  try {
+    if (world) completeManagerOnboardingStep(world, "match");
+  } catch (err) {
+    console.error(err);
+  }
   // 结束录制，可下载 JSON 回放
   try {
     if (matchView?.stopRecording) {
@@ -11202,7 +12232,16 @@ function toast(msg) {
   }
 }
 
+if (typeof window !== "undefined") {
+  window.vcfmMainApi = {
+    showMatchReport,
+    showMotionDiagnostic,
+    closeMotionDiagnostic,
+  };
+}
+
 // ---------- Boot ----------
+await initializeSaveStorage();
 initPrefs();
 window.addEventListener("vcfm-save-error", () => toast(t("toast.autosaveFail")));
 window.addEventListener("vc-prefs-change", () => {
@@ -11223,14 +12262,14 @@ fillDivisionSelects(START_DIVISION);
  * （否则每次刷新都会停在开始页，像「没记住进度」）
  * URL 加 ?menu=1 可强制停在开始页（例如要换档 / 导出）
  */
-function tryAutoResume() {
+async function tryAutoResume() {
   try {
     const params = new URLSearchParams(location.search || "");
     if (params.get("menu") === "1" || params.get("noload") === "1") return false;
     // session 内主动回菜单：同一会话刷新仍自动读；仅当带 menu=1 时停菜单
     const slot = getActiveSlot();
     if (!hasSave(slot)) return false;
-    const data = loadGame(slot);
+    const data = await loadGame(slot);
     if (!data) return false;
     world = data;
     dashboardAdvanceDigest = null;
@@ -11250,4 +12289,4 @@ function tryAutoResume() {
   }
 }
 
-tryAutoResume();
+await tryAutoResume();

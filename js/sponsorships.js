@@ -4,6 +4,24 @@ import { recordFinanceEntry } from "./finance-ledger.js";
 
 export const SPONSORSHIP_VERSION = 1;
 
+/**
+ * 赞助市场的名义通胀。现实里转播与赞助合同每个周期都会重新定价，
+ * 而球员工资和身价本来就随能力增长走高；市场价固定不动会让所有俱乐部
+ * 的经常性收支逐年恶化。基准取开局赛季，每季 3%，略高于实测的单人工资
+ * 通胀（约 2.7%/季），让健康经营的俱乐部还能慢慢攒下钱。
+ *
+ * 只影响新签合同的定价：已生效合同的 weeklyBase 存在存档里，不会被改写，
+ * 所以老档是在合同到期换约时自然跟上，和现实中的续约涨价一致。
+ */
+const SPONSORSHIP_BASE_SEASON = 2026;
+const SPONSORSHIP_SEASON_INFLATION = 0.03;
+
+function marketInflation(season) {
+  const value = Number(season);
+  if (!Number.isFinite(value)) return 1;
+  return Math.pow(1 + SPONSORSHIP_SEASON_INFLATION, Math.max(0, value - SPONSORSHIP_BASE_SEASON));
+}
+
 const SPONSOR_NAMES = [
   "Northstar Mobility", "Civic Union Bank", "Vertex Systems", "Summit Air",
   "Harbour Foods", "Coreline Energy", "Meridian Telecom", "Foundry Works",
@@ -23,7 +41,7 @@ function stableHash(value) {
   return hash >>> 0;
 }
 
-export function sponsorshipMarketWeekly(club) {
+export function sponsorshipMarketWeekly(club, season = null) {
   const division = Math.max(1, Math.round(number(club?.division) || 3));
   const tier = division === 1 || division === 4 || division === 6 || division === 8 || division === 10
     ? 1
@@ -33,7 +51,7 @@ export function sponsorshipMarketWeekly(club) {
   const base = { 1: 220_000, 2: 135_000, 3: 120_000 }[tier] || 120_000;
   const power = Math.max(40, Math.min(85, number(club?.power) || 55));
   const strengthFactor = 0.75 + ((power - 40) / 45) * 0.65;
-  return Math.round(base * strengthFactor);
+  return Math.round(base * strengthFactor * marketInflation(season));
 }
 
 function sponsorName(club, season, offset) {
@@ -42,7 +60,7 @@ function sponsorName(club, season, offset) {
 }
 
 function makeOffer(club, startSeason, kind, index) {
-  const market = sponsorshipMarketWeekly(club);
+  const market = sponsorshipMarketWeekly(club, startSeason);
   const profiles = {
     stable: { years: 3, baseFactor: 0.82 * 1.02, targetRate: 0.4, bonusWeeks: 8, signingWeeks: 4 },
     balanced: { years: 2, baseFactor: 0.82 * 0.93, targetRate: 0.3, bonusWeeks: 14, signingWeeks: 5 },
@@ -71,7 +89,7 @@ function offersFor(club, startSeason) {
 }
 
 function initialContract(world, club) {
-  const market = sponsorshipMarketWeekly(club);
+  const market = sponsorshipMarketWeekly(club, world.season);
   return {
     id: `sp_${club.id}_${world.season}_incumbent`,
     sponsor: sponsorName(club, world.season, 9),
@@ -88,7 +106,8 @@ function initialContract(world, club) {
 }
 
 function chooseAiOffer(club, offers) {
-  if (number(club.money) < sponsorshipMarketWeekly(club) * 6) return offers[0];
+  const season = offers[0]?.startSeason ?? null;
+  if (number(club.money) < sponsorshipMarketWeekly(club, season) * 6) return offers[0];
   return (number(club.power) || 50) >= 68 ? offers[2] : offers[1];
 }
 
@@ -148,7 +167,7 @@ export function acceptSponsorshipOffer(world, clubId, offerId) {
 }
 
 export function clubCommercialBreakdown(world, club) {
-  const market = sponsorshipMarketWeekly(club);
+  const market = sponsorshipMarketWeekly(club, world?.season);
   const state = world ? ensureClubSponsorship(world, club) : null;
   const sponsorship = Math.max(0, Math.round(number(state?.activeContract?.weeklyBase) || market * 0.82));
   const otherCommercial = Math.max(0, Math.round(market * 0.18));
@@ -191,6 +210,6 @@ export function sponsorshipSnapshot(world, club) {
     next: state.nextContract,
     offers: state.offers,
     targetPosition: Math.max(1, Math.ceil(teamCount * number(active.targetRate))),
-    otherCommercialWeekly: Math.round(sponsorshipMarketWeekly(club) * 0.18),
+    otherCommercialWeekly: Math.round(sponsorshipMarketWeekly(club, world?.season) * 0.18),
   };
 }

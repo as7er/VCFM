@@ -11,7 +11,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <title>VCFM</title>
-  <link rel="stylesheet" href="css/style.css?v=216" />
+  <link rel="stylesheet" href="css/style.css?v=238" />
   <script>
     /* 尽早应用主题/语言，避免闪白 */
     (function () {
@@ -124,30 +124,30 @@
           <span id="money-label" class="money"></span>
         </div>
         <div class="nav-stack">
-          <nav class="primary-nav" aria-label="主导航">
-            <button type="button" class="primary-tab active" data-nav-group="overview" data-i18n="nav.overview">总览</button>
-            <button type="button" class="primary-tab" data-nav-group="team" data-i18n="nav.team">球队</button>
-            <button type="button" class="primary-tab" data-nav-group="matches" data-i18n="nav.matches">比赛</button>
-            <button type="button" class="primary-tab" data-nav-group="transfer" data-i18n="nav.transfer">转会</button>
-            <button type="button" class="primary-tab" data-nav-group="world" data-i18n="nav.world">世界</button>
+          <nav class="primary-nav" aria-label="主导航" role="tablist">
+            <button type="button" role="tab" aria-selected="true" aria-current="page" class="primary-tab active" data-nav-group="overview" data-i18n="nav.overview">总览</button>
+            <button type="button" role="tab" aria-selected="false" class="primary-tab" data-nav-group="team" data-i18n="nav.team">球队</button>
+            <button type="button" role="tab" aria-selected="false" class="primary-tab" data-nav-group="matches" data-i18n="nav.matches">比赛</button>
+            <button type="button" role="tab" aria-selected="false" class="primary-tab" data-nav-group="transfer" data-i18n="nav.transfer">转会</button>
+            <button type="button" role="tab" aria-selected="false" class="primary-tab" data-nav-group="world" data-i18n="nav.world">世界</button>
           </nav>
-          <nav class="tabs" aria-label="二级导航">
-          <button data-tab="dashboard" class="tab active" data-i18n="tab.dashboard">概览</button>
-          <button data-tab="finance" class="tab" data-i18n="tab.finance">财政</button>
-          <button data-tab="squad" class="tab" data-i18n="tab.squad">阵容</button>
-          <button data-tab="youth" class="tab" data-i18n="tab.youth">青训</button>
-          <button data-tab="facilities" class="tab" data-i18n="tab.facilities">设施</button>
-          <button data-tab="staff" class="tab" data-i18n="tab.staff">职员</button>
-          <button data-tab="training" class="tab" data-i18n="tab.training">训练</button>
-          <button data-tab="tactics" class="tab" data-i18n="tab.tactics">战术</button>
-          <button data-tab="table" class="tab" data-i18n="tab.leagues">联赛中心</button>
-          <button data-tab="competitions" class="tab" data-i18n="tab.competitions">世界赛事</button>
-          <button data-tab="clubs" class="tab" data-i18n="tab.clubs">俱乐部</button>
-          <button data-tab="inbox" class="tab" data-i18n="tab.inbox">信箱</button>
-          <button data-tab="media" class="tab" data-i18n="tab.media">媒体</button>
-          <button data-tab="transfer" class="tab" data-i18n="tab.transfer">转会</button>
-          <button data-tab="career" class="tab" data-i18n="tab.career">生涯</button>
-          <button data-tab="fixtures" class="tab" data-i18n="tab.fixtures">赛程</button>
+          <nav class="tabs" aria-label="二级导航" role="tablist">
+          <button role="tab" aria-selected="true" aria-current="page" data-tab="dashboard" class="tab active" data-i18n="tab.dashboard">概览</button>
+          <button role="tab" aria-selected="false" data-tab="finance" class="tab" data-i18n="tab.finance">财政</button>
+          <button role="tab" aria-selected="false" data-tab="squad" class="tab" data-i18n="tab.squad">阵容</button>
+          <button role="tab" aria-selected="false" data-tab="youth" class="tab" data-i18n="tab.youth">青训</button>
+          <button role="tab" aria-selected="false" data-tab="facilities" class="tab" data-i18n="tab.facilities">设施</button>
+          <button role="tab" aria-selected="false" data-tab="staff" class="tab" data-i18n="tab.staff">职员</button>
+          <button role="tab" aria-selected="false" data-tab="training" class="tab" data-i18n="tab.training">训练</button>
+          <button role="tab" aria-selected="false" data-tab="tactics" class="tab" data-i18n="tab.tactics">战术</button>
+          <button role="tab" aria-selected="false" data-tab="table" class="tab" data-i18n="tab.leagues">联赛中心</button>
+          <button role="tab" aria-selected="false" data-tab="competitions" class="tab" data-i18n="tab.competitions">世界赛事</button>
+          <button role="tab" aria-selected="false" data-tab="clubs" class="tab" data-i18n="tab.clubs">俱乐部</button>
+          <button role="tab" aria-selected="false" data-tab="inbox" class="tab" data-i18n="tab.inbox">信箱</button>
+          <button role="tab" aria-selected="false" data-tab="media" class="tab" data-i18n="tab.media">媒体</button>
+          <button role="tab" aria-selected="false" data-tab="transfer" class="tab" data-i18n="tab.transfer">转会</button>
+          <button role="tab" aria-selected="false" data-tab="career" class="tab" data-i18n="tab.career">生涯</button>
+          <button role="tab" aria-selected="false" data-tab="fixtures" class="tab" data-i18n="tab.fixtures">赛程</button>
           </nav>
         </div>
         <div class="actions">
@@ -156,7 +156,7 @@
           </button>
           <button id="btn-save" class="btn small" data-i18n="btn.save">存档</button>
           <div class="topbar-continue">
-            <button id="btn-topbar-continue" class="btn primary topbar-continue-main" type="button">推进一天</button>
+            <button id="btn-topbar-continue" class="btn primary topbar-continue-main" type="button" aria-busy="false">推进一天</button>
             <details class="topbar-continue-more">
               <summary class="btn primary topbar-continue-caret" aria-label="更多推进选项" data-i18n-title="nav.moreAdvance" title="更多推进选项">
                 <span aria-hidden="true">▾</span>
@@ -168,6 +168,7 @@
               </div>
             </details>
           </div>
+          <span id="calendar-advance-status" class="sr-only" role="status" aria-live="polite"></span>
           <details class="topbar-more">
             <summary class="btn small ghost" aria-label="更多操作" data-i18n-title="nav.more">•••</summary>
             <div class="topbar-more-menu">
@@ -198,8 +199,9 @@
                   <span class="dashboard-eyebrow" data-i18n="dash.workbenchEyebrow">经理工作台</span>
                   <h2 data-i18n="dash.todayPriorities">今日重点</h2>
                 </div>
-                <span id="dashboard-workbench-status" class="dashboard-workbench-status ready" data-i18n="dash.ready">准备就绪</span>
+                <span id="dashboard-workbench-status" class="dashboard-workbench-status ready" role="status" aria-live="polite" data-i18n="dash.ready">准备就绪</span>
               </div>
+              <div id="dashboard-focus" class="dashboard-focus" hidden></div>
               <div id="dashboard-priorities" class="dashboard-priorities"></div>
               <div class="dashboard-workbench-foot">
                 <div>
@@ -208,10 +210,12 @@
                 </div>
                 <div>
                   <h3 data-i18n="dash.advanceChanges">最近推进变化</h3>
-                  <div id="dashboard-advance-summary" class="dashboard-advance-summary"></div>
+                  <div id="dashboard-advance-summary" class="dashboard-advance-summary" aria-live="polite"></div>
                 </div>
               </div>
             </section>
+
+            <section id="dashboard-onboarding" class="card dashboard-onboarding-card" hidden></section>
 
             <section class="card dashboard-match-card">
               <div class="dashboard-section-head">
@@ -422,21 +426,21 @@
                   <tr>
                     <th data-i18n="th.num">#</th>
                     <th data-i18n="th.name">姓名</th>
-                    <th class="squad-detail" data-i18n="th.nation">国籍</th>
                     <th data-i18n="th.pos">位置</th>
-                    <th class="squad-detail" data-i18n="th.age">年龄</th>
                     <th data-i18n="th.ovr">能力</th>
+                    <th data-i18n="th.form" title="近 5 场滚动状态">状态</th>
+                    <th data-i18n="th.fit">体能</th>
+                    <th data-i18n="th.contract" title="合同年限">合同</th>
+                    <th class="squad-detail" data-i18n="th.nation">国籍</th>
+                    <th class="squad-detail" data-i18n="th.age">年龄</th>
                     <th class="squad-detail" data-i18n="th.apps" title="本赛季出场">出场</th>
                     <th class="squad-detail" data-i18n="th.goalsCs" data-i18n-title="th.goalsCsTitle">进球/零封</th>
                     <th class="squad-detail" data-i18n="th.assistsGa" data-i18n-title="th.assistsGaTitle">助攻/失球</th>
                     <th class="squad-detail" data-i18n="th.avgR" title="本赛季场均评分">场均</th>
                     <th class="squad-detail" data-i18n="th.lastR" title="最近一场评分">最近</th>
-                    <th data-i18n="th.form" title="近 5 场滚动状态">状态</th>
-                    <th data-i18n="th.fit">体能</th>
                     <th class="squad-detail" data-i18n="th.morale">士气</th>
                     <th class="squad-detail" data-i18n="th.relation">关系</th>
                     <th class="squad-detail" data-i18n="th.playingTime">定位</th>
-                    <th data-i18n="th.contract" title="合同年限">合同</th>
                     <th class="squad-detail" data-i18n="th.scout">球探估值</th>
                     <th class="squad-detail" data-i18n="th.wage">周薪</th>
                     <th></th>
@@ -673,6 +677,18 @@
                 <input id="defensive-line" type="range" min="1" max="5" value="3" />
                 <span id="defensive-line-val" class="tac-slider-val">3 · 标准</span>
               </label>
+              <div class="tac-phase-shapes">
+                <h3 data-i18n="tac.phaseShapes">攻防形态</h3>
+                <div class="tac-phase-shape-grid">
+                  <label><span data-i18n="tac.possessionFormation">持球阵型</span>
+                    <select id="possession-formation-select"></select>
+                  </label>
+                  <label><span data-i18n="tac.outOfPossessionFormation">无球阵型</span>
+                    <select id="out-possession-formation-select"></select>
+                  </label>
+                </div>
+                <p class="hint" data-i18n="tac.phaseShapesHint">选择“跟随基础阵型”会随上方基础阵型同步；显式阵型只改变空间站位，不改变球员能力。</p>
+              </div>
               <div id="tac-summary" class="tac-summary" aria-live="polite"></div>
               <div id="tac-role-panel" class="tac-role-panel" aria-live="polite"></div>
               <div class="tac-core-block">
@@ -1276,7 +1292,12 @@
         <aside class="fm-commentary fmm-commentary" aria-label="match commentary">
           <div class="fm-com-head">
             <span data-i18n="match.commentary">比赛事件</span>
-            <span class="fm-com-badge" id="match-com-badge">PRE</span>
+            <div class="fm-com-tools">
+              <button type="button" class="fm-com-toggle icon-btn" id="match-com-toggle" aria-expanded="true" aria-controls="match-log" data-i18n-title="match.commentaryCollapse" title="收起实时评论">
+                <span aria-hidden="true">⌃</span>
+              </button>
+              <span class="fm-com-badge" id="match-com-badge">PRE</span>
+            </div>
           </div>
           <div id="match-log" class="match-log fm-com-log"></div>
         </aside>
@@ -1392,13 +1413,21 @@
               <button type="button" id="btn-match-sfx" class="btn small icon-btn" data-i18n-title="match.sfxHint" title="音效" aria-label="音效" aria-pressed="false">
                 <span class="mtb-glyph" aria-hidden="true">🔊</span>
               </button>
+              <button type="button" id="btn-match-motion-capture" class="btn small icon-btn" disabled data-i18n-title="match.motionCaptureHint" title="保存并检查最近比赛片段" aria-label="保存并检查最近比赛片段" data-motion-incidents="0">
+                <span class="mtb-glyph" aria-hidden="true">↓</span>
+              </button>
             </div>
             <div class="match-speed-bar" role="group" aria-label="match speed">
-              <button type="button" class="btn small" data-match-speed="0.5" title="慢放 ×0.5" aria-label="×0.5">.5</button>
+              <button type="button" class="btn small" data-match-speed="0.5" title="慢放 ×0.5" aria-label="×0.5">0.5</button>
               <button type="button" class="btn small" data-match-speed="1" title="正常观赛 ×1" aria-label="×1">1</button>
               <button type="button" class="btn small" data-match-speed="1.5" title="稍快 ×1.5" aria-label="×1.5">1.5</button>
               <button type="button" class="btn small" data-match-speed="2" title="快速 ×2" aria-label="×2">2</button>
               <button type="button" class="btn small" data-match-speed="4" title="极快 ×4" aria-label="×4">4</button>
+            </div>
+            <div class="match-camera-bar" role="group" aria-label="camera view">
+              <button type="button" class="btn small" data-match-camera="full" data-i18n="match.cameraFull" data-i18n-title="match.cameraFullHint" aria-pressed="false">全场</button>
+              <button type="button" class="btn small" data-match-camera="tv" data-i18n="match.cameraTv" data-i18n-title="match.cameraTvHint" aria-pressed="true">电视</button>
+              <button type="button" class="btn small" data-match-camera="tactical" data-i18n="match.cameraTactical" data-i18n-title="match.cameraTacticalHint" aria-pressed="false">战术</button>
             </div>
           </div>
           <div class="match-actions" id="match-main-actions">
@@ -1408,6 +1437,41 @@
             <button id="btn-match-continue" class="btn" disabled data-i18n="match.continue">赛后继续</button>
           </div>
         </footer>
+
+        <div id="match-motion-review" class="match-motion-review hidden" role="dialog" aria-modal="true" aria-labelledby="match-motion-review-title">
+          <div class="motion-review-surface">
+            <header class="motion-review-head">
+              <div>
+                <h2 id="match-motion-review-title">运动片段诊断</h2>
+                <p id="match-motion-review-meta"></p>
+              </div>
+              <div class="motion-review-actions">
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-play" title="播放" aria-label="播放"><span aria-hidden="true">▶</span></button>
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-prev" title="上一帧" aria-label="上一帧"><span aria-hidden="true">←</span></button>
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-next" title="下一帧" aria-label="下一帧"><span aria-hidden="true">→</span></button>
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-export" title="导出 JSON" aria-label="导出 JSON"><span aria-hidden="true">↓</span></button>
+                <button type="button" class="btn small icon-btn" id="btn-motion-review-close" title="关闭" aria-label="关闭"><span aria-hidden="true">×</span></button>
+              </div>
+            </header>
+            <div class="motion-review-summary" id="match-motion-review-summary"></div>
+            <div class="motion-review-pitches">
+              <figure>
+                <figcaption id="motion-engine-label">引擎坐标</figcaption>
+                <div class="motion-review-pitch" id="match-motion-engine-pitch"></div>
+              </figure>
+              <figure>
+                <figcaption id="motion-display-label">画面坐标</figcaption>
+                <div class="motion-review-pitch" id="match-motion-display-pitch"></div>
+              </figure>
+            </div>
+            <div class="motion-review-timeline">
+              <output id="match-motion-review-time">0.00s</output>
+              <input type="range" id="match-motion-review-range" min="0" max="0" step="1" value="0" aria-label="片段帧" />
+              <output id="match-motion-review-frame">0 / 0</output>
+            </div>
+            <div class="motion-review-incidents" id="match-motion-review-incidents"></div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -1443,12 +1507,12 @@
       });
     })();
   </script>
-  <script type="module" src="js/main.js?v=216"></script>
+  <script type="module" src="js/main.js?v=238"></script>
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
         // 只保留当前 CACHE 名，删掉历史 vcfm-*（须与 sw.js 的 CACHE 同步）
-        var CURRENT_CACHE = "vcfm-v216";
+        var CURRENT_CACHE = "vcfm-v238";
         if (window.caches && caches.keys) {
           caches.keys().then(function (keys) {
             return Promise.all(
@@ -1459,7 +1523,7 @@
           }).catch(function () {});
         }
         // 本地开发：若 SW 异常可导致旧坏缓存；注册失败不阻断游戏
-        navigator.serviceWorker.register("./sw.js?v=216").then(function (reg) {
+        navigator.serviceWorker.register("./sw.js?v=238").then(function (reg) {
           try { reg.update(); } catch (e) {}
           if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
         }).catch(function () {});
@@ -1468,8 +1532,8 @@
           if (refreshing) return;
           refreshing = true;
           try {
-            if (!sessionStorage.getItem("vcfm-sw-reloaded-v216")) {
-              sessionStorage.setItem("vcfm-sw-reloaded-v216", "1");
+            if (!sessionStorage.getItem("vcfm-sw-reloaded-v238")) {
+              sessionStorage.setItem("vcfm-sw-reloaded-v238", "1");
               location.reload();
             }
           } catch (e) {

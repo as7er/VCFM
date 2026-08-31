@@ -8,6 +8,7 @@ import {
   ensureClubSquadPlan,
   invalidateClubSquadPlan,
   squadPlayerPlan,
+  squadPositionPlan,
 } from "./squad-planning.js";
 
 function cashFailure(world, club, amount, label, options = {}) {
@@ -199,7 +200,17 @@ export function processContractsEndOfSeason(world) {
           continue;
         }
         const decision = squadPlayerPlan(squadPlan, p.id);
-        if (decision?.action === "renew") {
+        // 超编:合同到期的多余球员直接放走。阵容上限先前只在“别买更多”的
+        // 软刹车里参与,从不在这条到期路径里放人,于是超编一路积到失衡。
+        // 到期是零成本离队机会:续约要真付签约奖,而放走冗余球员照样把位置
+        // 上限空出来。仍尊重那种“本赛季最后还需要他”的保留判定(plan 里
+        // 的 renew 都是结构性需要,不是超编冗余)。
+        const positionOverstock = (() => {
+          if (decision?.action === "renew") return false;
+          const positionRow = squadPositionPlan(squadPlan, p.pos);
+          return !!(positionRow && positionRow.overstock);
+        })();
+        if (decision?.action === "renew" && !positionOverstock) {
           const o = renewOffer(p);
           if (club.money >= o.fee) {
             recordFinanceEntry(club, -o.fee, { category: "contract", source: "contract-renewal", season: world.season, day: world.day });
@@ -240,7 +251,9 @@ export function processContractsEndOfSeason(world) {
     });
   }
 
-  if (world.freeAgents.length > 100) world.freeAgents = world.freeAgents.slice(-100);
+  // 保留最近期的一段,避免自由市场无界膨胀;过期球员从世界移除。容量提高,
+  // 因为契约到期加上阵容超编释放会让自由市场一季内涌入更多冗余。
+  if (world.freeAgents.length > 400) world.freeAgents = world.freeAgents.slice(-400);
 
   return { userExpired, leftUser };
 }

@@ -6,6 +6,7 @@ import {
   ensureClubSquadPlan,
   evaluateRecruitmentCandidate,
   evaluateYouthCandidate,
+  selectPlannedOverstockedPosition,
   selectPlannedRecruitmentPosition,
   selectPlannedSaleCandidate,
 } from "../js/squad-planning.js";
@@ -151,6 +152,39 @@ function worldWith(...clubs) {
   home.players = home.players.filter((candidate) => candidate.pos !== "DEF" || candidate.id === weak.id).slice(0, 4);
   home.squadPlan = null;
   assert.equal(selectPlannedSaleCandidate(world, home), null, "minimum depth must be protected");
+
+  // The old guard (current > minimum) alone only blocked buying more; a squad is
+  // genuinely overstocked only when a position exceeds its formation ceiling, so
+  // sales must be gated on that and needScore must expose it.
+  const wideHome = club("surplus");
+  addSquad(wideHome, { GK: 2, DEF: 9, MID: 5, ATT: 5 }, "surplus", 12);
+  const widePeer = club("surplus_peer");
+  addSquad(widePeer, { GK: 2, DEF: 7, MID: 5, ATT: 5 }, "surplus_peer", 12);
+  const wideWorld = worldWith(wideHome, widePeer);
+  const widePlan = ensureClubSquadPlan(wideWorld, wideHome, { force: true });
+  assert.equal(widePlan.positions.DEF.overstock, true, "a nine-man defence with a five-slot ceiling must read as overstocked");
+  const low = wideHome.players.filter((candidate) => candidate.pos === "DEF").at(-1);
+  low.ovr = 9;
+  low.attrs = Object.fromEntries(Object.keys(low.attrs).map((key) => [key, 9]));
+  low.age = 30;
+  const chosen = selectPlannedSaleCandidate(wideWorld, wideHome);
+  assert.equal(chosen?.id, low.id, "an overstocked side sells its weakest extra defender");
+  const spare = wideHome.players.filter((candidate) => candidate.pos === "DEF" && candidate.id !== low.id).at(-1);
+  spare.contractYears = 1;
+  spare.weak = 7;
+  spare.ovr = 7;
+  spare.attrs = Object.fromEntries(Object.keys(spare.attrs).map((key) => [key, 7]));
+  assert.equal(
+    selectPlannedOverstockedPosition(wideWorld, wideHome),
+    "DEF",
+    "an overstocked side must admit which position is crowded"
+  );
+  // 超编位置不再参与补强:9-5-5 的后卫已经十个人,不该再买回来后卫。
+  assert.notEqual(
+    selectPlannedRecruitmentPosition(wideWorld, wideHome),
+    "DEF",
+    "an overstocked position must not be recruited back over"
+  );
 }
 
 // Recruitment follows the highest structural need and rewards actual quality, upside and registration value.
@@ -180,11 +214,57 @@ function worldWith(...clubs) {
   weak.contractYears = 1;
   const needed = ai.players.find((candidate) => candidate.pos === "ATT");
   needed.contractYears = 1;
-  const world = worldWith(user, ai);
-  processContractsEndOfSeason(world);
-  assert.ok(ai.players.some((candidate) => candidate.id === needed.id && candidate.contractYears > 0));
-  assert.equal(ai.players.some((candidate) => candidate.id === weak.id), false);
-  assert.ok(world.freeAgents.some((candidate) => candidate.id === weak.id));
+  const dealt = worldWith(user, ai);
+  processContractsEndOfSeason(dealt);
+  assert.ok(dealt.clubs[1].players.some((candidate) => candidate.id === needed.id && candidate.contractYears > 0));
+  assert.ok(dealt.freeAgents.some((candidate) => candidate.id === weak.id));
+}
+
+// An AI squad can be overstocked at a position: it keeps a needed expiring
+// starter but lets a weak, expiring surplus player go — the real "exit".
+{
+  const user = club("squad_keep_user");
+  addSquad(user, { GK: 2, DEF: 7, MID: 5, ATT: 5 }, "sku", 12);
+  const tt = club("squad_keep");
+  addSquad(tt, { GK: 3, DEF: 5, MID: 5, ATT: 3 }, "sqk", 12);
+  const ttPd = club("squad_keep_peer");
+  addSquad(ttPd, { GK: 2, DEF: 7, MID: 5, ATT: 5 }, "sqk_peer", 12);
+  // Push ATT past its 5-man ideal: 3 base + 4 extras = 7, with TWO expiring —
+  // one is the real starter, the other a weak surplus body.
+  for (let index = 0; index < 4; index++) {
+    const extra = player(`sqk_extra${index}`, "ATT", 9, 22, { potential: 9 });
+    extra.clubId = tt.id;
+    tt.players.push(extra);
+  }
+  const attackStarter = tt.players.find(
+    (candidate) => candidate.pos === "ATT" && candidate.id.startsWith("sqk_ATT")
+  );
+  attackStarter.contractYears = 1;
+  attackStarter.ovr = 14;
+  attackStarter.potential = 15;
+  attackStarter.value = attackStarter.ovr * 100_000;
+  const surplusBody = tt.players
+    .filter((candidate) => candidate.pos === "ATT" && candidate.id.startsWith("sqk_extra"))
+    .sort((a, b) => b.ovr - a.ovr)
+    .at(-1);
+  surplusBody.contractYears = 1;
+  surplusBody.ovr = 6;
+  surplusBody.attrs = Object.fromEntries(Object.keys(surplusBody.attrs || {}).map((key) => [key, 6]));
+  const gw = worldWith(user, tt, ttPd);
+  processContractsEndOfSeason(gw);
+  assert.ok(
+    gw.clubs[1].players.some((candidate) => candidate.id === attackStarter.id && candidate.contractYears > 0),
+    "a needed expiring starter must still be renewed in an overstocked side"
+  );
+  assert.equal(
+    gw.clubs[1].players.some((candidate) => candidate.id === surplusBody.id),
+    false,
+    "a weak expiring surplus player must be released from an overstocked side"
+  );
+  assert.ok(
+    gw.freeAgents.some((candidate) => candidate.id === surplusBody.id),
+    "the surplus player must land in the free-agent market"
+  );
 }
 
 // Youth promotion and AI-to-AI loans both require an actual first-team need at the destination.

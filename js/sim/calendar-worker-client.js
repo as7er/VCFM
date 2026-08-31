@@ -46,6 +46,16 @@ function ensureCalendarWorker() {
     const message = event.data || {};
     const pending = pendingRequests.get(message.requestId);
     if (!pending) return;
+    if (message.progress) {
+      try {
+        window.dispatchEvent(new CustomEvent("vcfm-calendar-progress", {
+          detail: message.progress,
+        }));
+      } catch (_) {
+        /* non-window test environment */
+      }
+      return;
+    }
     pendingRequests.delete(message.requestId);
     if (!message.ok) {
       pending.reject(new Error(message.error || "calendar worker failed"));

@@ -8,14 +8,33 @@ import {
   runPreparedMatchSimulation,
   simulateMatchSync,
 } from "../js/match.js";
-import { createWorld } from "../js/models.js";
+import { createWorld, resetIdCounter } from "../js/models.js";
 import { ensureWorldStaff } from "../js/staff.js";
 
 const clone = (value) => structuredClone(value);
 
+function seededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 4294967296;
+  };
+}
+
 const start = CLUB_TEMPLATES.find((club) => club.division === 3);
-const source = createWorld(start.id, "Background Spatial Worker Audit");
-ensureWorldStaff(source);
+const originalRandom = Math.random;
+const originalNow = Date.now;
+Math.random = seededRandom(0xabcdef01);
+Date.now = () => 1787061720042;
+let source;
+try {
+  resetIdCounter(1);
+  source = createWorld(start.id, "Background Spatial Worker Audit");
+  ensureWorldStaff(source);
+} finally {
+  Math.random = originalRandom;
+  Date.now = originalNow;
+}
 const sourceFixture = source.fixtures.find(
   (fixture) => fixture.home !== source.userClubId && fixture.away !== source.userClubId
 );
@@ -85,6 +104,31 @@ assert.equal(first.result.report.engine, "spatial-v2");
 assert.equal(first.result.report.simulationProfile, "background");
 assert.equal(first.result.report.simulationMeta?.timeStep, 0.3);
 assert.equal(first.result.report.simulationMeta?.separationPasses, 4);
+assert.equal(first.result.report.simulationMeta?.integration?.adaptive, true);
+assert.ok(
+  first.result.report.simulationMeta?.integration?.fineSharePct > 0,
+  "background match must substep critical ball interactions"
+);
+assert.ok(
+  first.result.report.simulationMeta?.integration?.fineSharePct <= 20,
+  "background critical ball windows exceeded their time budget"
+);
+// 预算由 32 上调到 34（v237，与 phase-shape-evidence-audit 同步）：恢复禁区盯人后
+// 后卫真的贴到球边（最近防守者 2.42 → 2.05 米），close-contest 细步窗口因此更常
+// 触发——这正是改动的预期后果，细步本身就是为了让禁区接触判定更准。
+// 实测代价：8 场后台档 16.6 → 17.4 秒（+4.8%），占比 31.9% → 32.3%。
+assert.ok(
+  first.result.report.simulationMeta?.integration?.extraStepSharePct <= 34,
+  "background critical ball substeps exceeded their execution budget"
+);
+assert.ok(
+  first.result.report.simulationMeta?.integration?.reasons?.["pass-interaction"] > 0,
+  "background match must preserve pass contact resolution"
+);
+assert.ok(
+  first.result.report.simulationMeta?.integration?.reasons?.["goalkeeper-motion"] > 0,
+  "background match must preserve goalkeeper reaction movement"
+);
 assert.ok(first.result.report.analysis, "AI spatial match must persist match analysis");
 assert.ok(
   JSON.stringify(first.result.report).length <= 25_000,
@@ -160,6 +204,7 @@ console.log(
       xg: first.fingerprint.xg,
       engine: first.fixture.matchEngine,
       profile: first.fixture.simulationProfile,
+      integration: first.result.report.simulationMeta?.integration,
       reportBytes: JSON.stringify(first.result.report).length,
       workerTransferBytes: JSON.stringify(completed).length,
       analysisEvents: first.result.report.analysis?.summary?.events || null,

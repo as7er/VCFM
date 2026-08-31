@@ -1,3 +1,5 @@
+import { FORMATIONS } from "./data.js";
+
 export const CURRENT_SAVE_SCHEMA_VERSION = 3;
 
 function isRecord(value) {
@@ -125,6 +127,15 @@ export function validateSaveStructure(world, options = {}) {
       for (const field of ["age", "ovr", "potential", "fitness", "morale", "wage", "value"]) {
         finiteIfPresent(player[field], `player ${player.id} ${field}`);
       }
+      finiteIfPresent(player.number, `player ${player.id} number`);
+      if (player.numberPreferences != null) {
+        if (!Array.isArray(player.numberPreferences) || player.numberPreferences.some((number) => !Number.isInteger(Number(number)) || Number(number) < 1 || Number(number) > 99)) {
+          throw new Error(`invalid save: player ${player.id} number preferences are invalid`);
+        }
+      }
+      if (player.numberPreferenceStrength != null && !["light", "normal", "strong"].includes(player.numberPreferenceStrength)) {
+        throw new Error(`invalid save: player ${player.id} number preference strength is invalid`);
+      }
       if (player.attrs != null && !isRecord(player.attrs)) {
         throw new Error(`invalid save: player ${player.id} attributes are invalid`);
       }
@@ -148,6 +159,15 @@ export function validateSaveStructure(world, options = {}) {
       for (const field of ["age", "ovr", "potential", "fitness", "morale", "wage", "value"]) {
         finiteIfPresent(player[field], `youth player ${player.id} ${field}`);
       }
+      finiteIfPresent(player.number, `youth player ${player.id} number`);
+      if (player.numberPreferences != null) {
+        if (!Array.isArray(player.numberPreferences) || player.numberPreferences.some((number) => !Number.isInteger(Number(number)) || Number(number) < 1 || Number(number) > 99)) {
+          throw new Error(`invalid save: youth player ${player.id} number preferences are invalid`);
+        }
+      }
+      if (player.numberPreferenceStrength != null && !["light", "normal", "strong"].includes(player.numberPreferenceStrength)) {
+        throw new Error(`invalid save: youth player ${player.id} number preference strength is invalid`);
+      }
       validatePlayerHabits(player, `youth player ${player.id}`);
       if (player.developmentStats != null) {
         if (!isRecord(player.developmentStats)) throw new Error(`invalid save: youth player ${player.id} development stats are invalid`);
@@ -169,6 +189,26 @@ export function validateSaveStructure(world, options = {}) {
           throw new Error(`invalid save: club ${club.id} lineup contains duplicate player`);
         }
         lineupIds.add(playerId);
+      }
+    }
+    if (club.numberRegistration != null) {
+      if (!isRecord(club.numberRegistration)) throw new Error(`invalid save: club ${club.id} number registration is invalid`);
+      finiteIfPresent(club.numberRegistration.season, `club ${club.id} number registration season`);
+      for (const field of ["entries", "youthEntries"]) {
+        if (club.numberRegistration[field] != null && !isRecord(club.numberRegistration[field])) {
+          throw new Error(`invalid save: club ${club.id} number registration ${field} is invalid`);
+        }
+        for (const [playerId, number] of Object.entries(club.numberRegistration[field] || {})) {
+          if (typeof playerId !== "string" || !playerId || !Number.isInteger(Number(number)) || Number(number) < 1 || Number(number) > 99) {
+            throw new Error(`invalid save: club ${club.id} number registration entry is invalid`);
+          }
+        }
+      }
+    }
+    for (const field of ["possessionFormation", "outOfPossessionFormation"]) {
+      const formationId = club.tactics?.[field];
+      if (formationId != null && (typeof formationId !== "string" || !FORMATIONS[formationId])) {
+        throw new Error(`invalid save: club ${club.id} ${field} is invalid`);
       }
     }
     // 战术角色与职责：结构与 lineup 同长、每项为非空字符串；合法角色/职责 id
@@ -199,6 +239,18 @@ export function validateSaveStructure(world, options = {}) {
       !Number.isFinite(Number(club.tactics.coachRoleIdentityVersion))
     ) {
       throw new Error(`invalid save: club ${club.id} coach role identity version is invalid`);
+    }
+    if (
+      club.tactics?.coachPhaseIdentityId != null &&
+      typeof club.tactics.coachPhaseIdentityId !== "string"
+    ) {
+      throw new Error(`invalid save: club ${club.id} coach phase identity is invalid`);
+    }
+    if (
+      club.tactics?.coachPhaseIdentityVersion != null &&
+      !Number.isFinite(Number(club.tactics.coachPhaseIdentityVersion))
+    ) {
+      throw new Error(`invalid save: club ${club.id} coach phase identity version is invalid`);
     }
     clubIds.add(club.id);
   }

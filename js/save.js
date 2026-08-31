@@ -1,9 +1,10 @@
-/** 本地存档：多槽位 localStorage + 导出/导入文件 */
+/** 本地存档：IndexedDB 多槽位，localStorage 兼容回退，支持导出/导入。 */
 
 import { compressToUTF16, decompressFromUTF16 } from "./compress.js";
 import { clubBrandingById } from "./clubs.js";
 import { localizedClubName } from "./branding.js";
 import { validateSaveStructure } from "./save-schema.js";
+import { stringifyWorldForSave } from "./save-serialization.js";
 
 // 新键名（VCFM）；旧键兼容读取后迁移
 const LEGACY_KEY = "vcfm_save_v1";
@@ -16,9 +17,12 @@ const OLD_ACTIVE_KEY = "vc_fm_active_slot";
 const OLD_META_KEY = "vc_fm_slots_meta";
 export const SLOT_COUNT = 3;
 const COMPRESSED_PREFIX = "VCFMZ1:";
+const SAVE_DB_NAME = "vcfm-saves";
+const SAVE_DB_VERSION = 1;
+const SAVE_STORE = "slots";
 
 function encodeWorld(world) {
-  return COMPRESSED_PREFIX + compressToUTF16(JSON.stringify(world));
+  return COMPRESSED_PREFIX + compressToUTF16(stringifyWorldForSave(world));
 }
 
 function encodeJson(json) {
@@ -36,11 +40,18 @@ function decodeWorld(raw) {
 let saveWorker = null;
 let saveWorkerDisabled = false;
 let activeJob = null;
+let saveDb = null;
+let storageInitialization = null;
+let activeDurableJob = null;
 let saveToken = 0;
 const queuedJobs = new Map();
+const queuedDurableJobs = new Map();
 const latestTokenBySlot = new Map();
 const pendingJsonBySlot = new Map();
 const pendingJobsBySlot = new Map();
+const durableSlots = new Set();
+const deletedDurableSlots = new Set();
+const durableIdleWaiters = new Set();
 
 function emitSaveError(error) {
   console.error(error);
@@ -49,6 +60,160 @@ function emitSaveError(error) {
   } catch (_) {
     /* non-browser test environment */
   }
+}
+
+function openSaveDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(SAVE_DB_NAME, SAVE_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(SAVE_STORE)) {
+        db.createObjectStore(SAVE_STORE, { keyPath: "slot" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("save database could not be opened"));
+    request.onblocked = () => reject(new Error("save database upgrade was blocked"));
+  });
+}
+
+function saveDbRequest(mode, operation) {
+  if (!saveDb) return Promise.reject(new Error("save database is unavailable"));
+  return new Promise((resolve, reject) => {
+    const transaction = saveDb.transaction(SAVE_STORE, mode);
+    const store = transaction.objectStore(SAVE_STORE);
+    let request;
+    try {
+      request = operation(store);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    transaction.oncomplete = () => resolve(request?.result);
+    transaction.onerror = () => reject(transaction.error || request?.error || new Error("save transaction failed"));
+    transaction.onabort = () => reject(transaction.error || new Error("save transaction was aborted"));
+  });
+}
+
+function durableRecord(slot) {
+  return saveDbRequest("readonly", (store) => store.get(Number(slot)));
+}
+
+function writeDurableRecord(job) {
+  return saveDbRequest("readwrite", (store) => store.put({
+    slot: job.slot,
+    json: job.json,
+    meta: job.meta,
+  }));
+}
+
+function deleteDurableRecord(slot) {
+  return saveDbRequest("readwrite", (store) => store.delete(Number(slot)));
+}
+
+function resolveDurableIdleWaiters() {
+  if (activeDurableJob || queuedDurableJobs.size) return;
+  for (const resolve of durableIdleWaiters) resolve();
+  durableIdleWaiters.clear();
+}
+
+function startNextDurableJob() {
+  if (activeDurableJob || !saveDb || !queuedDurableJobs.size) {
+    resolveDurableIdleWaiters();
+    return;
+  }
+  const job = queuedDurableJobs.values().next().value;
+  queuedDurableJobs.delete(job.slot);
+  activeDurableJob = job;
+  writeDurableRecord(job)
+    .then(async () => {
+      if (deletedDurableSlots.has(job.slot)) {
+        await deleteDurableRecord(job.slot);
+      } else if (latestTokenBySlot.get(job.slot) === job.token) {
+        durableSlots.add(job.slot);
+        pendingJsonBySlot.delete(job.slot);
+        pendingJobsBySlot.delete(job.slot);
+      }
+    })
+    .catch((error) => emitSaveError(error))
+    .finally(() => {
+      activeDurableJob = null;
+      startNextDurableJob();
+    });
+}
+
+function queueDurableSave(world, slot) {
+  if (!saveDb) return false;
+  const json = stringifyWorldForSave(world);
+  const job = {
+    token: ++saveToken,
+    slot,
+    json,
+    meta: metaFromWorld(world),
+  };
+  deletedDurableSlots.delete(slot);
+  durableSlots.add(slot);
+  latestTokenBySlot.set(slot, job.token);
+  pendingJsonBySlot.set(slot, json);
+  pendingJobsBySlot.set(slot, job);
+  queuedDurableJobs.set(slot, job);
+  const meta = readMeta();
+  meta[slot] = job.meta;
+  writeMeta(meta);
+  startNextDurableJob();
+  return true;
+}
+
+export function waitForPendingSaves() {
+  if (!saveDb || (!activeDurableJob && !queuedDurableJobs.size)) return Promise.resolve();
+  return new Promise((resolve) => durableIdleWaiters.add(resolve));
+}
+
+async function initializeDurableStorage() {
+  if (typeof indexedDB === "undefined") return false;
+  try {
+    saveDb = await openSaveDatabase();
+    const keys = await saveDbRequest("readonly", (store) => store.getAllKeys());
+    for (const key of keys || []) durableSlots.add(Number(key));
+
+    migrateKeyNames();
+    migrateLegacySave();
+    for (let slot = 1; slot <= SLOT_COUNT; slot++) {
+      const key = slotKey(slot);
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      if (!durableSlots.has(slot)) {
+        const world = decodeWorld(raw);
+        const meta = readMeta()[slot] || metaFromWorld(world);
+        await saveDbRequest("readwrite", (store) => store.put({
+          slot,
+          json: stringifyWorldForSave(world),
+          meta,
+        }));
+        durableSlots.add(slot);
+      }
+      localStorage.removeItem(key);
+      localStorage.removeItem(oldSlotKey(slot));
+      if (slot === 1) localStorage.removeItem(LEGACY_KEY);
+    }
+    localStorage.removeItem(OLD_LEGACY_KEY);
+    return true;
+  } catch (error) {
+    try {
+      saveDb?.close();
+    } catch (_) {
+      /* already closed */
+    }
+    saveDb = null;
+    console.warn("IndexedDB save storage unavailable; using localStorage fallback", error);
+    return false;
+  }
+}
+
+/** Opens the durable browser store and migrates legacy localStorage slots once. */
+export function initializeSaveStorage() {
+  if (!storageInitialization) storageInitialization = initializeDurableStorage();
+  return storageInitialization;
 }
 
 function writeEncodedSave(job, encoded) {
@@ -78,6 +243,8 @@ function disableSaveWorker() {
 
 /** Synchronously persists the latest pending snapshot for every slot. */
 export function flushPendingSaves({ reportError = true, disableWorker = false } = {}) {
+  // IndexedDB writes are already in flight and cannot be made synchronous during unload.
+  if (saveDb) return true;
   if (disableWorker) disableSaveWorker();
   let ok = true;
   for (const [slot, job] of [...pendingJobsBySlot]) {
@@ -154,7 +321,7 @@ function ensureSaveWorker() {
 function queueSave(world, slot) {
   const worker = ensureSaveWorker();
   if (!worker) return false;
-  const json = JSON.stringify(world);
+  const json = stringifyWorldForSave(world);
   const job = {
     token: ++saveToken,
     slot,
@@ -293,6 +460,7 @@ export function listSlots() {
   for (let i = 1; i <= SLOT_COUNT; i++) {
     const pending = pendingJsonBySlot.get(i);
     const raw = pending || localStorage.getItem(slotKey(i));
+    const durable = durableSlots.has(i);
     let info = meta[i] || null;
     if (raw && !info) {
       try {
@@ -317,7 +485,7 @@ export function listSlots() {
     }
     out.push({
       slot: i,
-      empty: !raw,
+      empty: !raw && !durable,
       ...info,
     });
   }
@@ -328,7 +496,7 @@ export function hasAnySave() {
   migrateKeyNames();
   migrateLegacySave();
   for (let i = 1; i <= SLOT_COUNT; i++) {
-    if (pendingJsonBySlot.has(i) || localStorage.getItem(slotKey(i))) return true;
+    if (pendingJsonBySlot.has(i) || durableSlots.has(i) || localStorage.getItem(slotKey(i))) return true;
   }
   return !!localStorage.getItem(LEGACY_KEY);
 }
@@ -337,9 +505,9 @@ export function hasSave(slot = null) {
   migrateKeyNames();
   migrateLegacySave();
   if (slot == null) {
-    return pendingJsonBySlot.has(getActiveSlot()) || !!localStorage.getItem(slotKey(getActiveSlot())) || !!localStorage.getItem(LEGACY_KEY);
+    return pendingJsonBySlot.has(getActiveSlot()) || durableSlots.has(getActiveSlot()) || !!localStorage.getItem(slotKey(getActiveSlot())) || !!localStorage.getItem(LEGACY_KEY);
   }
-  return pendingJsonBySlot.has(Number(slot)) || !!localStorage.getItem(slotKey(slot));
+  return pendingJsonBySlot.has(Number(slot)) || durableSlots.has(Number(slot)) || !!localStorage.getItem(slotKey(slot));
 }
 
 /** 仅允许 1..SLOT_COUNT；非法值回落到活动槽或 1，避免写出 vcfm_slot_0 等孤儿键 */
@@ -354,6 +522,10 @@ export function saveGame(world, slot = null, { immediate = false } = {}) {
   try {
     migrateKeyNames();
     const s = resolveSlot(slot);
+    if (queueDurableSave(world, s)) {
+      setActiveSlot(s);
+      return true;
+    }
     if (!immediate && queueSave(world, s)) {
       setActiveSlot(s);
       return true;
@@ -377,17 +549,29 @@ export function saveGame(world, slot = null, { immediate = false } = {}) {
   }
 }
 
-export function loadGame(slot = null) {
+export async function loadGame(slot = null) {
   try {
+    await initializeSaveStorage();
     migrateKeyNames();
     migrateLegacySave();
     const s = resolveSlot(slot);
     const pending = pendingJsonBySlot.get(s);
-    let raw = pending || localStorage.getItem(slotKey(s));
+    if (pending) {
+      setActiveSlot(s);
+      return JSON.parse(pending);
+    }
+    if (saveDb && durableSlots.has(s)) {
+      const record = await durableRecord(s);
+      if (record?.json) {
+        setActiveSlot(s);
+        return JSON.parse(record.json);
+      }
+    }
+    let raw = localStorage.getItem(slotKey(s));
     if (!raw && s === 1) raw = localStorage.getItem(LEGACY_KEY);
     if (!raw) return null;
     setActiveSlot(s);
-    return pending ? JSON.parse(pending) : decodeWorld(raw);
+    return decodeWorld(raw);
   } catch (e) {
     console.error(e);
     return null;
@@ -403,7 +587,11 @@ export function clearSave(slot = null) {
     pendingJsonBySlot.delete(s);
     pendingJobsBySlot.delete(s);
     queuedJobs.delete(s);
+    queuedDurableJobs.delete(s);
+    durableSlots.delete(s);
+    deletedDurableSlots.add(s);
     latestTokenBySlot.set(s, ++saveToken);
+    if (saveDb) deleteDurableRecord(s).catch(emitSaveError);
     localStorage.removeItem(oldSlotKey(s));
     if (s === 1) {
       localStorage.removeItem(LEGACY_KEY);
@@ -450,7 +638,7 @@ export function formatSlotLabel(info) {
 export function exportSaveDownload(world) {
   if (!world) return false;
   try {
-    const blob = new Blob([JSON.stringify(world)], { type: "application/json" });
+    const blob = new Blob([stringifyWorldForSave(world)], { type: "application/json" });
     const a = document.createElement("a");
     const club = world.userClubId || "club";
     a.href = URL.createObjectURL(blob);

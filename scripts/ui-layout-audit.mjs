@@ -28,12 +28,18 @@ assert.doesNotMatch(main, /(?<!\$)\$\(\"\.(?:primary-tab|tab|tab-panel)\"\)\.for
 assert.ok(css.includes("#squad-table.squad-compact .squad-detail"));
 assert.ok(css.includes(".dashboard-layout"));
 assert.ok(html.includes('id="dashboard-priorities"'), "manager workbench priority region required");
+assert.ok(html.includes('id="dashboard-onboarding"'), "first-week onboarding region required");
 assert.ok(html.includes('id="dashboard-quick-actions"'), "manager workbench quick actions required");
 assert.ok(html.includes('id="dashboard-advance-summary"'), "calendar change summary required");
 assert.ok(main.includes("collectDashboardWorkbench"), "dashboard must derive priorities from live world state");
+assert.ok(main.includes("managerOnboardingView"), "dashboard must derive onboarding from save state");
 assert.ok(main.includes("captureAdvanceSnapshot") && main.includes("buildAdvanceDigest"), "calendar advancement must compare before/after state");
 assert.ok(main.includes('closest("[data-dashboard-link]")'), "workbench links must use delegated tab navigation");
 assert.ok(workbench.includes("renderManagerWorkbench"));
+assert.ok(workbench.includes('focus.title || (en ? "No focus yet" : "暂无重点")'), "focus title must not be swallowed by ternary precedence");
+assert.ok(workbench.includes("const list = sorted.slice(1, 5)"), "priority list must not repeat the enlarged focus item");
+assert.ok(html.includes('id="calendar-advance-status"'), "calendar advancement needs an accessible live status");
+assert.ok(main.includes('setAttribute("aria-current", active ? "page" : "false")'), "navigation must expose its current page");
 assert.ok(css.includes(".dashboard-priority-item") && css.includes(".dashboard-advance-summary"));
 assert.ok(css.includes(".finance-layout"));
 assert.ok(css.includes(".btn:focus-visible"));

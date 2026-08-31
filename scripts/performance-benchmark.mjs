@@ -4,6 +4,7 @@ import { CLUB_TEMPLATES, START_DIVISIONS } from "../js/data.js";
 import { createWorld } from "../js/models.js";
 import { advanceDay } from "../js/engine.js";
 import { compressToUTF16 } from "../js/compress.js";
+import { stringifyWorldForSave } from "../js/save-serialization.js";
 
 const args = new Set(process.argv.slice(2));
 const daysArg = process.argv.find((arg) => arg.startsWith("--days="));
@@ -14,7 +15,7 @@ if (!start) throw new Error("a playable starting club is required");
 
 function snapshotMetrics(world) {
   const serializeStart = performance.now();
-  const json = JSON.stringify(world);
+  const json = stringifyWorldForSave(world);
   const serializeMs = performance.now() - serializeStart;
   const compressStart = performance.now();
   const packed = compressToUTF16(json);

@@ -124,7 +124,7 @@ export function getProject(club, kind) {
   return (f.projects || []).find((p) => p.kind === kind) || null;
 }
 
-function upgradeCost(kind, nextLv) {
+export function facilityUpgradeCost(kind, nextLv) {
   if (kind === "stadium") return STADIUM_UPGRADE_COST[nextLv];
   if (kind === "training") return TRAINING_FACILITY_COST[nextLv];
   if (kind === "youth") return YOUTH_UPGRADE_COST[nextLv];
@@ -142,7 +142,7 @@ function levelName(kind, lv) {
  * 开工升级（扩建/新建看台/训练/青训）
  * world.day 用于计算完工日
  */
-export function startFacilityUpgrade(world, clubId, kind) {
+export function startFacilityUpgrade(world, clubId, kind, { announce = true } = {}) {
   if (!["stadium", "training", "youth"].includes(kind)) {
     return { ok: false, msg: "未知设施类型" };
   }
@@ -165,7 +165,7 @@ export function startFacilityUpgrade(world, clubId, kind) {
   if (cur >= FACILITY_MAX) return { ok: false, msg: `${LABELS[kind]}已满级` };
 
   const next = cur + 1;
-  const cost = upgradeCost(kind, next);
+  const cost = facilityUpgradeCost(kind, next);
   if (cost == null) return { ok: false, msg: "无法升级" };
   const cash = clubCashAvailability(world, club, cost);
   if (!cash.ok) {
@@ -203,16 +203,85 @@ export function startFacilityUpgrade(world, clubId, kind) {
   f.projects.push(project);
 
   const label = LABELS[kind];
-  world.news.unshift({
-    day: world.day,
-    text: `🏗️ ${club.name} ${verb}${label}：目标「${project.name}」（Lv.${next}），工期 ${days} 天，花费 ${formatMoney(cost)}`,
-  });
+  if (announce || club.id === world.userClubId) {
+    world.news.unshift({
+      day: world.day,
+      text: `🏗️ ${club.name} ${verb}${label}：目标「${project.name}」（Lv.${next}），工期 ${days} 天，花费 ${formatMoney(cost)}`,
+    });
+  }
 
   return {
     ok: true,
     msg: `已开工${verb}${label} → ${project.name}（${days} 天后完工，${formatMoney(cost)}）`,
     project,
   };
+}
+
+function stableScore(value) {
+  let hash = 2166136261;
+  for (const char of String(value)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * AI clubs reinvest retained football income into visible assets. One project
+ * per season prevents construction spam; debt, restrictions and a tier-based
+ * cash reserve take precedence over expansion.
+ */
+export function processAiFacilityInvestment(world) {
+  if (!world || world.seasonOver || Number(world.day) % 28 !== 0) return [];
+  const actions = [];
+  for (const club of world.clubs || []) {
+    if (club.id === world.userClubId) continue;
+    const finance = club.finance || (club.finance = {});
+    if (finance.lastAiFacilityInvestmentSeason === world.season) continue;
+    if (finance.compliance?.transferEmbargo || finance.debtPlan?.transferEmbargo) continue;
+    if (Number(finance.debtPlan?.ownerDebt) > 0 || Number(club.ownerDebt) > 0) continue;
+
+    const facilities = ensureFacilities(club);
+    if (facilities.projects.length) continue;
+    const tier = Math.max(1, Math.min(3, Number(DIVISIONS[club.division]?.tier) || 3));
+    const power = Math.max(40, Math.min(85, Number(club.power) || 55));
+    const baseCeiling = { 1: 5, 2: 4, 3: 3 }[tier];
+    const strengthFloor = { 1: 62, 2: 55, 3: 48 }[tier];
+    const target = Math.max(2, baseCeiling - (power < strengthFloor ? 1 : 0));
+    const candidates = ["stadium", "training", "youth"]
+      .filter((kind) => facilities[kind] < target && !isBuilding(club, kind))
+      .map((kind) => {
+        const next = facilities[kind] + 1;
+        return {
+          kind,
+          next,
+          cost: facilityUpgradeCost(kind, next),
+          gap: target - facilities[kind],
+          tie: stableScore(`${club.id}:${world.season}:${kind}`) % 100,
+        };
+      })
+      .filter((candidate) => Number(candidate.cost) > 0)
+      .sort((left, right) => right.gap - left.gap || right.tie - left.tie);
+    if (!candidates.length) continue;
+
+    const reserve = { 1: 6_000_000, 2: 3_000_000, 3: 1_500_000 }[tier];
+    const candidate = candidates.find((item) =>
+      Number(club.money) >= item.cost + Math.max(reserve, Math.round(item.cost * 0.5))
+    );
+    if (!candidate) continue;
+    const result = startFacilityUpgrade(world, club.id, candidate.kind, { announce: false });
+    if (!result.ok) continue;
+    finance.lastAiFacilityInvestmentSeason = world.season;
+    finance.lastAiFacilityInvestmentDay = world.day;
+    finance.lastAiFacilityInvestment = {
+      kind: candidate.kind,
+      from: candidate.next - 1,
+      to: candidate.next,
+      cost: candidate.cost,
+    };
+    actions.push({ clubId: club.id, ...finance.lastAiFacilityInvestment });
+  }
+  return actions;
 }
 
 /** 兼容旧青训升级按钮：走设施工期系统 */

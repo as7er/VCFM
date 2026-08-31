@@ -48,7 +48,7 @@ async function assertCrestLoaded(locator, label) {
 
 async function assertStraightPassRendering(page) {
   const result = await page.evaluate(async () => {
-    const { MatchView } = await import("./js/matchview.js?v=216");
+    const { MatchView } = await import("./js/matchview.js?v=229");
     const positions = ["GK", "DEF", "DEF", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT", "ATT"];
     const makeClub = (id, color) => {
       const players = positions.map((pos, index) => ({
@@ -109,7 +109,13 @@ async function assertStraightPassRendering(page) {
     const view = new MatchView(root);
     const home = makeClub("trail-home", "#2563eb");
     const away = makeClub("trail-away", "#dc2626");
-    view.mount(home, away);
+    const motionStatusUpdates = [];
+    view.mount(home, away, {
+      onMotionStatus: (status) => motionStatusUpdates.push({
+        frames: status.frames,
+        incidents: status.incidents,
+      }),
+    });
     view.stopLoop();
     view.setSimDrive(true);
     view.refreshLayout();
@@ -128,7 +134,14 @@ async function assertStraightPassRendering(page) {
     const receiverId = home.players[7].id;
     const withActors = (passer, receiver) => playerFrames.map((player) => {
       if (player.id === passerId) return { ...player, x: passer.x, y: passer.y };
-      if (player.id === receiverId) return { ...player, x: receiver.x, y: receiver.y };
+      if (player.id === receiverId) return {
+        ...player,
+        x: receiver.x,
+        y: receiver.y,
+        fsm: "support",
+        shapePhase: "in-possession",
+        movementTarget: { x: 58, y: 48, source: "layered", setAt: 0, until: 1.5, phase: "in-possession", ownerId: passerId },
+      };
       return player;
     });
     const frames = [
@@ -178,6 +191,12 @@ async function assertStraightPassRendering(page) {
     const receiveSamples = samples.filter((sample) => sample.frameIndex === 2);
     const flightTrail = view._ballTrail.slice();
     const recordedFinalCarrierId = view.carrier?.id || null;
+    const motionClip = view.createMotionClip({
+      reason: "browser-audit",
+      createdAt: "2026-08-18T00:00:00.000Z",
+      metadata: { fixtureId: "browser-motion", matchSeed: 229 },
+    });
+    const motionStatus = view.getMotionDiagnosticStatus();
     const context = view.canvas.getContext("2d");
     const pixels = context.getImageData(0, 0, view.canvas.width, view.canvas.height).data;
     let nonBlankPixels = 0;
@@ -302,6 +321,35 @@ async function assertStraightPassRendering(page) {
       passNetwork: JSON.stringify([...view.passNetwork.entries()]),
       heat: JSON.stringify(view.heatCells.map(({ home: valueHome, away: valueAway }) => [valueHome, valueAway])),
     };
+    view.ball.x = 84;
+    view.ball.y = 8;
+    view.setCameraPreset("full", { persist: false });
+    view._updateSimCamera(0.1);
+    const fullCamera = { x: view.cam.tx, y: view.cam.ty, scale: view.cam.tScale };
+    view.setCameraPreset("tv", { persist: false });
+    view.camMode = "box";
+    view._updateSimCamera(0.1);
+    const tvCamera = { x: view.cam.tx, y: view.cam.ty, scale: view.cam.tScale };
+    view.setCameraPreset("tactical", { persist: false });
+    view._updateSimCamera(0.1);
+    view._drawCanvas();
+    const tacticalCamera = {
+      x: view.cam.tx,
+      y: view.cam.ty,
+      scale: view.cam.tScale,
+      classApplied: view.fieldEl.classList.contains("mp-camera-tactical"),
+    };
+    const motionReviewOpened = window.vcfmMainApi?.showMotionDiagnostic(motionClip) || false;
+    const motionReview = {
+      visible: !document.querySelector("#match-motion-review")?.classList.contains("hidden"),
+      enginePlayers: document.querySelectorAll("#match-motion-engine-pitch svg g:not(.motion-target)").length,
+      displayPlayers: document.querySelectorAll("#match-motion-display-pitch svg g:not(.motion-target)").length,
+      engineTargets: document.querySelectorAll("#match-motion-engine-pitch .motion-target").length,
+      displayTargets: document.querySelectorAll("#match-motion-display-pitch .motion-target").length,
+      incidentRows: document.querySelectorAll("#match-motion-review-incidents [data-motion-frame]").length,
+      rangeMax: Number(document.querySelector("#match-motion-review-range")?.max || 0),
+    };
+    window.vcfmMainApi?.closeMotionDiagnostic();
     view.destroy();
     root.remove();
     return {
@@ -328,6 +376,19 @@ async function assertStraightPassRendering(page) {
       goalSequenceReplayReturn,
       fullTimeReplayPlayed,
       fullTimeReplayReturn,
+      fullCamera,
+      tvCamera,
+      tacticalCamera,
+      motionClip: {
+        kind: motionClip.kind,
+        frames: motionClip.frames.length,
+        incidents: motionClip.incidents.length,
+        seed: motionClip.metadata.matchSeed,
+      },
+      motionStatus,
+      motionStatusUpdates,
+      motionReviewOpened,
+      motionReview,
     };
   });
 
@@ -381,6 +442,92 @@ async function assertStraightPassRendering(page) {
     { state: "FULL_TIME", subState: null, simDrive: false, frozen: true },
     "recorded goal replay did not restore the full-time state"
   );
+  assert.deepEqual(result.fullCamera, { x: 0, y: 0, scale: 1 }, "full-pitch camera moved during box action");
+  assert.ok(result.tvCamera.scale > 1.04, "TV camera did not push in for box action");
+  assert.notEqual(result.tvCamera.y, 0, "TV camera did not follow deep play");
+  assert.deepEqual(
+    result.tacticalCamera,
+    { x: 0, y: 0, scale: 1, classApplied: true },
+    "tactical camera was not fixed or did not enable live structure rendering"
+  );
+  assert.equal(result.motionClip.kind, "vcfm-motion-clip");
+  assert.ok(result.motionClip.frames >= 4, "motion clip did not retain the rendered pass frames");
+  assert.ok(result.motionClip.incidents >= 1, "synthetic high-speed pass did not receive an automatic marker");
+  assert.equal(result.motionClip.seed, 229);
+  assert.ok(result.motionStatusUpdates.some((status) => status.frames >= 2), "motion status callback never enabled capture");
+  assert.equal(result.motionReviewOpened, true);
+  assert.equal(result.motionReview.visible, true);
+  assert.equal(result.motionReview.enginePlayers, 22);
+  assert.equal(result.motionReview.displayPlayers, 22);
+  assert.ok(result.motionReview.engineTargets >= 1);
+  assert.ok(result.motionReview.displayTargets >= 1);
+  assert.ok(result.motionReview.incidentRows >= 1);
+  assert.equal(result.motionReview.rangeMax, result.motionClip.frames - 1);
+}
+
+async function assertInboxEntityLinks(page) {
+  const fixture = await page.evaluate(async () => {
+    const { getActiveSlot, loadGame, saveGame } = await import("./js/save.js");
+    const { pushInbox } = await import("./js/inbox.js");
+    const snapshot = await loadGame(getActiveSlot());
+    const user = snapshot.clubs.find((club) => club.id === snapshot.userClubId);
+    const other = snapshot.clubs.find((club) => club.id !== snapshot.userClubId);
+    const player = user.players[0];
+    const staff = Object.values(user.staff || {}).find(Boolean);
+    const nationCode = player.nationality;
+    const mail = pushInbox(snapshot, {
+      category: "system",
+      priority: 1,
+      title: `${player.name} 与 ${other.name} 的资料查阅`,
+      body: `${player.name}、${other.name}、${staff.name} 和 ${nationCode} 均应可直接打开详情。`,
+      ref: {
+        kind: "browser_entity_audit",
+        playerId: player.id,
+        playerClubId: user.id,
+        clubId: other.id,
+        nationCode,
+        staffId: staff.id,
+        staffClubId: user.id,
+      },
+      actions: [{ id: "ack", label: "知道了", labelEn: "OK" }],
+    });
+    saveGame(snapshot, getActiveSlot(), { immediate: true });
+    return {
+      mailId: mail.id,
+      player: player.name,
+      club: other.name,
+      staff: staff.name,
+      nation: nationCode,
+    };
+  });
+  await page.waitForTimeout(900);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => !!window.vcfmMainApi);
+  await page.locator('[data-tab="inbox"]').click();
+  await page.waitForSelector("#tab-inbox.active .inbox-item");
+  const item = page.locator(`#inbox-list [data-mail-id="${fixture.mailId}"]`);
+  await item.waitFor();
+  assert.ok(await item.locator("[data-player-link]").count() > 0, "inbox player should be a detail link");
+  assert.ok(await item.locator("[data-club-link]").count() > 0, "inbox club should be a detail link");
+  assert.ok(await item.locator("[data-staff-link]").count() > 0, "inbox staff should be a detail link");
+  assert.ok(await item.locator("[data-nation]").count() > 0, "inbox nation should be a detail link");
+
+  const openAndCheck = async (selector, expected) => {
+    await item.locator(selector).first().click();
+    await page.waitForSelector("#modal:not(.hidden)");
+    assert.match(await page.locator("#modal-body").innerText(), expected, `${selector} opened the wrong detail`);
+    await page.keyboard.press("Escape");
+    if (await page.locator("#modal:not(.hidden)").count()) await page.keyboard.press("Escape");
+    await page.waitForFunction(() => document.querySelector("#modal")?.classList.contains("hidden"));
+  };
+  await openAndCheck("[data-player-link]", new RegExp(fixture.player));
+  await openAndCheck("[data-club-link]", new RegExp(fixture.club));
+  await openAndCheck("[data-staff-link]", new RegExp(fixture.staff));
+  await openAndCheck("[data-nation]", /国家队名单|National squad/);
+  await assertNoHorizontalOverflow(page, "desktop inbox entity links");
+  await page.locator('[data-tab="dashboard"]').click();
+  await page.waitForSelector("#tab-dashboard.active");
+  assert.ok(await page.locator("#dash-inbox [data-player-link]").count() > 0, "dashboard inbox summary should preserve entity links");
 }
 
 const navGroupByTab = {
@@ -404,6 +551,80 @@ async function openTab(page, tab) {
   await page.locator(`[data-tab="${tab}"]:visible`).click();
 }
 
+async function assertPhaseShapeReport(page) {
+  await page.evaluate(async () => {
+    const main = window.vcfmMainApi;
+    if (!main) throw new Error("main page test API is unavailable");
+    const positions = [
+      [50, 8], [18, 28], [40, 24], [60, 24], [82, 28],
+      [28, 48], [50, 52], [72, 48], [20, 72], [50, 78], [80, 72],
+    ];
+    const analysisSide = {
+      xg: 1.1,
+      openPlayXg: 0.9,
+      shots: [{ minute: 32, playerName: "Audit Forward", x: 50, y: 88, xg: 0.2, outcome: "saved" }],
+      progression: { passCompletionPct: 82, progressivePasses: 17, finalThirdEntries: 29, boxEntries: 8 },
+      pressing: { pressures: 32, pressureSuccessPct: 28, highPressures: 7, regains: 12, highRegains: 2 },
+      shape: { averageActionHeight: 54 },
+      heatmap: { cols: 6, rows: 10, max: 1, cells: Array(60).fill(0) },
+      network: { nodes: [], edges: [], hub: null },
+    };
+    const usageSide = (prefix) => ({
+      totalSeconds: 5400,
+      phasePct: {
+        "in-possession": 38.5,
+        "out-of-possession": 43.5,
+        "attacking-transition": 9.5,
+        "defensive-transition": 8.5,
+      },
+      averagePositions: positions.map(([x, y], index) => ({
+        playerId: `${prefix}-${index}`,
+        name: `${prefix} Player ${index + 1}`,
+        number: index + 1,
+        role: index ? "MID" : "GK",
+        x,
+        y,
+        samples: 5000,
+      })),
+    });
+    main.showMatchReport({
+      score: "1 - 1",
+      weather: { icon: "", name: "Clear" },
+      home: { name: "Audit Home", short: "Home", xg: 1.1, shots: 10, shotsOn: 4, possession: 52, corners: 4, fouls: 11, yellows: 2, reds: 0, saves: 3, woodwork: 0 },
+      away: { name: "Audit Away", short: "Away", xg: 1.0, shots: 9, shotsOn: 4, possession: 48, corners: 3, fouls: 12, yellows: 1, reds: 0, saves: 3, woodwork: 0 },
+      scorers: [],
+      ratings: null,
+      narrative: [],
+      analysis: { home: structuredClone(analysisSide), away: structuredClone(analysisSide) },
+      phaseShapes: {
+        version: 1,
+        usage: { home: usageSide("Home"), away: usageSide("Away") },
+        timeline: [
+          { minute: 0, team: "home", trigger: "pre-match", source: "player", reason: "manual-plan", baseFormation: "4-3-3", possessionFormation: "3-4-3", outOfPossessionFormation: "5-3-2", scoreGap: 0 },
+          { minute: 0, team: "away", trigger: "pre-match", source: "coach", reason: "pre-match-guard", baseFormation: "4-2-3-1", possessionFormation: "4-2-3-1", outOfPossessionFormation: "4-4-2", scoreGap: 0 },
+          { minute: 45, team: "away", trigger: "half-time", source: "coach", reason: "chasing-game", baseFormation: "4-2-3-1", possessionFormation: "3-4-3", outOfPossessionFormation: "4-4-2", scoreGap: -1 },
+          { minute: 75, team: "away", trigger: "review", source: "coach", reason: "protecting-lead", baseFormation: "4-2-3-1", possessionFormation: "4-2-3-1", outOfPossessionFormation: "5-3-2", scoreGap: 1 },
+        ],
+      },
+    }, { review: true });
+    document.querySelector("#screen-main")?.classList.remove("active");
+    document.querySelector("#screen-match")?.classList.add("active");
+  });
+  await page.locator('[data-analysis-tab="shapes"]').click();
+  assert.equal(await page.locator(".analysis-average-position").count(), 22);
+  assert.equal(await page.locator(".shape-timeline-row").count(), 4);
+  assert.match(await page.locator('[data-analysis-panel="shapes"]').innerText(), /3-4-3.*5-3-2/s);
+  await assertNoHorizontalOverflow(page, "desktop phase-shape report");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await assertNoHorizontalOverflow(page, "mobile phase-shape report");
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.evaluate(() => {
+    document.querySelector("#screen-match")?.classList.remove("active");
+    document.querySelector("#screen-main")?.classList.add("active");
+    document.querySelector("#match-report")?.classList.add("hidden");
+  });
+}
+
 let browser;
 try {
   await waitForServer();
@@ -411,7 +632,17 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("dialog", async (dialog) => {
+    const urgentInbox = /紧急信箱|urgent inbox/i.test(dialog.message());
+    await dialog[urgentInbox ? "dismiss" : "accept"]();
+  });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+  await page.waitForFunction(() => (
+    !("serviceWorker" in navigator)
+    || sessionStorage.getItem("vcfm-sw-reloaded-v235") === "1"
+  ));
+  await page.waitForLoadState("networkidle");
+  await page.waitForFunction(() => !!window.vcfmMainApi);
   await assertStraightPassRendering(page);
   await assertCrestLoaded(page.locator("#start-club-preview .club-crest"), "career setup crest");
   await assertNoHorizontalOverflow(page, "desktop start screen");
@@ -425,9 +656,12 @@ try {
   }
   await assertCrestLoaded(page.locator("#club-name .club-crest"), "topbar crest");
   await assertNoHorizontalOverflow(page, "desktop dashboard");
+  await assertInboxEntityLinks(page);
   await page.waitForSelector("#dashboard-priorities > *");
   assert.ok((await page.locator("#dashboard-priorities").innerText()).trim().length > 0, "manager workbench must render priorities or an explicit ready state");
   assert.ok(await page.locator("#dashboard-quick-actions [data-dashboard-link]").count() > 0, "manager workbench must expose contextual actions");
+  await page.waitForSelector("#dashboard-onboarding:not([hidden])");
+  assert.match(await page.locator("#dashboard-onboarding").innerText(), /0\/4/, "new careers must begin with four onboarding steps");
   const dashboardAction = page.locator("#dashboard-quick-actions [data-dashboard-link]").first();
   const dashboardTarget = await dashboardAction.getAttribute("data-dashboard-link");
   await dashboardAction.click();
@@ -444,12 +678,125 @@ try {
   assert.equal(await page.locator("#btn-advance").isEnabled(), true);
   assert.match(await page.locator("#dashboard-advance-summary").innerText(), /推进 1 天|Advanced 1 day/);
   assert.ok((await page.locator("#dashboard-advance-summary").innerText()).trim().length > 0, "calendar advance must explain what changed");
+  await page.waitForSelector("#dashboard-onboarding:not([hidden])");
+  assert.match(await page.locator("#dashboard-onboarding").innerText(), /0\/4/, "onboarding must survive pre-match date progression");
+
+  for (const onboardingTab of ["squad", "tactics", "training"]) {
+    await openTab(page, onboardingTab);
+    await page.waitForSelector(`#tab-${onboardingTab}.active`);
+    await openTab(page, "dashboard");
+  }
+  await page.waitForFunction(
+    () => document.querySelectorAll("#dashboard-onboarding .dashboard-onboarding-step.done").length === 3
+  );
+  assert.match(await page.locator("#dashboard-onboarding").innerText(), /3\/4/, "three management onboarding steps must be complete");
+  await page.waitForTimeout(500);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => !!window.vcfmMainApi);
+  await page.waitForSelector("#screen-main.active", { timeout: 90_000 });
+  await page.waitForSelector("#dashboard-onboarding:not([hidden])");
+  assert.match(await page.locator("#dashboard-onboarding").innerText(), /3\/4/, "onboarding progress must persist across reload");
+
+  const dateBeforeFirstMatch = await page.locator("#date-label").innerText();
+  await page.locator("#btn-advance").click();
+  await page.waitForFunction(
+    (before) => document.querySelector("#date-label")?.textContent !== before,
+    dateBeforeFirstMatch,
+    { timeout: 150_000 }
+  );
+  await page.waitForFunction(() => !document.querySelector("#btn-play-match")?.disabled, null, { timeout: 90_000 });
+  await page.locator("#btn-play-match").click();
+  await page.waitForSelector("#screen-match.active", { timeout: 90_000 });
+
+  // 解说栏折叠开关。此前只有「源码里存在这个选择器」的断言，折叠行为本身没被测过。
+  const commentary = page.locator(".fmm-commentary");
+  const commentaryToggle = page.locator("#match-com-toggle");
+  const isCollapsed = () => commentary.evaluate((el) => el.classList.contains("is-collapsed"));
+  // 底栏一旦溢出 .fm-match-body 就会盖住折叠按钮让它点不到（它是 position:relative，
+  // 解说栏是 static，所以画在解说栏之上）。约束在 .fm-pitch-col 的 max-height。
+  const toggleOverlap = await page.evaluate(() => {
+    const button = document.querySelector("#match-com-toggle");
+    const dock = document.querySelector(".mp-fmm-dock");
+    const body = document.querySelector(".fm-match-body");
+    if (!button || !dock || !body) return { missing: true };
+    const rect = button.getBoundingClientRect();
+    const topMost = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return {
+      coveredByDock: dock.contains(topMost),
+      dockBottom: Math.round(dock.getBoundingClientRect().bottom),
+      bodyBottom: Math.round(body.getBoundingClientRect().bottom),
+    };
+  });
+  assert.notEqual(toggleOverlap.missing, true, "match dock and commentary toggle must both exist");
+  assert.ok(
+    toggleOverlap.dockBottom <= toggleOverlap.bodyBottom + 1,
+    `match dock must stay inside the pitch area (dock ${toggleOverlap.dockBottom} > body ${toggleOverlap.bodyBottom})`
+  );
+  assert.equal(
+    toggleOverlap.coveredByDock,
+    false,
+    `match dock must not cover the commentary toggle (dock ${toggleOverlap.dockBottom}, body ${toggleOverlap.bodyBottom})`
+  );
+  assert.equal(await isCollapsed(), true, "commentary must start collapsed");
+  await commentaryToggle.click();
+  assert.equal(await isCollapsed(), false, "commentary must expand on toggle");
+  assert.equal(await commentaryToggle.getAttribute("aria-expanded"), "true", "expanded commentary must announce itself");
+  await commentaryToggle.click();
+  assert.equal(await isCollapsed(), true, "commentary must collapse again");
+  assert.equal(await commentaryToggle.getAttribute("aria-expanded"), "false", "collapsed commentary must announce itself");
+
+  // 替补席是五列网格，空的一侧必须留住自己的列；display:none 会让后面的元素
+  // 前移一列，把分隔线挤进替补席的位置。
+  await page.waitForSelector("#mp-bench-strip", { timeout: 90_000 });
+  assert.equal(
+    await page.locator("#mp-bench-strip > *").count(),
+    5,
+    "bench strip must keep its five grid columns"
+  );
+  assert.equal(
+    await page.locator("#mp-bench-strip .mp-bench-list").evaluateAll(
+      (nodes) => nodes.filter((node) => getComputedStyle(node).display === "none").length
+    ),
+    0,
+    "an empty bench side must keep its column instead of collapsing it"
+  );
+
+  await page.waitForFunction(() => !document.querySelector("#btn-sim-instant")?.disabled, null, { timeout: 90_000 });
+  await page.locator("#btn-sim-instant").click();
+  await page.waitForFunction(() => !document.querySelector("#btn-match-continue")?.disabled, null, { timeout: 90_000 });
+  await page.locator("#btn-match-continue").click();
+  await page.waitForSelector("#screen-main.active", { timeout: 90_000 });
+  assert.equal(await page.locator("#dashboard-onboarding").isHidden(), true, "onboarding must close after the first match");
+  // 关闭状态必须真的落盘。这一步只靠 finishMatchUI 之后调用方的 saveGame 保证，
+  // 少了它，重开存档引导会再次出现，而纯内存断言看不出来。
+  await page.waitForTimeout(500);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => !!window.vcfmMainApi);
+  await page.waitForSelector("#screen-main.active", { timeout: 90_000 });
+  // 面板本来就带 hidden，要等工作台渲染完再断言，否则是假阳性。
+  await page.waitForFunction(
+    () => !!document.querySelector("#dashboard-priorities")?.innerHTML.trim(),
+    null,
+    { timeout: 90_000 }
+  );
+  assert.equal(
+    await page.locator("#dashboard-onboarding").isHidden(),
+    true,
+    "a completed onboarding must stay closed across reload"
+  );
 
   for (const tab of ["finance", "squad", "staff", "training", "tactics", "facilities", "media", "fixtures", "table", "career"]) {
     await openTab(page, tab);
     await page.waitForTimeout(100);
     await assertNoHorizontalOverflow(page, `desktop ${tab}`);
     if (tab === "tactics") {
+      const possessionShape = page.locator("#possession-formation-select");
+      const defensiveShape = page.locator("#out-possession-formation-select");
+      assert.equal(await possessionShape.locator("option").count(), 9, "possession shape must include follow-base plus all formations");
+      assert.equal(await defensiveShape.locator("option").count(), 9, "defensive shape must include follow-base plus all formations");
+      await possessionShape.selectOption("3-4-3");
+      await defensiveShape.selectOption("5-3-2");
+      assert.match(await page.locator("#tac-summary").innerText(), /3-4-3.*5-3-2/s);
       // v209 角色/职责面板：每个首发槽都有角色徽章，点击可打开角色面板并切换角色/职责
       await page.waitForSelector("#pitch .tac-slot");
       assert.equal(await page.locator("#pitch .tac-slot").count(), 11);
@@ -558,6 +905,8 @@ try {
   assert.match(await externalPlayerAbility.innerText(), /^\d+-\d+$/);
   await page.keyboard.press("Escape");
 
+  await assertPhaseShapeReport(page);
+
   await page.setViewportSize({ width: 390, height: 844 });
   await openTab(page, "transfer");
   await assertNoHorizontalOverflow(page, "mobile scouting mission");
@@ -567,6 +916,8 @@ try {
   await assertNoHorizontalOverflow(page, "mobile squad planning");
   await openTab(page, "tactics");
   await page.waitForSelector("#pitch .tac-slot");
+  assert.equal(await page.locator("#possession-formation-select").inputValue(), "3-4-3", "possession shape must persist across navigation");
+  assert.equal(await page.locator("#out-possession-formation-select").inputValue(), "5-3-2", "defensive shape must persist across navigation");
   await page.locator("#pitch .tac-role-badge").first().click();
   await page.waitForSelector("#tac-role-panel .tac-role-card");
   await assertNoHorizontalOverflow(page, "mobile tactics role panel");
@@ -582,7 +933,7 @@ try {
   assert.equal(await page.locator("#btn-global-search").evaluate((element) => element === document.activeElement), true);
   assert.deepEqual(pageErrors, []);
 
-  console.log("Browser E2E passed: spatial goal replay, straight-pass rendering, nonblank match canvas, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
+  console.log("Browser E2E passed: first-week onboarding persistence and first-match completion, broadcast cameras, motion clip diagnostics, spatial goal replay, straight-pass rendering, nonblank match canvas, phase-shape evidence, manager identity, squad planning, club crests, finance, scouting knowledge, desktop/mobile overflow, navigation and modal focus");
 } finally {
   await browser?.close();
   server.kill();

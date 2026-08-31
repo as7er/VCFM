@@ -332,6 +332,10 @@ export function compactSimFrame(eng) {
   // 入网脉冲只发一帧，立即清掉，避免后续帧/跳段在错误位置重放网效
   const netHit = !!b._netHitPulse;
   if (netHit) b._netHitPulse = false;
+  // 擦球脉冲（门将指尖蹭偏、未扑住）同样只发一帧：球的方向确实变了，
+  // 表现层要在这一点画接触标记，否则看起来是「无接触折射」。
+  const deflect = b._deflectPulse || null;
+  if (deflect) b._deflectPulse = null;
   // 定位球阶段直接随帧传给表现层，不能等事件文案临时摆拍。
   const setPiece =
     b.state === "penalty"
@@ -358,6 +362,7 @@ export function compactSimFrame(eng) {
       owner: b.owner,
       state: b.state || null,
       netHit,
+      deflect,
       setPiece:
         setPiece ||
         (b.state === "corner" ? "corner" : b.state === "penalty" ? "penalty" : null),
@@ -629,8 +634,28 @@ export function buildHighlightSegments(frames, windows, tStart, tEnd) {
 
 function pickFlavorEvents(raw, fromMin, toMin) {
   const out = [];
-  const caps = { corner: 5, save: 6, tackle: 4, offside: 3, intercept: 2 };
-  const counts = { corner: 0, save: 0, tackle: 0, offside: 0, intercept: 0 };
+  const caps = {
+    corner: 5,
+    save: 6,
+    tackle: 4,
+    offside: 3,
+    intercept: 2,
+    backpass: 2,
+    advantage_played: 3,
+    handball: 3,
+    var_decision: 4,
+  };
+  const counts = {
+    corner: 0,
+    save: 0,
+    tackle: 0,
+    offside: 0,
+    intercept: 0,
+    backpass: 0,
+    advantage_played: 0,
+    handball: 0,
+    var_decision: 0,
+  };
   const byType = {};
   for (const e of raw) {
     if (!caps[e.type]) continue;
@@ -644,7 +669,18 @@ function pickFlavorEvents(raw, fromMin, toMin) {
       const e = list[i];
       let minute = simTToMinute(e.t);
       minute = Math.max(fromMin, Math.min(toMin, minute));
-      out.push({ minute, type, team: e.team, agentId: e.agentId, t: e.t });
+      out.push({
+        minute,
+        type,
+        team: e.team,
+        agentId: e.agentId,
+        t: e.t,
+        penalty: !!e.penalty,
+        incident: e.incident || null,
+        decision: e.decision || null,
+        finalDecision: e.finalDecision || null,
+        reason: e.reason || null,
+      });
       counts[type]++;
     }
   }
@@ -766,6 +802,7 @@ export function translatePeriodToMatch(state, period, helpers) {
   }
 
   if (state.simEngineMeta) {
+    state.simEngineMeta.integration = eng.integrationSummary();
     state.simEngineMeta.halves.push({
       tStart,
       tEnd,
@@ -823,6 +860,21 @@ export function defaultFlavorText(state, item) {
       return `🚫 ${minute}' ${short} 越位`;
     case "intercept":
       return `拦截 ${minute}' ${who} 断下传球`;
+    case "backpass":
+      return `↩️ ${minute}' ${who} 回传门将违例，对手获得间接任意球`;
+    case "advantage_played":
+      return `▶️ ${minute}' 裁判示意有利，${short} 继续进攻`;
+    case "handball":
+      return item.penalty
+        ? `✋ ${minute}' ${who} 禁区内手球，判罚点球`
+        : `✋ ${minute}' ${who} 手球犯规`;
+    case "var_decision":
+      if (item.decision === "overturned") {
+        return `VAR ${minute}' 复核完成，原判被推翻`;
+      }
+      return item.incident === "goal"
+        ? `VAR ${minute}' 复核完成，进球有效`
+        : `VAR ${minute}' 复核完成，点球判罚成立`;
     case "card":
       return `🟨 ${minute}' ${who} 吃到黄牌`;
     case "red":

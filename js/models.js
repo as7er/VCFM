@@ -11,10 +11,11 @@ import {
   START_DIVISION,
   START_DIVISIONS,
   generatePlayerName,
+  NAMES_BY_NATION,
   PLAYER_ROLES,
   defaultRoleForSlot,
 } from "./data.js";
-import { applyClubBranding } from "./branding.js";
+import { applyClubBranding, fictionalizePlayerName } from "./branding.js";
 import { CURRENT_SAVE_SCHEMA_VERSION } from "./save-schema.js";
 import { recordPlayerDevelopment } from "./player-pathway.js";
 import {
@@ -37,6 +38,14 @@ import {
   roleFitsPosition,
 } from "./player-roles.js";
 import {
+  assignSquadNumbers,
+  ensurePlayerNumber,
+  ensurePlayerNumberPreferences,
+  numberPreferenceLabel,
+  registerSquadNumbers,
+} from "./squad-numbers.js";
+export { assignSquadNumbers, ensurePlayerNumber, ensurePlayerNumberPreferences, numberPreferenceLabel, registerSquadNumbers, setSquadNumber } from "./squad-numbers.js";
+import {
   APPEARANCE_HAIR_COLORS as SHARED_APPEARANCE_HAIR_COLORS,
   APPEARANCE_HAIR_STYLE_IDS as SHARED_APPEARANCE_HAIR_STYLE_IDS,
   APPEARANCE_HAIR_STYLE_NAMES as SHARED_APPEARANCE_HAIR_STYLE_NAMES,
@@ -48,6 +57,11 @@ import {
 } from "./appearance.js";
 
 let _id = 1;
+/**
+ * 只由计数器和 Math.random 决定：id 既被当作稳定种子 hash（报名背景见
+ * squad-registration.js），又被大量排序拿来做同分兜底，而审计靠种子化的
+ * Math.random 复现整个世界，掺进时间戳会让同一份存档每次跑出不同结果。
+ */
 export function uid(prefix = "p") {
   return `${prefix}_${_id++}_${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -66,6 +80,64 @@ function clamp(v, a = 1, b = 20) {
 
 function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function stableNameIndex(seed, length) {
+  if (!length) return 0;
+  let hash = 2166136261;
+  for (const ch of String(seed || "")) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % length;
+}
+
+function playerNameIdentity(player) {
+  const pool = NAMES_BY_NATION[player?.nationality];
+  const order = pool?.order || "given-family";
+  const parts = String(player?.name || "").trim().split(/\s+/).filter(Boolean);
+  const parsed = parts.length < 2
+    ? { order, given: parts[0] || "", family: "" }
+    : order === "family-given"
+    ? { order, given: parts.slice(1).join(" "), family: parts[0] }
+    : { order, given: parts[0], family: parts.slice(1).join(" ") };
+  if (!pool || (pool.first.includes(parsed.given) && pool.last.includes(parsed.family))) return parsed;
+  // 公开姓名可能来自 branding.js 的真实姓名替换；反查原始池，避免迁移时误改名。
+  for (const given of pool.first) {
+    for (const family of pool.last) {
+      const source = order === "family-given" ? `${family} ${given}` : `${given} ${family}`;
+      if (fictionalizePlayerName(source) === player?.name) return { order, given, family };
+    }
+  }
+  return parsed;
+}
+
+function stableNamePicker(player) {
+  const identity = playerNameIdentity(player);
+  let call = 0;
+  return (items) => {
+    const desired = call++ === 0 ? identity.given : identity.family;
+    return items.includes(desired)
+      ? desired
+      : items[stableNameIndex(`${player?.id || player?.name}:${call}`, items.length)];
+  };
+}
+
+/** 修复旧档同队姓名冲突；稳定保留已有姓名，只有发生名/姓碰撞时才换名。 */
+export function ensureDistinctClubPlayerNames(club) {
+  if (!club) return 0;
+  const players = [...(club.players || []), ...(club.youth?.players || [])];
+  const usedNames = new Set();
+  let changed = 0;
+  for (const player of players) {
+    const next = generatePlayerName(player.nationality, stableNamePicker(player), { usedNames });
+    if (next !== player.name) {
+      player.name = next;
+      changed++;
+    }
+    usedNames.add(player.name);
+  }
+  return changed;
 }
 
 const TALENT_MODEL_VERSION = 1;
@@ -873,7 +945,9 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
   const age = isYouth ? rand(15, 18) : rand(17, 34);
   const p = {
     id: uid(isYouth ? "yt" : "pl"),
-    name: generatePlayerName(nation.code, pick),
+    name: generatePlayerName(nation.code, opts.namePick || pick, {
+      usedNames: opts.existingNames,
+    }),
     pos,
     age,
     nationality: nation.code,
@@ -901,8 +975,11 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     intl: { caps: 0, goals: 0, assists: 0, cleanSheets: 0, goalsConceded: 0 },
     // 个人荣誉
     honors: [],
-    // 球衣号（入队时由 assignSquadNumbers 分配）
+    // 球衣号与稳定偏好（入队/登记时由 squad-numbers 分配）
     number: null,
+    numberPreferences: [],
+    numberPreferenceStrength: null,
+    numberPreferenceVersion: 0,
     talentModelVersion: TALENT_MODEL_VERSION,
   };
   generatePlayerAttributes(p, mean);
@@ -915,6 +992,7 @@ export function createPlayer(pos, power = 65, clubId = null, opts = {}) {
     p.hairStyle = look.hairStyle;
   }
   ensureFootballProfile(p);
+  ensurePlayerNumberPreferences(p);
   p.ovr = playerOverall(p);
   // 潜力：青年略高于当前，成年接近当前
   if (isYouth) {
@@ -966,7 +1044,15 @@ export function createYouthPlayer(club) {
   // 实力与俱乐部+青训等级挂钩
   const power = Math.max(40, club.power - 18 + level * 3 + rand(-4, 6));
   const pos = pick(["GK", "DEF", "DEF", "MID", "MID", "MID", "ATT", "ATT"]);
-  const p = createPlayer(pos, power, club.id, { youth: true, homeNation: club.countryCode });
+  const existingNames = new Set([
+    ...(club.players || []).map((player) => player.name),
+    ...(club.youth?.players || []).map((player) => player.name),
+  ]);
+  const p = createPlayer(pos, power, club.id, {
+    youth: true,
+    homeNation: club.countryCode,
+    existingNames,
+  });
   // 高等级更容易出高潜力
   if (Math.random() < 0.08 + level * 0.04) {
     p.potential = clamp(p.potential + rand(1, 3), p.potential, 20);
@@ -976,14 +1062,14 @@ export function createYouthPlayer(club) {
   return p;
 }
 
-export function fillYouthSquad(club, count = null) {
+export function fillYouthSquad(club, count = null, options = {}) {
   const ya = ensureYouthAcademy(club);
   const cfg = YOUTH_LEVELS[ya.level] || YOUTH_LEVELS[1];
   const target = count ?? Math.min(cfg.capacity, 4 + ya.level);
   while (ya.players.length < target) {
     ya.players.push(createYouthPlayer(club));
   }
-  assignSquadNumbers(club);
+  if (options.assignNumbers !== false) assignSquadNumbers(club, { reason: options.reason || "youth-intake" });
   return ya.players;
 }
 
@@ -1108,83 +1194,6 @@ export function kitBackground(kit) {
   }
 }
 
-/** 位置默认号段偏好 */
-function preferredNumbers(pos) {
-  if (pos === "GK") return [1, 13, 23, 25, 31];
-  if (pos === "DEF") return [2, 3, 4, 5, 6, 12, 14, 15, 16, 22, 24, 26, 32];
-  if (pos === "MID") return [6, 7, 8, 10, 11, 14, 16, 17, 18, 20, 21, 28, 30];
-  return [7, 9, 10, 11, 14, 17, 18, 19, 21, 27, 29, 33, 99];
-}
-
-/** 给俱乐部全员分配不重复球衣号（缺号才补） */
-export function assignSquadNumbers(club) {
-  if (!club || !Array.isArray(club.players)) return;
-  ensureKit(club);
-  const used = new Set();
-  for (const p of club.players) {
-    if (p.number != null && p.number >= 1 && p.number <= 99) used.add(p.number);
-  }
-  // 已有号的不动；缺号按能力优先占号
-  const need = club.players
-    .filter((p) => p.number == null || p.number < 1 || p.number > 99)
-    .sort((a, b) => (b.ovr || 0) - (a.ovr || 0));
-
-  for (const p of need) {
-    let num = null;
-    for (const cand of preferredNumbers(p.pos)) {
-      if (!used.has(cand)) {
-        num = cand;
-        break;
-      }
-    }
-    if (num == null) {
-      for (let n = 1; n <= 99; n++) {
-        if (!used.has(n)) {
-          num = n;
-          break;
-        }
-      }
-    }
-    p.number = num || 99;
-    used.add(p.number);
-  }
-  // 青训也补号（可与一线重复显示，但尽量不重复本队）
-  const ya = club.youth?.players;
-  if (Array.isArray(ya)) {
-    for (const p of ya) {
-      if (p.number != null && p.number >= 1 && p.number <= 99) continue;
-      let num = null;
-      for (const cand of preferredNumbers(p.pos)) {
-        if (!used.has(cand)) {
-          num = cand;
-          break;
-        }
-      }
-      if (num == null) {
-        for (let n = 40; n <= 99; n++) {
-          if (!used.has(n)) {
-            num = n;
-            break;
-          }
-        }
-      }
-      p.number = num || (40 + Math.floor(Math.random() * 50));
-      used.add(p.number);
-    }
-  }
-}
-
-export function ensurePlayerNumber(club, player) {
-  if (!player) return null;
-  if (player.number != null && player.number >= 1 && player.number <= 99) return player.number;
-  if (club) assignSquadNumbers(club);
-  if (player.number != null) return player.number;
-  // 无俱乐部上下文：按位置给个默认
-  const prefs = preferredNumbers(player.pos);
-  player.number = prefs[0] || 99;
-  return player.number;
-}
-
 const SQUAD_SHAPE = [
   ...Array(2).fill("GK"),
   ...Array(6).fill("DEF"),
@@ -1193,9 +1202,15 @@ const SQUAD_SHAPE = [
 ];
 
 export function createClub(template, lang = "zh") {
+  const existingNames = new Set();
   const players = SQUAD_SHAPE.map((pos) => {
     const jitter = rand(-6, 6);
-    return createPlayer(pos, template.power + jitter, template.id, { homeNation: template.countryCode });
+    const player = createPlayer(pos, template.power + jitter, template.id, {
+      homeNation: template.countryCode,
+      existingNames,
+    });
+    existingNames.add(player.name);
+    return player;
   });
   // 排序：主力能力略高
   players.sort((a, b) => b.ovr - a.ovr);
@@ -1230,6 +1245,7 @@ export function createClub(template, lang = "zh") {
     },
     staff: null, // create 后填充，避免循环依赖 staff.js
     kit: null,
+    numberRegistration: null,
     training: { focus: "balanced", intensity: "normal" },
     facilities: template.realityProfile
       ? {
@@ -1262,7 +1278,7 @@ export function createClub(template, lang = "zh") {
   applyClubBranding(club, clubBrandingById[club.id] || template.branding, lang);
   ensureKit(club);
   fillYouthSquad(club);
-  assignSquadNumbers(club);
+  assignSquadNumbers(club, { reason: "club-created" });
   // staff / training / facilities 在 createWorld / 读档时 ensure
   return club;
 }
@@ -1278,6 +1294,9 @@ function playerSelectable(p) {
 export function defaultTactics() {
   return {
     formation: "4-3-3",
+    /** null 表示跟随基础阵型；显式值只改变对应比赛阶段的空间站位 */
+    possessionFormation: null,
+    outOfPossessionFormation: null,
     style: "balanced",
     pressing: 3,
     tempo: 3,
@@ -1633,6 +1652,14 @@ export function ensureTactics(club) {
   } else {
     const t = club.tactics;
     if (!t.formation || !FORMATIONS[t.formation]) t.formation = d.formation;
+    if (t.possessionFormation === undefined) t.possessionFormation = null;
+    if (t.outOfPossessionFormation === undefined) t.outOfPossessionFormation = null;
+    if (t.possessionFormation !== null && !FORMATIONS[t.possessionFormation]) {
+      t.possessionFormation = null;
+    }
+    if (t.outOfPossessionFormation !== null && !FORMATIONS[t.outOfPossessionFormation]) {
+      t.outOfPossessionFormation = null;
+    }
     if (!t.style) t.style = d.style;
     if (t.pressing == null) t.pressing = d.pressing;
     if (t.tempo == null) t.tempo = d.tempo;
@@ -2111,7 +2138,10 @@ export function createWorld(userClubId, managerName, lang = "zh") {
     return c;
   });
   calibrateWorldAbilityDistribution(clubs);
-  for (const club of clubs) autoLineup(club);
+  for (const club of clubs) {
+    autoLineup(club);
+    registerSquadNumbers(club, { season: 2026, day: 1, reason: "initial-registration", protectedEntries: {} });
+  }
   // staff 延迟到 main/engine ensure，避免 models↔staff 循环
 
   const user = clubs.find((c) => c.id === userClubId);
@@ -2204,6 +2234,12 @@ export function ensureWorldClubTemplates(world, lang = "zh") {
     if (known.has(template.id)) continue;
     const club = createClub(template, lang);
     autoLineup(club);
+    registerSquadNumbers(club, {
+      season: world.season,
+      day: world.day,
+      reason: "club-added",
+      protectedEntries: {},
+    });
     world.clubs.push(club);
     world.table[club.id] = { played: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
     added++;
