@@ -6575,7 +6575,11 @@ export class SimEngine {
       this.t + (type === "corner" ? 1.8 : fkSetPiece ? 2.0 : 1.0);
     // 人墙任意球复用角球的短窗保形：开球前全员钉在摆位点，不被跑位逻辑拆散
     if (fkSetPiece) this.cornerShapeUntil = this.t + 2.6;
-    this._emit(type, taker, {
+    // 越位是唯一「判罚原因」与「重启名称」同名的类型：`_callOffside` 已经发过一条
+    // 真实判罚（带 kickLineY/kickBallY），这里若照 type 原样发，事件流里就会出现
+    // 第二条 `offside`，且 taker 属于**获得任意球的防守方**——解说因此把越位念成
+    // 对手越位。其余重启名（corner/goalkick/freekick/throwin）都不与判罚原因重名。
+    this._emit(type === "offside" ? "offside_restart" : type, taker, {
       x,
       y,
       setPiece: type,

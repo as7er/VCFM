@@ -81,6 +81,9 @@ const checks = [
   "scripts/manager-onboarding-audit.mjs",
   "scripts/ecosystem-audit.mjs",
   "scripts/world-invariants-audit.mjs",
+  // 默认 8 场（约 60s）：2 场就能稳定产生 20+ 次判罚，不存在「零样本让断言空转」，
+  // 8 场只是让判罚率告警的分母更可信。
+  "scripts/offside-event-integrity-audit.mjs",
 ];
 const fullChecks = [
   ["scripts/match-realism-audit.mjs", "24"],
