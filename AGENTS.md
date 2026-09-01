@@ -57,7 +57,7 @@ node scripts/box-possession-sampling-audit.mjs   # 禁区循环基线
 
 ## v240 比赛官员表现层 + 诊断：近静止球员的目标点画像（2026-09-01）
 
-> 缓存 `vcfm-v240`，提交 `[待填写]`
+> 缓存 `vcfm-v240`，提交 `cdec34a`
 
 ### 表现层：主裁判 + 两名边裁视觉化
 
