@@ -4238,6 +4238,38 @@ html[data-theme="light"] .mp-card-bar { background: rgba(0, 0, 0, 0.08); }
 html[data-theme="light"] .mp-name {
   color: #fff;
 }
+
+/* 比赛官员（主裁 + 两名边裁）：纯表现层，不参与判定。
+   刻意比球员小（16px vs 26px）且 z-index 2（球员 3、球 6），
+   这样他们读起来是场上工作人员，不会被误当成第 12 个球员。
+   pointer-events: none —— 绝不能抢球员的点击（球员点选是主交互）。 */
+.mp-official {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  pointer-events: none;
+  will-change: left, top;
+  /* 传统裁判黑衫；绿草皮上对比度足够，且与两队球衣色不撞 */
+  background: radial-gradient(circle at 32% 28%, #4b5563 0 30%, #1f2937 32% 100%);
+  border: 1.5px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+/* 主裁略大,便于与边裁区分 */
+.mp-official.referee {
+  width: 18px;
+  height: 18px;
+}
+/* 边裁：袖标提示他们沿边线跑动 */
+.mp-official.assistant {
+  border-color: rgba(250, 204, 21, 0.9);
+}
+html[data-theme="light"] .mp-official {
+  border-color: rgba(255, 255, 255, 0.9);
+}
+
 .mp-ball {
   position: absolute;
   width: 13px;

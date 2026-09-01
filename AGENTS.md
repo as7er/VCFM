@@ -4,7 +4,7 @@
 
 > 仓库：https://github.com/as7er/VCFM.git · `master`（2026-08-31 起 GitHub 已改为大写 `VCFM`，小写地址仍会重定向）  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v239**（禁区盯人、门将封角与比赛表现修复）
+> 缓存：**vcfm-v240**（比赛官员表现层：主裁 + 两名边裁）
 
 ## 交接（2026-09-01，换机继续）
 

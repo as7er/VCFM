@@ -510,6 +510,7 @@ export class MatchView {
     this._simBallTrailPhase = trailPhase;
     this._pushBallTrail();
     this._applyBall();
+    this._updateOfficials(soft);
     this._recordMotionDiagnostic(sim);
     // 直播用 soft follow（见 update）；非时间轴时默认 follow
     if (!this._simPlay && this.simDrive) this.camMode = this.camMode === "box" ? "box" : "follow";
@@ -1359,6 +1360,7 @@ export class MatchView {
     actors.appendChild(ballEl);
     this.ball = { x: 50, y: 50, tx: 50, ty: 50, el: ballEl };
     this._applyBall();
+    this._spawnOfficials(actors);
 
     this.cam = { x: 0, y: 0, tx: 0, ty: 0, scale: 1, tScale: 1 };
     this.setCameraPreset(this.cameraPreset, { persist: false });
@@ -2722,6 +2724,100 @@ export class MatchView {
   }
 
   /**
+   * 比赛官员（主裁 + 两名边裁）——纯表现层。
+   *
+   * 引擎已完整实现裁判规则（越位按出脚瞬间快照、手球、点球、VAR），但**场上不存在
+   * 裁判这个对象**：判罚是全局精确计算的，没有视野、没有站位影响。这里只把已经
+   * 发生的判罚「配上人」，**不反向影响任何判定**，所以不碰 24 场标定。
+   *
+   * 坐标约定（从 `_offsideLineY` 反推确认）：主队攻向 y=0、客队攻向 y=100，
+   * 即客队球门在 y≈0、主队球门在 y≈100。
+   *
+   * 边裁按真实分工站**对角两条边线**，各负责一半场地，位置跟随该半场的越位线——
+   * 这正是真实边裁的职责（与倒数第二名防守者齐平）。好处是当进攻转到另一半场时，
+   * 他会自然被拉回中线附近，不需要额外写「回撤」逻辑。
+   */
+  _spawnOfficials(actors) {
+    if (!actors) return;
+    const make = (cls, x, y) => {
+      const el = document.createElement("div");
+      el.className = `mp-official ${cls}`;
+      el.setAttribute("aria-hidden", "true");
+      actors.appendChild(el);
+      return { x, y, el };
+    };
+    this.officials = {
+      // 主裁：对角线体系，跟球但保持距离，不站在球上
+      referee: make("referee", 42, 50),
+      // 边裁 A：x≈3 边线，负责 y<50（客队防守半场），跟主队进攻的越位线
+      assistantA: make("assistant", 3, 32),
+      // 边裁 B：x≈97 边线，负责 y>50（主队防守半场），跟客队进攻的越位线
+      assistantB: make("assistant", 97, 68),
+    };
+    this._applyOfficials();
+  }
+
+  /** 把官员的逻辑坐标写到 DOM（与 `_applyPlayer` 同一套百分比定位） */
+  _applyOfficials() {
+    const o = this.officials;
+    if (!o) return;
+    for (const key of ["referee", "assistantA", "assistantB"]) {
+      const m = o[key];
+      if (!m?.el) continue;
+      m.el.style.left = `${m.x}%`;
+      m.el.style.top = `${m.y}%`;
+    }
+  }
+
+  /**
+   * 每帧更新官员位置。只读 `this.ball` 与 `this.players`，不写任何球员/球状态。
+   * `soft` 与球员同义：慢镜/直播下用指数平滑，避免硬切抖动。
+   */
+  _updateOfficials(soft = false) {
+    const o = this.officials;
+    if (!o) return;
+    const bx = this.ball?.x ?? 50;
+    const by = this.ball?.y ?? 50;
+    // 平滑系数刻意比球员慢：裁判是跟着跑的，不该和球同步瞬移
+    const k = soft ? 0.12 : 0.22;
+    const lerp = (m, tx, ty) => {
+      m.x += (clamp(tx, 1, 99) - m.x) * k;
+      m.y += (clamp(ty, 1, 99) - m.y) * k;
+    };
+
+    // —— 主裁：对角线体系 ——
+    // 真实主裁跑一条对角线，侧后方跟随，把球夹在自己与边裁之间。
+    // 这里取「球的横向反侧 + 纵向略滞后」，并保证不贴到球上。
+    const side = bx >= 50 ? -1 : 1; // 球在右侧时裁判偏左，反之偏右
+    let tx = bx + side * 11;
+    let ty = by + (by >= 50 ? -7 : 7);
+    const gap = Math.hypot(tx - bx, ty - by);
+    if (gap < 6) {
+      // 兜底：贴太近时沿反侧推开，避免主裁站到球场中央挡球
+      tx = bx + side * 8;
+      ty = by + (by >= 50 ? -6 : 6);
+    }
+    lerp(o.referee, tx, ty);
+
+    // —— 边裁：各守一半，跟随该半场的越位线 ——
+    // `_offsideLineY(att)` 返回倒数第二名防守者的 y，正是边裁该齐平的位置。
+    const lineForHomeAttack = this._offsideLineY("home"); // 客队防守半场 y<50
+    const lineForAwayAttack = this._offsideLineY("away"); // 主队防守半场 y>50
+    lerp(
+      o.assistantA,
+      3,
+      clamp(Number.isFinite(lineForHomeAttack) ? lineForHomeAttack : 32, 1, 50)
+    );
+    lerp(
+      o.assistantB,
+      97,
+      clamp(Number.isFinite(lineForAwayAttack) ? lineForAwayAttack : 68, 50, 99)
+    );
+
+    this._applyOfficials();
+  }
+
+  /**
    * 底部替补席：保留可点击资料入口，但不占用球场边线。
    *
    * 这一条是「现算的展示列表」而不是持久化名单：全队减首发。两点必须与
@@ -3398,6 +3494,7 @@ export class MatchView {
         this._applyPlayer(pl);
       }
       this._applyBall();
+      this._updateOfficials(true);
       this._updatePossessionChrome();
       this._drawCanvas();
       await sleepFn(Math.max(16, (dt || 50) / speed));
