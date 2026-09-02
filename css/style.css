@@ -3310,11 +3310,15 @@ html[data-theme="dark"] .mp-fmm-dock {
   to { opacity: 1; }
 }
 
-/* 球门网口：贴在端线外侧（与 SVG 门架一致），不伸进场内 */
+/* 球门网口：贴在端线外侧（与 SVG 门架一致），不伸进场内。
+   ⚠ 宽度必须对上引擎的 `SIM.GOAL_X0 = 44` / `GOAL_X1 = 56`——`left/width` 的 1% 就是
+   一个 x 格（球员定位也用 `left: ${x}%`）。旧值 `left:43%; width:14%` 把球门画宽了
+   两格（每边 0.68m），于是「看着从柱内进了、引擎判出去」会周期性出现。
+   `box-sizing: border-box`（style.css:95）让 1.5px 边框落在宽度内侧，残差 ~0.3%。 */
 .mp-goal-mouth {
   position: absolute;
-  left: 43%;
-  width: 14%;
+  left: 44%;
+  width: 12%;
   height: 1.7%;
   z-index: 2;
   pointer-events: none;

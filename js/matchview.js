@@ -861,14 +861,28 @@ export class MatchView {
     }
 
     if (kind === "save") {
+      // 引擎的 save 事件带 `hold`：true = 干净抱住，false = 托出/拍出。
+      // 实测抱住约占扑救的 29.5%（`holdP = 0.18 + 0.12*handling + 0.16*反应时间`），
+      // 但这个字段过去**整个前端一次都没读过**：文案永远「精彩扑救」，
+      // 姿势永远被强制成倒地扑救，于是三成的抱球被画成了扑出——
+      // 用户的原话是「都没有接住过，都是扑救」，对画面成立，对模拟不成立。
+      const held = !!opts.ev?.hold;
       this.camMode = "box";
       this.camBoostUntil = now + 2200;
       this.fieldEl?.classList.add("mp-replay-slow");
       if (this.replayBadgeEl) {
-        this.replayBadgeEl.textContent = lang === "en" ? "▶ SAVE" : "▶ 扑救";
+        this.replayBadgeEl.textContent = held
+          ? lang === "en" ? "▶ CLAIMED" : "▶ 没收"
+          : lang === "en" ? "▶ SAVE" : "▶ 扑救";
         this.replayBadgeEl.classList.remove("hidden");
       }
-      this.setCaption(lang === "en" ? "GREAT SAVE" : "精彩扑救", "save", 1600);
+      this.setCaption(
+        held
+          ? lang === "en" ? "CLAIMED IT" : "稳稳抱住"
+          : lang === "en" ? "GREAT SAVE" : "精彩扑救",
+        "save",
+        1600
+      );
       // save 事件的 playerId 就是做出扑救的门将（match.js 把引擎的 agentId 映射过来）。
       // 兜底不能只找「第一个门将」——那有一半概率是对方门将，动作会画在错误的一端。
       // ev.teamId 是扑救方，据此挑对应门将；再退一步才用离球最近的门将。
@@ -895,8 +909,11 @@ export class MatchView {
         // 高光/快速路径会跳帧，带 pose 的那一两帧可能整个被跳过，所以这里必须兜。
         // 时长 520 → 900ms：×2/×4 倍速下 520ms 的墙钟窗口基本看不见；
         // 引擎侧姿态本身是 0.55s 模拟时间，这里是画面停留，不影响判定。
-        if (!gk.pose || gk.pose !== "dive") {
-          gk.pose = "dive";
+        // ⚠ 但**抱住**的时候不能摆倒地：门将是站着把球没收的。
+        //   以前这里无条件强制 dive，是「从来没接住过」这个观感的直接来源。
+        const savePose = held ? "hold" : "dive";
+        if (!gk.pose || gk.pose !== savePose) {
+          gk.pose = savePose;
           gk.poseDir = (this.ball.x || 50) >= gk.x ? 1 : -1;
           // heading 必须一起给：新的扑救画法优先按 heading 决定伸展方向，
           // 留着上一次跑位的旧 heading 会让门将朝错误方向扑。

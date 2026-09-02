@@ -1634,6 +1634,8 @@ export class SimEngine {
     for (let index = 0; index < physicsSubsteps; index++) {
       this.t = stepStartedAt + index * physicsDt;
       this._activeStepDt = contactReason ? SIM.DT : physicsDt;
+      // 见 `_emit`：子步内发出的事件描述的是这一步之后的几何，时间戳要相应前推。
+      this._emitTimeOffset = physicsDt;
       this._stepBall(physicsDt);
       this._resolvePossession(physicsDt);
       this._resolveBounds();
@@ -1642,6 +1644,7 @@ export class SimEngine {
         (this.ball.owner || this.ball.state !== startingBallState);
       if (this.pendingPenalty || this.celebrateUntil || flightResolved) break;
     }
+    this._emitTimeOffset = 0;
     this.t = stepStartedAt;
     this._activeStepDt = dt;
     // 5a) 防死锁看门狗：僵持 20s 强制解围（存量僵持 + 减员放大的兜底）
@@ -4298,7 +4301,14 @@ export class SimEngine {
   /** 记录涌现事件（P5 由适配层翻译成现有 event 结构） */
   _emit(type, a, extra = {}) {
     this.events.push({
-      t: this.t,
+      // 物理子步期间，事件描述的是「这一步跑完之后」的几何，而 `this.t` 还停在步首
+      // （见 `_stepOnce` 的子步循环）。差一个 SIM.DT = 0.1s，而球一帧走 4~6 米，
+      // 于是解说会在球进网/门将碰球**之前**就发出来，画面随后还被
+      // `holdSimTimeline` 冻住 380ms——用户看到的就是「先播报，停顿一下才进球」。
+      // 这里只把**事件时间戳**推到子步之后，`this.t` 本身一动不动：
+      // 所有冷却、决策节流、settleUntil 都读 `this.t`，改它会改行为，
+      // 而事件时间戳没有任何玩法逻辑读取（`directResult` 是半场跑完后的纯后处理）。
+      t: this.t + (this._emitTimeOffset || 0),
       type,
       team: a?.team,
       agentId: a?.id,

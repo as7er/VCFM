@@ -680,6 +680,9 @@ function pickFlavorEvents(raw, fromMin, toMin) {
         decision: e.decision || null,
         finalDecision: e.finalDecision || null,
         reason: e.reason || null,
+        // 这里是白名单，字段不在列上就被丢掉。`hold` 就是这么丢的：引擎发了，
+        // 文案想读，中间这一层没带——和 `deflect` 被 `interpolateSimBall` 丢掉是同一个形状。
+        hold: !!e.hold,
       });
       counts[type]++;
     }
@@ -853,7 +856,11 @@ export function defaultFlavorText(state, item) {
     case "corner":
       return `🚩 ${minute}' ${short} 获得角球`;
     case "save":
-      return `🧤 ${minute}' ${who} 扑救成功`;
+      // 引擎的 save 事件带 `hold`（true = 干净抱住，约占 29.5%）。以前这里不看它，
+      // 所有扑救一律说「扑救成功」，于是画面上「从来没有接住过」。
+      return item.hold
+        ? `🧤 ${minute}' ${who} 稳稳没收`
+        : `🧤 ${minute}' ${who} 把球扑出`;
     case "tackle":
       return `🛡️ ${minute}' ${who} 抢断成功`;
     case "offside":

@@ -76,6 +76,11 @@ export function interpolateSimBall(from = {}, to = {}, alpha = 0) {
     state,
     owner,
     netHit: t >= 0.5 ? !!to.netHit : !!from.netHit,
+    // `deflect` 必须一起带过来。引擎在门将指尖擦球等处设了接触标记，注释写着
+    // 「画面上就成了『球在无人接触的情况下自己拐弯』」，adapt 传了、matchview 也画了，
+    // 但直播回放**永远**走这个插值器，而这里以前只返回 netHit——那个修复静默失效了。
+    // 偏向 `to`：接触发生在后一帧，早显示等于又提前一帧。
+    deflect: (t >= 0.85 ? to.deflect : from.deflect) || null,
   };
 }
 
