@@ -92,7 +92,7 @@ const mean = (v) => (v.length ? Number((v.reduce((a, b) => a + b, 0) / v.length)
 const pct = (n, d) => Number(((n / Math.max(1, d)) * 100).toFixed(1));
 
 /** 档位开关 */
-const V = { slots: false, delivery: false, runs: false, restDef: false, outlet: false };
+const V = { slots: false, delivery: false, runs: false, restDef: false, outlet: false, gkOnLine: false };
 
 /**
  * 角球计划：`_restart` 包装里算好，`_think` / `_bestCross` 包装读它。
@@ -218,9 +218,12 @@ function buildDefence(engine, L, ball) {
   // 7) 还没排到的（11v10 之类）：填到弧顶外侧
   while (rest[k]) defend.set(rest[k++].id, { ...at(far * 9.0, 19.0), role: "spare" });
 
-  // 门将：离门线 1.5m，略偏后半门
+  // 门将：离门线 1.5m，略偏后半门。
+  // `V.gkOnLine` 关掉时返回 null → `_restart` 不动他，留在引擎原值（实测离线 5.25m）。
+  // 这是「+0.66 归因」的第二轮：留守/留前场已证伪（留档十），门将是 `slots` 里
+  // 唯一碰了守门员的部分，而角球频率的来源正是 `engine.js:6178/6196` 的托救与封堵。
   const gk = engine.agents.find((a) => a.team === L.defTeam && a.role === "GK" && !a.sentOff);
-  return { defend, gk, gkSpot: at(far * 0.8, 1.5) };
+  return { defend, gk, gkSpot: V.gkOnLine ? at(far * 0.8, 1.5) : null };
 }
 
 /**
@@ -308,7 +311,7 @@ SimEngine.prototype._restart = function _restartProbe(type, team, x, y, ...rest)
     if (a.sentOff) continue;
     if (a.id === taker.id) continue;
     if (a.role === "GK") {
-      if (a.team !== attTeam) { a.x = D.gkSpot.x; a.y = D.gkSpot.y; }
+      if (a.team !== attTeam && D.gkSpot) { a.x = D.gkSpot.x; a.y = D.gkSpot.y; }
       continue;
     }
     const spot = a.team === attTeam ? plan.attack.get(a.id) : plan.defend.get(a.id);
@@ -511,8 +514,12 @@ const LEVELS = [
   { label: "slots −留守−留前场", set: { slots: true, restDef: false, outlet: false } },
   { label: "slots −留守", set: { slots: true, restDef: false } },
   { label: "slots −留前场", set: { slots: true, outlet: false } },
+  // —— 归因第二轮：门将。留守/留前场证伪后，`slots` 里只剩三个变量改了非摆位的东西，
+  //    门将是唯一碰了守门员的（5.25m → 1.58m），而角球频率的来源就是托救与封堵。
+  { label: "slots −门将上线", set: { slots: true, gkOnLine: false } },
   { label: "delivery 只改落点", set: { delivery: true } },
   { label: "slots + delivery", set: { slots: true, delivery: true } },
+  { label: "slots + delivery −门将上线", set: { slots: true, delivery: true, gkOnLine: false } },
   { label: "slots + delivery + runs", set: { slots: true, delivery: true, runs: true } },
 ];
 
@@ -523,6 +530,7 @@ function sweep(level) {
   // 未显式指定时跟随 slots，保证既有档位与已留档的数字逐位可比
   V.restDef = level.set.restDef ?? V.slots;
   V.outlet = level.set.outlet ?? V.slots;
+  V.gkOnLine = level.set.gkOnLine ?? V.slots;
   const agg = { corners: 0, cornerShots: 0, cornerGoals: 0, goals: 0, shots: 0, passes: 0, crosses: 0 };
   const z = { attSix: [], attSecond: [], attBox: [], attHeld: [], defSix: [], defBox: [], defUp: [],
     goalSideOfAll: [], nearestDefToBall: [], minPair: [], gkDepth: [] };
@@ -545,7 +553,7 @@ function sweep(level) {
       if (m.gapAtKick != null) runGap.push(m.gapAtKick);
     }
   }
-  V.slots = V.delivery = V.runs = V.restDef = V.outlet = false;
+  V.slots = V.delivery = V.runs = V.restDef = V.outlet = V.gkOnLine = false;
   const per = (n) => Number((n / matches).toFixed(2));
   return {
     scores,
@@ -629,21 +637,26 @@ console.log("\n[1b] 🔬 +0.66 归因（只看非角球进球；禁区结构在�
   const base = rows.find((r) => r.label === "control 现状");
   const only = (label) => rows.find((r) => r.label === label);
   const delta = (r) => Number((r.非角球进球 - base.非角球进球).toFixed(2));
-  for (const label of ["slots 只改摆位", "slots −留守−留前场", "slots −留守", "slots −留前场"]) {
+  for (const label of [
+    "slots 只改摆位", "slots −留守−留前场", "slots −留守", "slots −留前场", "slots −门将上线",
+  ]) {
     const r = only(label);
     if (!r) continue;
     const d = delta(r);
     console.log(
-      `  ${label.padEnd(24)} 非角球进球 ${String(r.非角球进球).padStart(5)}  ` +
+      `  ${label.padEnd(26)} 非角球进球 ${String(r.非角球进球).padStart(5)}  ` +
         `Δ vs control ${(d >= 0 ? "+" : "") + d.toFixed(2)}  ` +
         `留守 ${String(r.留守).padStart(4)}  留前场 ${String(r.留前场).padStart(4)}  ` +
-        `进球 ${String(r.进球).padStart(4)}`
+        `门将离线 ${String(r.门将离线).padStart(5)}m  ` +
+        `角球 ${String(r.角球).padStart(5)}  进球 ${String(r.进球).padStart(4)}`
     );
   }
   console.log(
-    `  读法：若「−留守−留前场」的 Δ 回到 0 附近，+0.66 就归这两个安排；` +
-      `再看「−留守」与「−留前场」哪一档把 Δ 压下去，就是它单独的责任。` +
-      `\n        若四档 Δ 都在 +0.6 上下不动，说明成因不在这两处，得回到禁区结构本身。`
+    `  留守/留前场已证伪（留档十）：摘掉它们 Δ 不回 0，方向还相反——那两个安排是 rest defence。\n` +
+      `  本轮看「−门将上线」：若 Δ 掉到 0 附近，+0.66 就归「门将被提到门线上」。\n` +
+      `  ⚠ 但那不是可调的旋钮——1.5m 才是真实值（角球审计 12 项告警之一就是「门将离线 5.25m」）。\n` +
+      `     若确认，结论是「引擎在角球后恢复门将站位的方式有缺陷」，要修引擎，不是把门将改回去。\n` +
+      `  ⚠ 四档之间 0.17 进球/场 的差距是噪声（12 场约 2 个球），只读「回不回 0」，不读排序。`
   );
 }
 
