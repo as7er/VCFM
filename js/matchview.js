@@ -47,6 +47,27 @@ const KEY_EVENT_MS = 3400;
 /** 次要但仍需读的事件（扑救 / 角球 / 伤停） */
 const MINOR_EVENT_MS = 2200;
 
+/**
+ * 逻辑格 → 米。场地 100×100 格映射到 68m×105m，所以**两个轴的格不等长**：
+ * x 一格 0.68m、y 一格 1.05m（等于引擎的 `SIM.PITCH_W_METRES / SIM.FIELD_W`）。
+ * 直接对格数取 `Math.hypot` 是混单位——`corner-structure-audit` 修掉的就是这个写法。
+ * 这里不 import SIM：表现层不该为两个常量把引擎拉进来。
+ */
+const OFFICIAL_MX = 0.68;
+const OFFICIAL_MY = 1.05;
+/** 主裁与球的最小间距（米）：低于此值两个圆点会叠在一起，读起来像裁判在带球 */
+const MIN_REF_GAP_M = 5;
+/**
+ * 官员单帧位移上限（米）。真实主裁冲刺峰值 6~7 m/s，取 7。
+ * 官员每 sim 帧更新一次（`_updateOfficials` 只在 `applySimSnapshot` 与
+ * `playSimTimeline` 里被调，都不在 60fps 的 `update()` 内），标准档 sim 步长 0.1s，
+ * 所以上限 = 7 m/s × 0.1s = 0.7 m/帧。
+ * 低通局面重心已经消掉了目标点的不连续，但死球摆位（球瞬移到角旗）与开球回中圈
+ * 仍会让残差一次性变大，`k` 施加在大残差上实测仍能产出 16 m/s 的单帧位移。
+ * 这条上限把瞬移从「更少发生」变成「不可能发生」，边裁跟越位线同样受它保护。
+ */
+const MAX_OFFICIAL_STEP_M = 0.7;
+
 function replayRandomFor(event = {}) {
   const key = [
     event.teamId,
@@ -2739,20 +2760,25 @@ export class MatchView {
    */
   _spawnOfficials(actors) {
     if (!actors) return;
-    const make = (cls, x, y) => {
+    // `label` 只是圆点里的一个字母（主裁 R / 边裁 A），让两种官员在场上可区分：
+    // 光靠 16px 与 18px 的直径差、加一圈黄边，在跟镜里几乎读不出来。
+    // 仍保持 aria-hidden：官员是纯装饰标记，不可点击、不承载比赛信息，
+    // 把字母暴露给读屏只会在 22 名球员之间插进三个无意义的朗读点。
+    const make = (cls, label, x, y) => {
       const el = document.createElement("div");
       el.className = `mp-official ${cls}`;
+      el.textContent = label;
       el.setAttribute("aria-hidden", "true");
       actors.appendChild(el);
       return { x, y, el };
     };
     this.officials = {
       // 主裁：对角线体系，跟球但保持距离，不站在球上
-      referee: make("referee", 42, 50),
+      referee: make("referee", "R", 42, 50),
       // 边裁 A：x≈3 边线，负责 y<50（客队防守半场），跟主队进攻的越位线
-      assistantA: make("assistant", 3, 32),
+      assistantA: make("assistant", "A", 3, 32),
       // 边裁 B：x≈97 边线，负责 y>50（主队防守半场），跟客队进攻的越位线
-      assistantB: make("assistant", 97, 68),
+      assistantB: make("assistant", "A", 97, 68),
     };
     this._applyOfficials();
   }
@@ -2772,30 +2798,63 @@ export class MatchView {
   /**
    * 每帧更新官员位置。只读 `this.ball` 与 `this.players`，不写任何球员/球状态。
    * `soft` 与球员同义：慢镜/直播下用指数平滑，避免硬切抖动。
+   *
+   * 主裁跟的是**局面重心**（`_playCentre`），不是球的瞬时位置。旧实现把目标点
+   * 直接挂在 `this.ball` 上，于是球的每一次不连续都被原样传给主裁：长传飞行、
+   * 死球摆位瞬移到角旗，看起来就是「主裁和球同步瞬移」。**先低通球位再算目标**，
+   * 输入连续，输出就不可能瞬移。
    */
   _updateOfficials(soft = false) {
     const o = this.officials;
     if (!o) return;
     const bx = this.ball?.x ?? 50;
     const by = this.ball?.y ?? 50;
+
+    // 局面重心：飞行中几乎不追球——真实主裁不跟着长传球跑，他跑向局面要去的地方。
+    const play = (this._playCentre ??= { x: bx, y: by });
+    const track = this._isBallInFlight() ? 0.02 : soft ? 0.06 : 0.1;
+    play.x += (bx - play.x) * track;
+    play.y += (by - play.y) * track;
+
     // 平滑系数刻意比球员慢：裁判是跟着跑的，不该和球同步瞬移
     const k = soft ? 0.12 : 0.22;
     const lerp = (m, tx, ty) => {
-      m.x += (clamp(tx, 1, 99) - m.x) * k;
-      m.y += (clamp(ty, 1, 99) - m.y) * k;
+      let dx = (clamp(tx, 1, 99) - m.x) * k;
+      let dy = (clamp(ty, 1, 99) - m.y) * k;
+      // 单帧位移封顶（见 MAX_OFFICIAL_STEP_M）：按米算，两轴格长不同
+      const stepM = Math.hypot(dx * OFFICIAL_MX, dy * OFFICIAL_MY);
+      if (stepM > MAX_OFFICIAL_STEP_M) {
+        const scale = MAX_OFFICIAL_STEP_M / stepM;
+        dx *= scale;
+        dy *= scale;
+      }
+      m.x += dx;
+      m.y += dy;
     };
 
     // —— 主裁：对角线体系 ——
     // 真实主裁跑一条对角线，侧后方跟随，把球夹在自己与边裁之间。
-    // 这里取「球的横向反侧 + 纵向略滞后」，并保证不贴到球上。
-    const side = bx >= 50 ? -1 : 1; // 球在右侧时裁判偏左，反之偏右
-    let tx = bx + side * 11;
-    let ty = by + (by >= 50 ? -7 : 7);
-    const gap = Math.hypot(tx - bx, ty - by);
-    if (gap < 6) {
-      // 兜底：贴太近时沿反侧推开，避免主裁站到球场中央挡球
-      tx = bx + side * 8;
-      ty = by + (by >= 50 ? -6 : 6);
+    // 用 tanh 过渡而不是旧的 `bx >= 50 ? -1 : 1`：符号写法在球每次横穿中线时
+    // 让目标 x 直接跳 22 格（纵向那一项同理跳 14 格），那正是肉眼看到的「瞬移」。
+    // tanh 在中线平滑过零，两侧仍饱和到原来的 ±11 / ±7 偏移，几何意图不变。
+    const lateral = -Math.tanh((play.x - 50) / 12); // 球偏右 → 裁判偏左
+    const trail = -Math.tanh((play.y - 50) / 12); // 纵向朝中线滞后
+    let tx = play.x + lateral * 11;
+    let ty = play.y + trail * 7;
+
+    // 与球保持最小间距。这条兜底在旧实现里是**死代码**：偏移恒为 ±11/±7，
+    // `Math.hypot(11, 7)` 恒等于 13.04，`gap < 6` 永远不成立。tanh 之后偏移在
+    // 中线附近趋于 0，主裁真的可能站到球上，所以它现在必须成立。
+    // 距离换算成米（旧写法直接对格数取 hypot，是混单位）。
+    const dxM = (tx - bx) * OFFICIAL_MX;
+    const dyM = (ty - by) * OFFICIAL_MY;
+    const gapM = Math.hypot(dxM, dyM);
+    if (gapM < MIN_REF_GAP_M) {
+      // 沿「球 → 目标」方向推开；偏移恰好为零时退到横向让开，避免除零
+      const ux = gapM > 1e-3 ? dxM / gapM : 1;
+      const uy = gapM > 1e-3 ? dyM / gapM : 0;
+      tx = bx + (ux * MIN_REF_GAP_M) / OFFICIAL_MX;
+      ty = by + (uy * MIN_REF_GAP_M) / OFFICIAL_MY;
     }
     lerp(o.referee, tx, ty);
 

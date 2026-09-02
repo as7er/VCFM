@@ -4256,11 +4256,26 @@ html[data-theme="light"] .mp-name {
   background: radial-gradient(circle at 32% 28%, #4b5563 0 30%, #1f2937 32% 100%);
   border: 1.5px solid rgba(255, 255, 255, 0.75);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  /* 圆点里的身份字母（主裁 R / 边裁 A）：直径差 16px vs 18px 在跟镜里读不出来，
+     字母才是唯一可靠的区分。文字层不能吃掉 pointer-events: none（上面已声明，
+     子内容继承），也不参与选中。 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: 0;
+  color: rgba(255, 255, 255, 0.95);
+  user-select: none;
+  /* 黑衫上的白字本身够亮，描边只用来压住草皮纹理透出的高频噪点 */
+  text-shadow: 0 0 2px rgba(15, 23, 42, 0.85);
 }
 /* 主裁略大,便于与边裁区分 */
 .mp-official.referee {
   width: 18px;
   height: 18px;
+  font-size: 10.5px;
 }
 /* 边裁：袖标提示他们沿边线跑动 */
 .mp-official.assistant {
