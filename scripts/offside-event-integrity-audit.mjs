@@ -8,8 +8,17 @@
 //
 // 断言一（回归守卫，硬失败）：`type === "offside"` 的事件数必须等于 `_callOffside`
 // 的调用次数。任何「整数倍」关系都说明重启通知又和判罚同名了。
-// 断言二（判罚率，仅告警）：真实足球约 1~3 次/队/场（英超近季约 1.4）。当前实测
-// 约 4.6，偏高约 3 倍，成因见 AGENTS.md v241；因为目标值尚未定案，这里只告警不失败。
+// 断言二（判罚率，仅告警）：真实值来自官方 Premier League / Pulselive API
+// （JSON 里 `"source":"OPTA"`，`total_offside` 季度累计 ÷ 760 队场）：
+//   VAR 时代 2019/20~2025/26 均值 **1.70 次/队/场**（1.55~1.91）
+//   VAR 前   2014/15~2018/19 均值 **1.99**（1.91~2.06）—— VAR 让越位旗少了约 15%
+//   五大联赛 2024/25~2025/26 区间 1.53~1.91（西甲最高、英超与意甲最低）
+// 据此取 **1.4~2.1** 为容许带、1.7 为目标值。当前实测约 4.6，偏高约 2.7 倍，
+// 成因见 AGENTS.md v241（`_bestCross` 没有越位项）；目标值虽已确定，但修复未做，
+// 所以这条仍只告警不失败——让它硬失败会立刻挡住所有无关改动。
+//
+// ⚠ 早先备忘里「英超约 1.4」是**错的**：近十二个赛季没有任何一季低到 1.4，
+// 1.4 是容许带的下沿而不是均值。不要再引用那个数。
 //
 // 用法：node scripts/offside-event-integrity-audit.mjs [场数]
 import { SimEngine, SIM } from "../js/sim/engine.js";
@@ -54,8 +63,10 @@ function club(name, ability) {
 }
 
 const matches = Math.max(1, Number(process.argv[2]) || 8);
-const REAL_PER_TEAM_MIN = 1;
-const REAL_PER_TEAM_MAX = 3;
+// Opta 实测容许带（英超十二季 + 五大联赛十个联赛季，见文件头）
+const REAL_PER_TEAM_MIN = 1.4;
+const REAL_PER_TEAM_MAX = 2.1;
+const REAL_PER_TEAM_TARGET = 1.7;
 
 let totalCalls = 0;
 let totalEvents = 0;
@@ -142,8 +153,10 @@ if (!failed) {
 }
 if (perTeam < REAL_PER_TEAM_MIN || perTeam > REAL_PER_TEAM_MAX) {
   console.warn(
-    `\n⚠ 越位判罚率 ${perTeam.toFixed(2)} 次/队/场，超出真实足球区间 ` +
-      `${REAL_PER_TEAM_MIN}~${REAL_PER_TEAM_MAX}（仅告警，目标值待定，见 AGENTS.md v241）`,
+    `\n⚠ 越位判罚率 ${perTeam.toFixed(2)} 次/队/场，超出 Opta 实测带 ` +
+      `${REAL_PER_TEAM_MIN}~${REAL_PER_TEAM_MAX}（目标 ${REAL_PER_TEAM_TARGET}，` +
+      `英超 VAR 时代均值）——偏高 ${(perTeam / REAL_PER_TEAM_TARGET).toFixed(1)} 倍。` +
+      `仅告警：成因未修，见 AGENTS.md v241。`,
   );
 }
 process.exit(failed ? 1 : 0);
