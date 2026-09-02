@@ -84,6 +84,9 @@ const checks = [
   // 默认 8 场（约 60s）：2 场就能稳定产生 20+ 次判罚，不存在「零样本让断言空转」，
   // 8 场只是让判罚率告警的分母更可信。
   "scripts/offside-event-integrity-audit.mjs",
+  // 默认 6 场（约 50s，与 box-possession-sampling-audit 同量级）：6 场约 34 次角球，
+  // 硬断言（间距/主罚位置/Law 17/落点记录）不会因零样本空转；还原度缺口只告警。
+  "scripts/corner-structure-audit.mjs",
 ];
 const fullChecks = [
   ["scripts/match-realism-audit.mjs", "24"],

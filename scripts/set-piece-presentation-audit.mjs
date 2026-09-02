@@ -134,16 +134,23 @@ const cornerEngine = new SimEngine(makeClub("corner-home"), makeClub("corner-awa
 });
 cornerEngine._restart("corner", "home", 2, 4);
 const active = cornerEngine.agents.filter((player) => !player.sentOff);
+// 与上面的点球段同一条纪律：坐标不是米，必须先按 x 0.68 / y 1.05 换算再比距离。
+// 旧写法直接对坐标取 hypot 再和 3.3 比，同一个 3.3 可以是 2.24 m（纯横向）
+// 也可以是 3.47 m（纯纵向），没有物理含义。实测本场景真实最小间距 3.44 m，
+// 阈值沿用本仓库统一的 1.6 m 重叠判定（与点球段、support-target-crowding 一致）。
 let closest = Infinity;
 for (let i = 0; i < active.length; i++) {
   for (let j = i + 1; j < active.length; j++) {
     closest = Math.min(
       closest,
-      Math.hypot(active[i].x - active[j].x, active[i].y - active[j].y)
+      Math.hypot(
+        (active[i].x - active[j].x) * M_PER_X,
+        (active[i].y - active[j].y) * M_PER_Y
+      )
     );
   }
 }
-assert.ok(closest >= 3.3, `corner slots overlap: closest pair is ${closest.toFixed(2)}`);
+assert.ok(closest >= 1.6, `corner slots overlap: closest pair is ${closest.toFixed(2)} m`);
 
 const first = active.find((player) => player.role !== "GK");
 const second = active.find((player) => player.role !== "GK" && player.id !== first.id);
