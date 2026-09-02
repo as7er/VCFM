@@ -22,6 +22,9 @@ dist/
 # local match recordings / FMM reference clips (do not upload)
 /rec/
 
+# local scratch: video-comparison probes, baseline/calibration dumps (do not upload)
+/.tmp-*/
+
 # local health-check dumps & one-off fix scripts
 /artifacts/
 /scripts/_*.py
