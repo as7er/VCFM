@@ -58,18 +58,26 @@ const OFFICIAL_MY = 1.05;
 /** 主裁与球的最小间距（米）：低于此值两个圆点会叠在一起，读起来像裁判在带球 */
 const MIN_REF_GAP_M = 5;
 /**
- * 官员单帧位移上限（米）。官员每 sim 帧更新一次，标准档步长 0.1s，所以 0.5m/帧 = 5 m/s。
+ * 主裁的移动是**恒速追击 + 分档**，不是「速度 ∝ 目标残差」。
  *
- * ⚠ **锚点不是真实主裁的 6~7 m/s——那是第一版的错。** 引擎自己的球员实测
- * （`scripts/_referee-motion-probe.mjs`，4 场）：追球者中位 2.10 m/s、p90 4.82，
- * 全体外场 p99 5.72。按真实主裁封顶 7 m/s，主裁就比追球的球员还快，
- * 用户第一时间就看出来了：「球去到哪，主裁跑的比追球的球员还快」。
- * 所以判据是**引擎自己的球员**：主裁各分位都要略低于追球者。
- * 现档实测 中位 1.91 / p90 4.09 / p99 5.00，逐项低于上面那组；
- * 顺带每场跑动 11.49 km 落进真实的 10~12 km 带（上一版 13.34 km 偏高 11%）。
- * 边裁跟越位线同样受这条上限保护。
+ * ⛔ 前两版都错在同一条链上：目标点是局面重心的**刚性偏移**，于是球持续移动时目标
+ * 以 1:1 的增益跟着走，主裁必须跑出**球速**才追得上。低通只削高频、上限只削峰值，
+ * 那条牵引链一直没解开。用户在长传转移时看得最清楚——球一次飞 30~40m，残差瞬间变大，
+ * 主裁于是连续多帧顶着上限跑，而同时段的球员正在慢跑回位或以 2~4 m/s 转移。
+ *
+ * 真实主裁**让球跑掉，再补上来**：距球是呼吸的，不是常数。所以这里按距球分三档给速度，
+ * 并且把指数追踪换成恒速追击——主裁的速度与球速彻底解耦。
+ *
+ * 速度锚在引擎自己的球员上（`scripts/_referee-motion-probe.mjs`：追球者中位 2.10 m/s、
+ * p90 4.82，全体外场 p99 5.72）：
+ *   · 带内慢跑 1.5 m/s   —— 低于追球者中位
+ *   · 落后过多才全速 3.8 m/s —— 仍低于追球者 p90，所以**转移时他必然被落下**，这是对的
+ * 代价是距球会拉开到 30m 上下。真实主裁在长传转移后落后 25~35m 是常态。
  */
-const MAX_OFFICIAL_STEP_M = 0.5;
+const OFFICIAL_DRIFT_STEP_M = 0.15; // 1.5 m/s（每 sim 帧 0.1s）
+const MAX_OFFICIAL_STEP_M = 0.38; // 3.8 m/s
+const REF_GAP_NEAR_M = 9; // 比这更近就慢慢让开，别贴着球
+const REF_GAP_FAR_M = 30; // 比这更远才允许全速补位
 
 function replayRandomFor(event = {}) {
   const key = [
@@ -2822,20 +2830,16 @@ export class MatchView {
     play.x += (bx - play.x) * track;
     play.y += (by - play.y) * track;
 
-    // 平滑系数刻意比球员慢：裁判是跟着跑的，不该和球同步瞬移
-    const k = soft ? 0.1 : 0.18;
-    const lerp = (m, tx, ty) => {
-      let dx = (clamp(tx, 1, 99) - m.x) * k;
-      let dy = (clamp(ty, 1, 99) - m.y) * k;
-      // 单帧位移封顶（见 MAX_OFFICIAL_STEP_M）：按米算，两轴格长不同
-      const stepM = Math.hypot(dx * OFFICIAL_MX, dy * OFFICIAL_MY);
-      if (stepM > MAX_OFFICIAL_STEP_M) {
-        const scale = MAX_OFFICIAL_STEP_M / stepM;
-        dx *= scale;
-        dy *= scale;
-      }
-      m.x += dx;
-      m.y += dy;
+    // 恒速追击：本帧朝目标走 stepM 米，走不到就停在半路。
+    // 刻意**不用** `residual * k` —— 那会让速度跟着残差走，残差又跟着球走。
+    const moveTo = (m, tx, ty, stepM) => {
+      const dx = clamp(tx, 1, 99) - m.x;
+      const dy = clamp(ty, 1, 99) - m.y;
+      const dM = Math.hypot(dx * OFFICIAL_MX, dy * OFFICIAL_MY);
+      if (dM < 1e-4) return;
+      const s = Math.min(1, stepM / dM);
+      m.x += dx * s;
+      m.y += dy * s;
     };
 
     // —— 主裁：对角线体系 ——
@@ -2862,21 +2866,37 @@ export class MatchView {
       tx = bx + (ux * MIN_REF_GAP_M) / OFFICIAL_MX;
       ty = by + (uy * MIN_REF_GAP_M) / OFFICIAL_MY;
     }
-    lerp(o.referee, tx, ty);
+    // 距球分档给速度（见 OFFICIAL_DRIFT_STEP_M 那段说明）。判据用**真实球位**而不是
+    // 局面重心：玩家眼里的「离球多远」看的是球。
+    // 注意与上面那个 `gapM` 不是一回事——那个是「站位点到球」，用来防止站位点落在球上；
+    // 这个是「主裁本人到球」，用来决定他该慢跑还是全速。
+    const refGapM = Math.hypot((bx - o.referee.x) * OFFICIAL_MX, (by - o.referee.y) * OFFICIAL_MY);
+    const refStep =
+      refGapM > REF_GAP_FAR_M
+        ? MAX_OFFICIAL_STEP_M
+        : refGapM < REF_GAP_NEAR_M
+          ? OFFICIAL_DRIFT_STEP_M * 0.6
+          : OFFICIAL_DRIFT_STEP_M;
+    moveTo(o.referee, tx, ty, refStep);
 
     // —— 边裁：各守一半，跟随该半场的越位线 ——
     // `_offsideLineY(att)` 返回倒数第二名防守者的 y，正是边裁该齐平的位置。
     const lineForHomeAttack = this._offsideLineY("home"); // 客队防守半场 y<50
     const lineForAwayAttack = this._offsideLineY("away"); // 主队防守半场 y>50
-    lerp(
+    // 边裁按真实分工必须与倒数第二名防守者齐平，所以允许他们跑到上限——
+    // 真实边裁确实沿边线冲刺，而且没人会拿他们跟场内球员比速度。
+    // 恒速追击同样保护他们：越位线在攻防转换时跳得比球还狠。
+    moveTo(
       o.assistantA,
       3,
-      clamp(Number.isFinite(lineForHomeAttack) ? lineForHomeAttack : 32, 1, 50)
+      clamp(Number.isFinite(lineForHomeAttack) ? lineForHomeAttack : 32, 1, 50),
+      MAX_OFFICIAL_STEP_M
     );
-    lerp(
+    moveTo(
       o.assistantB,
       97,
-      clamp(Number.isFinite(lineForAwayAttack) ? lineForAwayAttack : 68, 50, 99)
+      clamp(Number.isFinite(lineForAwayAttack) ? lineForAwayAttack : 68, 50, 99),
+      MAX_OFFICIAL_STEP_M
     );
 
     this._applyOfficials();

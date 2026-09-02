@@ -128,6 +128,7 @@ function ballTrack(seed) {
 
       const out = engine.agents.filter((a) => a.role !== "GK" && !a.sentOff);
       const now = new Map(out.map((a) => [a.id, { x: a.x, y: a.y }]));
+      const entry = track[track.length - 1];
       if (prevPos) {
         let nearest = null, nd = Infinity;
         for (const a of out) {
@@ -139,7 +140,12 @@ function ballTrack(seed) {
           const d = metres(a.x - b.x, a.y - b.y);
           if (d < nd) { nd = d; nearest = v; }
         }
-        if (nearest != null) chaser.push(nearest);
+        if (nearest != null) {
+          chaser.push(nearest);
+          // 逐帧存下追球者速度：用户的观察是**同一瞬间**的相对速度，
+          // 拿分位对分位比不出「主裁比他快」这件事。
+          entry.chaserV = nearest;
+        }
       }
       prevPos = now;
     }
@@ -167,56 +173,66 @@ function ballTrack(seed) {
   }
 }
 
-/** 把某一版跟随逻辑跑在同一条球轨迹上。cfg 只对 "new" 生效 */
-function follow(track, mode, cfg = { track: 0.06, k: 0.12, cap: 0.7 }) {
-  const k = mode === "old" ? 0.12 : cfg.k;
+/**
+ * 把某一版跟随逻辑跑在同一条球轨迹上。
+ * cfg = { track, drift, cap, near, far }（"old" 忽略之，走旧的指数追踪 + 无上限）
+ */
+function follow(track, mode, cfg) {
   const ref = { x: 42, y: 50 };
   const play = { x: track[0].x, y: track[0].y };
-  const speeds = [], jumps = [], gaps = [], ballSpeeds = [];
-  let dist = 0, branchHits = 0, capHits = 0, prevT = null, prevB = null;
+  const speeds = [], gaps = [], jumps = [];
+  let dist = 0, prevT = null, capHits = 0, fasterThanChaser = 0, chaserFrames = 0;
   for (const f of track) {
     let t;
     if (mode === "old") {
       t = oldTarget(f.x, f.y);
-      if (t.dead) branchHits++;
     } else {
       const kk = f.flight ? cfg.track / 3 : cfg.track;
       play.x += (f.x - play.x) * kk;
       play.y += (f.y - play.y) * kk;
       t = newTarget(f.x, f.y, play);
-      if (t.guard) branchHits++;
     }
     if (prevT) jumps.push(metres(t.tx - prevT.tx, t.ty - prevT.ty));
     prevT = { tx: t.tx, ty: t.ty };
-    if (prevB) ballSpeeds.push(metres(f.x - prevB.x, f.y - prevB.y) / DT);
-    prevB = { x: f.x, y: f.y };
+
     const px = ref.x, py = ref.y;
-    let dx = (clamp(t.tx, 1, 99) - ref.x) * k;
-    let dy = (clamp(t.ty, 1, 99) - ref.y) * k;
-    if (mode !== "old") {
-      const stepM = Math.hypot(dx * MX, dy * MY);
-      if (stepM > cfg.cap) {
-        const scale = cfg.cap / stepM;
-        dx *= scale;
-        dy *= scale;
-        capHits++;
+    if (mode === "old") {
+      ref.x += (clamp(t.tx, 1, 99) - ref.x) * 0.12;
+      ref.y += (clamp(t.ty, 1, 99) - ref.y) * 0.12;
+    } else {
+      // 恒速追击 + 距球分档
+      const gapM = metres(f.x - ref.x, f.y - ref.y);
+      const stepM =
+        gapM > cfg.far ? cfg.cap : gapM < cfg.near ? cfg.drift * 0.6 : cfg.drift;
+      if (stepM >= cfg.cap) capHits++;
+      const dx = clamp(t.tx, 1, 99) - ref.x;
+      const dy = clamp(t.ty, 1, 99) - ref.y;
+      const dM = metres(dx, dy);
+      if (dM >= 1e-4) {
+        const s = Math.min(1, stepM / dM);
+        ref.x += dx * s;
+        ref.y += dy * s;
       }
     }
-    ref.x += dx;
-    ref.y += dy;
     const step = metres(ref.x - px, ref.y - py);
     dist += step;
-    speeds.push(step / DT);
+    const v = step / DT;
+    speeds.push(v);
     gaps.push(metres(ref.x - f.x, ref.y - f.y));
+    if (f.chaserV != null) {
+      chaserFrames++;
+      if (v > f.chaserV) fasterThanChaser++;
+    }
   }
   return {
     中位: q(speeds, 0.5), p90: q(speeds, 0.9), p99: q(speeds, 0.99),
     峰值: Number(Math.max(...speeds).toFixed(2)),
+    比追球者快的帧占比: Number(((fasterThanChaser / Math.max(1, chaserFrames)) * 100).toFixed(1)),
     每场km: Number((dist / 1000).toFixed(2)),
-    距球中位m: q(gaps, 0.5),
+    距球p10: q(gaps, 0.1), 距球中位: q(gaps, 0.5), 距球p90: q(gaps, 0.9),
+    距球峰值: Number(Math.max(...gaps).toFixed(1)),
+    全速帧占比: Number(((capHits / track.length) * 100).toFixed(1)),
     单帧跳变最大m: Number(Math.max(...jumps).toFixed(2)),
-    跳变over5次: jumps.filter((j) => j > 5).length,
-    branchHits, capHits,
   };
 }
 
@@ -224,13 +240,14 @@ const agg = (rows, key) => mean(rows.map((r) => r[key]));
 const summarise = (rows) =>
   Object.fromEntries(Object.keys(rows[0]).map((key) => [key, agg(rows, key)]));
 
-// 候选档：都比现档更慢。判据不是真实主裁的 7 m/s，而是**引擎自己的追球者**
+// 候选档。判据不是真实主裁的 6~7 m/s，而是**引擎自己的追球者**：
+// 长传转移时主裁必须被落下，所以 cap 要低于追球者 p90。
 const CFGS = [
-  { name: "A 现档", track: 0.06, k: 0.12, cap: 0.7 },
-  { name: "B", track: 0.045, k: 0.11, cap: 0.55 },
-  { name: "C", track: 0.035, k: 0.1, cap: 0.5 },
-  { name: "D", track: 0.025, k: 0.09, cap: 0.45 },
-  { name: "E", track: 0.018, k: 0.08, cap: 0.4 },
+  { name: "上一版", track: 0.035, drift: 0.5, cap: 0.5, near: 0, far: 0 }, // 恒定 0.5 = 无分档
+  { name: "A", track: 0.035, drift: 0.15, cap: 0.5, near: 9, far: 30 },
+  { name: "B ★采用", track: 0.035, drift: 0.15, cap: 0.38, near: 9, far: 30 },
+  { name: "C", track: 0.035, drift: 0.12, cap: 0.32, near: 9, far: 34 },
+  { name: "D", track: 0.035, drift: 0.1, cap: 0.28, near: 10, far: 38 },
 ];
 
 const tracks = [], playerRows = [];
@@ -244,20 +261,26 @@ const byCfg = CFGS.map((cfg) => ({ cfg, rows: tracks.map((t) => follow(t, "new",
 
 const P = summarise(playerRows);
 console.log(JSON.stringify({ matches, seeds: { first: seeds[0], last: seeds.at(-1) }, 引擎球员速度: P }, null, 2));
-console.log(`\n⚠ 判据不是真实主裁的 6~7 m/s——引擎球员就这个速度。主裁应各分位**略低于追球者**。`);
+console.log(`\n⚠ 判据是引擎自己的球员，不是真实主裁——这个引擎的球员就这个速度。`);
 console.log(`  追球者 中位 ${P.追球者中位} / p90 ${P.追球者p90}    全体 中位 ${P.全体中位} / p90 ${P.全体p90} / p99 ${P.全体p99}`);
 console.log(`  （峰值列不可信：定位球会把球员瞬移回阵型，那不是跑动）\n`);
 
 const OLD = summarise(oldRows);
-console.log(`  ${"档".padEnd(8)} ${"track".padEnd(6)} ${"k".padEnd(5)} ${"cap".padEnd(5)} 中位    p90    p99    峰值   每场km  距球m  跳变max`);
-console.log(`  ${"修前".padEnd(8)} ${"—".padEnd(6)} ${"0.12".padEnd(5)} ${"—".padEnd(5)} ${String(OLD.中位).padStart(5)}  ${String(OLD.p90).padStart(5)}  ${String(OLD.p99).padStart(5)}  ${String(OLD.峰值).padStart(5)}  ${String(OLD.每场km).padStart(6)}  ${String(OLD.距球中位m).padStart(5)}  ${String(OLD.单帧跳变最大m).padStart(6)}`);
+const hdr = `  ${"档".padEnd(9)} ${"drift".padEnd(6)} ${"cap".padEnd(5)} 中位   p90   峰值  比追球者快%  距球p10/中位/p90/峰值      每场km  全速帧%`;
+console.log(hdr);
+console.log(`  ${"修前".padEnd(9)} ${"—".padEnd(6)} ${"—".padEnd(5)} ${String(OLD.中位).padStart(4)}  ${String(OLD.p90).padStart(4)}  ${String(OLD.峰值).padStart(5)}  ${String(OLD.比追球者快的帧占比).padStart(9)}%  ${String(OLD.距球p10).padStart(4)}/${String(OLD.距球中位).padStart(5)}/${String(OLD.距球p90).padStart(5)}/${String(OLD.距球峰值).padStart(5)}  ${String(OLD.每场km).padStart(6)}  ${String(OLD.全速帧占比).padStart(6)}%`);
 for (const { cfg, rows } of byCfg) {
   const r = summarise(rows);
-  const ok = r.中位 < P.追球者中位 && r.p90 < P.追球者p90 && r.p99 < P.全体p99;
+  const ok = r.p90 < P.追球者p90 && r.中位 < P.追球者中位 && r.峰值 <= P.追球者p90;
   console.log(
-    `${ok ? "★" : " "} ${cfg.name.padEnd(8)} ${String(cfg.track).padEnd(6)} ${String(cfg.k).padEnd(5)} ${String(cfg.cap).padEnd(5)} ` +
-    `${String(r.中位).padStart(5)}  ${String(r.p90).padStart(5)}  ${String(r.p99).padStart(5)}  ${String(r.峰值).padStart(5)}  ` +
-    `${String(r.每场km).padStart(6)}  ${String(r.距球中位m).padStart(5)}  ${String(r.单帧跳变最大m).padStart(6)}`
+    `${ok ? "★" : " "} ${cfg.name.padEnd(9)} ${String(cfg.drift).padEnd(6)} ${String(cfg.cap).padEnd(5)} ` +
+    `${String(r.中位).padStart(4)}  ${String(r.p90).padStart(4)}  ${String(r.峰值).padStart(5)}  ` +
+    `${String(r.比追球者快的帧占比).padStart(9)}%  ` +
+    `${String(r.距球p10).padStart(4)}/${String(r.距球中位).padStart(5)}/${String(r.距球p90).padStart(5)}/${String(r.距球峰值).padStart(5)}  ` +
+    `${String(r.每场km).padStart(6)}  ${String(r.全速帧占比).padStart(6)}%`
   );
 }
-console.log(`\n★ = 中位与 p90 都低于追球者、p99 低于全体 p99。真实主裁每场 10~12 km 仅作旁证。`);
+console.log(`
+★ = 中位与 p90 低于追球者，且峰值不超过追球者 p90（长传转移时必然被落下）。
+「距球 p10/中位/p90/峰值」是这次的关键列：上一版几乎是常数（距离被锁死），
+分档之后应该拉开——距离会呼吸，才说明主裁不再被球牵着走。`);

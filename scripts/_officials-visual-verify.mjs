@@ -139,10 +139,10 @@ try {
   const moved = steps.filter((s) => s > 1e-6).length;
   console.log({ 采样帧: track.length, 有位移帧: moved, 单帧最大位移米: Number(maxStep.toFixed(3)) });
   assert.ok(moved > 20, "主裁必须真的在动（否则这条断言测的是静止画面）");
-  // 上限 0.5 m/次更新（= 5 m/s，锚在引擎自己的球员速度上，不是真实主裁的 7 m/s）；
-  // 一个 rAF 间隔内偶尔挤进两次更新，所以放宽到 1.8m。
+  // 上限 0.38 m/次更新（= 3.8 m/s，低于引擎追球者 p90 的 4.8——长传转移时主裁
+  // 必须被落下）。一个 rAF 间隔内偶尔挤进两次更新，所以放宽到 1.4m。
   // 旧实现单帧目标跳变最大 45.87m，任何回归都会远远撞穿这条线。
-  assert.ok(maxStep < 1.8, `主裁单帧位移 ${maxStep.toFixed(2)}m 过大，瞬移回归了`);
+  assert.ok(maxStep < 1.4, `主裁单帧位移 ${maxStep.toFixed(2)}m 过大，瞬移回归了`);
 
   await page.locator(".mp-field").screenshot({ path: `${OUT}/officials-field.png` });
   assert.deepEqual(pageErrors, [], `页面报错：${pageErrors.join(" | ")}`);

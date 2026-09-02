@@ -2222,6 +2222,22 @@ export class SimEngine {
       }
     }
 
+    // 开球同理：真实开球几乎总是一脚短传。开球没有 restartType（`_kickoff` 显式清空），
+    // 所以走一个自带时限的独立标志，见 `_kickoff` 里的说明。
+    // 没有这一条时，开球会掉进普通运动战逻辑，而队友全在球身后 → `advance` 为负 →
+    // 传球价值被压到 ±0.05（正常运动战 0.4~0.85），于是常常选成护球或后撤。
+    if (this.t < (b.kickoffPassUntil || 0)) {
+      const cands = this._passCandidates(a);
+      const target =
+        (b.kickoffMateId && cands.find((c) => c.agent.id === b.kickoffMateId)) || cands[0] || null;
+      if (target) {
+        b.kickoffPassUntil = 0;
+        b.kickoffMateId = null;
+        this._pass(a, target);
+        return;
+      }
+    }
+
     // 近射区：前锋/任何人；中场/核心/边锋内切弧顶稍大
     const isMid = a.role === "MID";
     const isAtt = a.role === "ATT";
@@ -6815,6 +6831,11 @@ export class SimEngine {
       a.intent = null;
       a.fsm = "home";
       a.decisionUntil = this.t + 0.5;
+      // 朝向必须一起重置。旧实现重置了 x/y/tx/ty/vx/vy/intent/fsm 却漏了 heading，
+      // 而 `_stepBall:4659` 把球钉在持球者 heading 前方 1.4 格——丢球那方在庆祝
+      // 期间朝自己球门走（`:6702`），开球时那个朝向没被清，于是**球一开始就在
+      // 开球者身后**，画面上是一次向后带球。
+      a.heading = this.attackDir(a.team) > 0 ? Math.PI / 2 : -Math.PI / 2;
     }
     this.ball.x = 50;
     this.ball.y = 50;
@@ -6838,7 +6859,47 @@ export class SimEngine {
       near.tx = near.x;
       near.ty = near.y;
       this.ball.owner = near.id;
-      near.decisionUntil = this.t + 0.6;
+      // 让首次决策落在死球窗口**之后**。旧值 t+0.6 落在 `deadBallUntil = t+0.9` 之内，
+      // 于是它被死球护球分支（`_decideOnBall` 开头）吃掉，而节流是在调用**之前**写的
+      // （`_think`），下一次机会被推到 t+1.64~2.86s。开球者因此抱着球空等 1~2 秒，
+      // 常常在能传之前就被断掉——实测首脚传球只占 37.5%。
+      near.decisionUntil = this.t + 0.95;
+      // 摆一个接球人。`* 0.48` 的压缩把最近的队友推到 15~25 格（16~26m）外，
+      // 真实开球旁边有个 5~10m 的伙伴。放在本方半场内 8 格处：Law 8 只要求
+      // 开球方在本方半场（对手才需退出中圈），所以这个位置合法。
+      // 距球 10 格，过得了传球候选的 `d < 6` 下限（`_passCandidates:2817`）。
+      const back = -this.attackDir(team); // 指向本方半场
+      let mate = null;
+      let bestD = Infinity;
+      for (const a of this.agents) {
+        if (a.team !== team || a.sentOff || a.role === "GK" || a.id === near.id) continue;
+        const d = dist(a.x, a.y, 50, 50);
+        if (d < bestD) { bestD = d; mate = a; }
+      }
+      if (mate) {
+        // 摆在**侧面**而不是身后：用户要的是「传给旁边的队友」。
+        // ±9 格横向 + 3 格回撤 = 距球 6.9m（hypot(9×0.68, 3×1.05)），落在真实开球
+        // 短传的 5~10m 里，也过得了传球候选的 `d < 6` 下限。
+        // 先前版本放在身后 8 格，首脚传球率确实到了 100%，但 100% 的开球都把球
+        // 往自己球门送（净位移中位 −1.56m），画面上仍然不对。
+        mate.x = clamp(mate.baseX < 50 ? 41 : 59, 4, 96);
+        mate.y = clamp(50 + back * 3, 3, 97);
+        mate.tx = mate.x;
+        mate.ty = mate.y;
+        mate.vx = 0;
+        mate.vy = 0;
+        // 记下接球人。首脚**指定传给他**，不走 `_bestPass` 的 argmax——那个排序读的是
+        // `advance`（`_passCandidates`），而开球时所有候选的 advance 都是负的，谁排第一
+        // 基本是噪声，方向也就不可控。实测靠 `_bestPass` 选时首脚传球率只有 77~100% 之间
+        // 浮动，且方向随摆位漂移。
+        this.ball.kickoffMateId = mate.id;
+      }
+      // 首脚必须传出，与界外球同一条规矩（`_decideOnBall:2217`）。
+      // ⚠ 刻意**不**设 `ball.restartType = "kickoff"`：那个字段有 8 处消费者，
+      //   含 `box-defending-audit` 的 `crowdedPairs`（上限 14、干净基线 12，余量只有 2）、
+      //   `edge-rules-audit` 的等值断言、以及 `_queueBallAction:1155` 的提前返回。
+      //   用一个自带时限的独立标志，把影响面锁死在开球上。
+      this.ball.kickoffPassUntil = this.t + 6;
     }
     this.possession = team;
     this.deadBallUntil = this.t + 0.9; // 死球恢复窗口
