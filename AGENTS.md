@@ -6,7 +6,54 @@
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
 > 缓存：**vcfm-v241**（越位事件去重：判罚与重启不再同名）
 
-## 交接（2026-09-01 17:30，换机继续）
+## 交接（2026-09-02 14:15，从家里的机器换回公司电脑）
+
+> **本次完成：越位主线从「有个可疑着力点」推进到「修法已标定完成，但被进攻过量卡住」。**
+> 提交 `d33c16f` 已推送 master，工作区干净（只剩故意不入库的 `.tmp-video/`）。
+> **引擎代码一行未改**，所以缓存仍是 `vcfm-v241`，不需要升。
+
+**结论链（按这个顺序读 v241 那几节）**：
+Opta 真实值 **1.70 次/队/场**（十二季一手数据，容许带 1.4~2.1）→ 路径分解发现判罚
+**A 路 50.7% / B 路 49.3% 各占一半**，B 路是「越位球员根本不是传球目标却抢先拿到飞行球」
+→ 堵 B 路 + 禁止传给越位队友实测 **2.04，首次进入真实带** → **但进球同时 2.92→3.67/场,
+破 `match-realism-audit:362` 的 2.5~3.3 护栏** → **过量越位一直在给进攻当刹车**,
+必须与「压低禁区循环」成对做，不能先上。
+
+**⛔ 已证伪，换机后不要再花时间碰这三处**：
+1. `_clampOffside`（暴露量只有 3.3% 的传球存在越位队友，自律是够的）；
+2. `_isOffsidePosition` 的 `tol`（被吹者越线中位 1.64m，擦线只占 1.4%）；
+3. `_bestCross` 的乘性越位抑制，含 `preferOnside`（作用面 0.3%，只降 8%）。
+
+**🔜 待做（越位侧，但排在主线之后）**：
+- 路径 A 要动就得**同时覆盖 `_passCandidates` / `_bestCross` / `_bestCutback` 三个出口**——
+  只改 `_passCandidates`（`hardA` 档）仅降 14%，传中与回做全从旁边漏过去了。
+- **三个降幅不可相加**（传中硬禁 −1.21、`peelB` −2.08、`hardA` −0.62 互相重叠）,
+  要合并档实测。
+- `peelB` 的 `stalls`（看门狗清球）与传球成功率**未验证**，采用前必须跑
+  `node scripts/match-realism-audit.mjs 24`。
+
+**⚠️ 这些东西留在家里那台机器上，不随 git 走**：
+- **视频素材**：`C:\Users\WXX\Desktop\2D比赛画面对比\`（FM26 Mobile 96MB / VCFM 60MB）。
+  **公司电脑没有。** 需要它的只有 `scripts/_video-compare/cmp8_ball.py`
+  （球速、球的三区分布、球在禁区内的时长）。
+- `.tmp-video/` 里的中间产物（`cmp_dots_fm.csv`、`cmp_dots_vc.csv`、`ball.csv`、
+  抽帧 PNG、`cand.pkl`）**故意未入库**,`.py` 脚本本身已在 `scripts/_video-compare/`。
+- **`C:\Users\WXX\.claude\projects\F--VCFM\memory\` 的记忆文件是本机的，不随仓库走。**
+  今天新增的三条（小样本占比不可信、标定带互相补偿、argmax 乘零不是排除）的**实质内容
+  都已同时写进本文件**，换机后靠 AGENTS.md 即可，不必担心丢。
+
+### 换机后的起步动作
+
+```
+git pull                                         # 取本次交接 + d33c16f
+node scripts/offside-event-integrity-audit.mjs 8  # 越位基线，应报 4.56 并告警
+node scripts/match-realism-audit.mjs 24          # 标定基线（verify.mjs 默认不含它）
+node scripts/box-possession-sampling-audit.mjs   # 禁区循环基线 = 主线的对象
+```
+⚠️ `node scripts/verify.mjs` 跑满 75 项要 **40 分钟以上**（`ecosystem-audit` 单项就十几分钟）,
+**不要接 `| tail`**——`tail` 要等管道关闭才吐字，后台会看着像卡死。直接跑或重定向到文件。
+
+## 交接（2026-09-01 17:30，上一次换机，内容仍有效）
 
 > **本次完成：确认「球员为什么慢」的根因 + 裁判表现层实现（v240）**
 > 
