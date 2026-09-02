@@ -104,7 +104,7 @@ function newTarget(bx, by, play) {
   return { tx, ty, guard };
 }
 
-/** 跑一场，逐 0.1s 采球位与飞行状态 */
+/** 跑一场，逐 0.1s 采球位与飞行状态；同时量引擎自己的球员速度 */
 function ballTrack(seed) {
   const restore = Math.random;
   Math.random = seededRandom(seed);
@@ -114,20 +114,62 @@ function ballTrack(seed) {
     });
     const steps = Math.round((90 * 60) / DT);
     const track = [];
+    // 球员速度：全体外场用直方图（4.3M 样本不必全存），追球者单独存
+    const BIN = 0.02, BINS = 700;
+    const hist = new Uint32Array(BINS);
+    let histN = 0;
+    const chaser = [];
+    let prevPos = null;
     for (let s = 0; s < steps; s++) {
       engine.step(DT);
       const st = engine.ball.state;
-      track.push({ x: engine.ball.x, y: engine.ball.y, flight: st === "pass" || st === "shot" });
+      const b = engine.ball;
+      track.push({ x: b.x, y: b.y, flight: st === "pass" || st === "shot" });
+
+      const out = engine.agents.filter((a) => a.role !== "GK" && !a.sentOff);
+      const now = new Map(out.map((a) => [a.id, { x: a.x, y: a.y }]));
+      if (prevPos) {
+        let nearest = null, nd = Infinity;
+        for (const a of out) {
+          const p = prevPos.get(a.id);
+          if (!p) continue;
+          const v = metres(a.x - p.x, a.y - p.y) / DT;
+          const bin = Math.min(BINS - 1, Math.floor(v / BIN));
+          hist[bin]++; histN++;
+          const d = metres(a.x - b.x, a.y - b.y);
+          if (d < nd) { nd = d; nearest = v; }
+        }
+        if (nearest != null) chaser.push(nearest);
+      }
+      prevPos = now;
     }
-    return track;
+    const fromHist = (p) => {
+      let acc = 0;
+      const want = p * histN;
+      for (let i = 0; i < BINS; i++) {
+        acc += hist[i];
+        if (acc >= want) return Number(((i + 0.5) * BIN).toFixed(2));
+      }
+      return Number(((BINS - 0.5) * BIN).toFixed(2));
+    };
+    let maxBin = 0;
+    for (let i = BINS - 1; i >= 0; i--) if (hist[i]) { maxBin = i; break; }
+    return {
+      track,
+      players: {
+        全体中位: fromHist(0.5), 全体p90: fromHist(0.9), 全体p99: fromHist(0.99),
+        全体峰值: Number(((maxBin + 0.5) * BIN).toFixed(2)),
+        追球者中位: q(chaser, 0.5), 追球者p90: q(chaser, 0.9), 追球者峰值: Number(Math.max(...chaser).toFixed(2)),
+      },
+    };
   } finally {
     Math.random = restore;
   }
 }
 
-/** 把某一版跟随逻辑跑在同一条球轨迹上 */
-function follow(track, mode) {
-  const k = 0.12; // soft = true
+/** 把某一版跟随逻辑跑在同一条球轨迹上。cfg 只对 "new" 生效 */
+function follow(track, mode, cfg = { track: 0.06, k: 0.12, cap: 0.7 }) {
+  const k = mode === "old" ? 0.12 : cfg.k;
   const ref = { x: 42, y: 50 };
   const play = { x: track[0].x, y: track[0].y };
   const speeds = [], jumps = [], gaps = [], ballSpeeds = [];
@@ -138,7 +180,7 @@ function follow(track, mode) {
       t = oldTarget(f.x, f.y);
       if (t.dead) branchHits++;
     } else {
-      const kk = f.flight ? 0.02 : 0.06;
+      const kk = f.flight ? cfg.track / 3 : cfg.track;
       play.x += (f.x - play.x) * kk;
       play.y += (f.y - play.y) * kk;
       t = newTarget(f.x, f.y, play);
@@ -152,10 +194,9 @@ function follow(track, mode) {
     let dx = (clamp(t.tx, 1, 99) - ref.x) * k;
     let dy = (clamp(t.ty, 1, 99) - ref.y) * k;
     if (mode !== "old") {
-      // 单帧位移封顶：MAX_OFFICIAL_STEP_M = 0.7 m（7 m/s × 0.1s）
       const stepM = Math.hypot(dx * MX, dy * MY);
-      if (stepM > MAX_STEP_M) {
-        const scale = MAX_STEP_M / stepM;
+      if (stepM > cfg.cap) {
+        const scale = cfg.cap / stepM;
         dx *= scale;
         dy *= scale;
         capHits++;
@@ -169,30 +210,54 @@ function follow(track, mode) {
     gaps.push(metres(ref.x - f.x, ref.y - f.y));
   }
   return {
-    refSpeedMedian: q(speeds, 0.5), refSpeedP90: q(speeds, 0.9), refSpeedP99: q(speeds, 0.99),
-    refSpeedMax: Number(Math.max(...speeds).toFixed(2)),
-    stepsOver7ms: speeds.filter((s) => s > 7).length,
-    distanceKm: Number((dist / 1000).toFixed(2)),
-    targetJumpP99M: q(jumps, 0.99), targetJumpMaxM: Number(Math.max(...jumps).toFixed(2)),
-    targetJumpsOver5M: jumps.filter((j) => j > 5).length,
-    gapToBallMedianM: q(gaps, 0.5),
-    ballSpeedMedian: q(ballSpeeds, 0.5),
+    中位: q(speeds, 0.5), p90: q(speeds, 0.9), p99: q(speeds, 0.99),
+    峰值: Number(Math.max(...speeds).toFixed(2)),
+    每场km: Number((dist / 1000).toFixed(2)),
+    距球中位m: q(gaps, 0.5),
+    单帧跳变最大m: Number(Math.max(...jumps).toFixed(2)),
+    跳变over5次: jumps.filter((j) => j > 5).length,
     branchHits, capHits,
   };
 }
 
 const agg = (rows, key) => mean(rows.map((r) => r[key]));
-const oldRows = [], newRows = [];
-for (const seed of seeds) {
-  const track = ballTrack(seed);
-  oldRows.push(follow(track, "old"));
-  newRows.push(follow(track, "new"));
-}
 const summarise = (rows) =>
   Object.fromEntries(Object.keys(rows[0]).map((key) => [key, agg(rows, key)]));
 
-console.log(JSON.stringify({ matches, seeds: { first: seeds[0], last: seeds.at(-1) }, before: summarise(oldRows), after: summarise(newRows) }, null, 2));
-console.log(`
-真实参照：主裁每场 10~12 km、均速约 2 m/s、冲刺峰值 6~7 m/s。
-before.branchHits 是 \`gap < 6\` 兜底的命中次数（应为 0 —— 死代码）；
-after.branchHits 是新的按米最小间距守卫命中次数（应 > 0 —— 它现在真的会成立）。`);
+// 候选档：都比现档更慢。判据不是真实主裁的 7 m/s，而是**引擎自己的追球者**
+const CFGS = [
+  { name: "A 现档", track: 0.06, k: 0.12, cap: 0.7 },
+  { name: "B", track: 0.045, k: 0.11, cap: 0.55 },
+  { name: "C", track: 0.035, k: 0.1, cap: 0.5 },
+  { name: "D", track: 0.025, k: 0.09, cap: 0.45 },
+  { name: "E", track: 0.018, k: 0.08, cap: 0.4 },
+];
+
+const tracks = [], playerRows = [];
+for (const seed of seeds) {
+  const { track, players } = ballTrack(seed);
+  tracks.push(track);
+  playerRows.push(players);
+}
+const oldRows = tracks.map((t) => follow(t, "old"));
+const byCfg = CFGS.map((cfg) => ({ cfg, rows: tracks.map((t) => follow(t, "new", cfg)) }));
+
+const P = summarise(playerRows);
+console.log(JSON.stringify({ matches, seeds: { first: seeds[0], last: seeds.at(-1) }, 引擎球员速度: P }, null, 2));
+console.log(`\n⚠ 判据不是真实主裁的 6~7 m/s——引擎球员就这个速度。主裁应各分位**略低于追球者**。`);
+console.log(`  追球者 中位 ${P.追球者中位} / p90 ${P.追球者p90}    全体 中位 ${P.全体中位} / p90 ${P.全体p90} / p99 ${P.全体p99}`);
+console.log(`  （峰值列不可信：定位球会把球员瞬移回阵型，那不是跑动）\n`);
+
+const OLD = summarise(oldRows);
+console.log(`  ${"档".padEnd(8)} ${"track".padEnd(6)} ${"k".padEnd(5)} ${"cap".padEnd(5)} 中位    p90    p99    峰值   每场km  距球m  跳变max`);
+console.log(`  ${"修前".padEnd(8)} ${"—".padEnd(6)} ${"0.12".padEnd(5)} ${"—".padEnd(5)} ${String(OLD.中位).padStart(5)}  ${String(OLD.p90).padStart(5)}  ${String(OLD.p99).padStart(5)}  ${String(OLD.峰值).padStart(5)}  ${String(OLD.每场km).padStart(6)}  ${String(OLD.距球中位m).padStart(5)}  ${String(OLD.单帧跳变最大m).padStart(6)}`);
+for (const { cfg, rows } of byCfg) {
+  const r = summarise(rows);
+  const ok = r.中位 < P.追球者中位 && r.p90 < P.追球者p90 && r.p99 < P.全体p99;
+  console.log(
+    `${ok ? "★" : " "} ${cfg.name.padEnd(8)} ${String(cfg.track).padEnd(6)} ${String(cfg.k).padEnd(5)} ${String(cfg.cap).padEnd(5)} ` +
+    `${String(r.中位).padStart(5)}  ${String(r.p90).padStart(5)}  ${String(r.p99).padStart(5)}  ${String(r.峰值).padStart(5)}  ` +
+    `${String(r.每场km).padStart(6)}  ${String(r.距球中位m).padStart(5)}  ${String(r.单帧跳变最大m).padStart(6)}`
+  );
+}
+console.log(`\n★ = 中位与 p90 都低于追球者、p99 低于全体 p99。真实主裁每场 10~12 km 仅作旁证。`);

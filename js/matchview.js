@@ -58,15 +58,18 @@ const OFFICIAL_MY = 1.05;
 /** 主裁与球的最小间距（米）：低于此值两个圆点会叠在一起，读起来像裁判在带球 */
 const MIN_REF_GAP_M = 5;
 /**
- * 官员单帧位移上限（米）。真实主裁冲刺峰值 6~7 m/s，取 7。
- * 官员每 sim 帧更新一次（`_updateOfficials` 只在 `applySimSnapshot` 与
- * `playSimTimeline` 里被调，都不在 60fps 的 `update()` 内），标准档 sim 步长 0.1s，
- * 所以上限 = 7 m/s × 0.1s = 0.7 m/帧。
- * 低通局面重心已经消掉了目标点的不连续，但死球摆位（球瞬移到角旗）与开球回中圈
- * 仍会让残差一次性变大，`k` 施加在大残差上实测仍能产出 16 m/s 的单帧位移。
- * 这条上限把瞬移从「更少发生」变成「不可能发生」，边裁跟越位线同样受它保护。
+ * 官员单帧位移上限（米）。官员每 sim 帧更新一次，标准档步长 0.1s，所以 0.5m/帧 = 5 m/s。
+ *
+ * ⚠ **锚点不是真实主裁的 6~7 m/s——那是第一版的错。** 引擎自己的球员实测
+ * （`scripts/_referee-motion-probe.mjs`，4 场）：追球者中位 2.10 m/s、p90 4.82，
+ * 全体外场 p99 5.72。按真实主裁封顶 7 m/s，主裁就比追球的球员还快，
+ * 用户第一时间就看出来了：「球去到哪，主裁跑的比追球的球员还快」。
+ * 所以判据是**引擎自己的球员**：主裁各分位都要略低于追球者。
+ * 现档实测 中位 1.91 / p90 4.09 / p99 5.00，逐项低于上面那组；
+ * 顺带每场跑动 11.49 km 落进真实的 10~12 km 带（上一版 13.34 km 偏高 11%）。
+ * 边裁跟越位线同样受这条上限保护。
  */
-const MAX_OFFICIAL_STEP_M = 0.7;
+const MAX_OFFICIAL_STEP_M = 0.5;
 
 function replayRandomFor(event = {}) {
   const key = [
@@ -2811,13 +2814,16 @@ export class MatchView {
     const by = this.ball?.y ?? 50;
 
     // 局面重心：飞行中几乎不追球——真实主裁不跟着长传球跑，他跑向局面要去的地方。
+    // 系数按 `_referee-motion-probe.mjs` 的档位曲线取 C 档（详见 MAX_OFFICIAL_STEP_M）：
+    // 低通越强，路径越短、均速越低，代价是离球更远（实测距球中位 11.07 → 12.99m，
+    // 而真实主裁离球 15~20m，所以这个方向本身也更真实）。
     const play = (this._playCentre ??= { x: bx, y: by });
-    const track = this._isBallInFlight() ? 0.02 : soft ? 0.06 : 0.1;
+    const track = this._isBallInFlight() ? 0.012 : soft ? 0.035 : 0.058;
     play.x += (bx - play.x) * track;
     play.y += (by - play.y) * track;
 
     // 平滑系数刻意比球员慢：裁判是跟着跑的，不该和球同步瞬移
-    const k = soft ? 0.12 : 0.22;
+    const k = soft ? 0.1 : 0.18;
     const lerp = (m, tx, ty) => {
       let dx = (clamp(tx, 1, 99) - m.x) * k;
       let dy = (clamp(ty, 1, 99) - m.y) * k;
