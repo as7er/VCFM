@@ -1139,6 +1139,10 @@ export class SimEngine {
     b.vy = velocity.vy;
     b.vz = Math.max(0, b.vz || 0) * 0.25;
     b.state = "loose";
+    // 第一脚失控:球沿「想接的方向」加噪声飞出,和来球线路无关,而这里过去
+    // **什么都不发**。按调查这是频率最高的一处折射(15~40%,快球最高 85%),
+    // 也就是「无缘无故拐弯」的主要来源。补上只活一帧的接触脉冲。
+    b._deflectPulse = { x: b.x, y: b.y, byId: a.id };
     this._clearBallTarget();
     a.controlFoot = plan.foot;
     a.controlPhase = "miscontrol";
@@ -1836,10 +1840,12 @@ export class SimEngine {
     // 门将活动区：永远贴在球门前（主队 y 大、客队 y 小）
     const sweep = this._roleBehavior(a, "sweep");
     const maxAdvance = 11 + sweep * 4; // 出击职责只扩大真实活动区，不改扑救能力
+    // 下界 2 格 = 2.1m，意味着门将**永远碰不到自己的门线**。真实门将球到禁区时
+    // 就站在线上。收到 1 格（1.05m），下面的兜底分支才可能真的贴线。
     const clampGkY = (ty) =>
       a.team === "home"
-        ? clamp(ty, goalY - maxAdvance, goalY - 2)
-        : clamp(ty, goalY + 2, goalY + maxAdvance);
+        ? clamp(ty, goalY - maxAdvance, goalY - 1)
+        : clamp(ty, goalY + 1, goalY + maxAdvance);
 
     // —— 门将持球：护球够久再开球（避免与前锋贴脸「传球互动」）——
     if (b.owner === a.id) {
@@ -1961,10 +1967,21 @@ export class SimEngine {
     }
     // 常规：门线前跟球横向移动。横向跟随收窄到 0.72——门将横移幅度本来就小于
     // 球的横移，站到与球同一 x 会把近角完全让开。
-    const threat = a.team === "home" ? b.y > 78 : b.y < 22;
-    const depth = threat ? 7 : 4;
-    a.tx = clamp(50 + (b.x - 50) * 0.72, 40, 60);
-    a.ty = clampGkY(goalY + facing * depth);
+    //
+    // ⛔ 旧实现有两处硬伤，实测（`scripts/_box-marking-probe.mjs`，6 场）：
+    //    **36.7% 的采样里门将站在自家门柱之外**，离门线中位 6.26m。
+    //    1) `clamp(…, 40, 60)`：40 已经在 `GOAL_X0 = 44` 之外，球从边路来时
+    //       `50 + (22-50)*0.72 = 29.8` 被夹到 40，人就站到近柱外面，远角整个空着。
+    //       横向范围必须留在门框内——门将覆盖的是球门，不是球。
+    //    2) `depth = threat ? 7 : 4` 是**格数常量**，等于 7.35m / 4.2m，
+    //       与球离门多远无关。真实门将球到禁区时贴到门线 1~3m，球远了才当清道夫出来。
+    //       改成按**米**随球距线性内收。
+    // 这条兜底分支覆盖了所有传中、所有无主球、所有边路带球（`underThreat` 需要
+    // 真实的 `owner`，而飞行中 `ball.owner` 是 null），所以它就是画面的常态。
+    const dGoalM = pitchDistanceToGoalMetres(b.x, b.y, goalY);
+    const depthM = clamp(1.0 + dGoalM * 0.12, 1.0, 9);
+    a.tx = clamp(50 + (b.x - 50) * 0.72, SIM.GOAL_X0, SIM.GOAL_X1);
+    a.ty = clampGkY(goalY + facing * (depthM / (SIM.PITCH_H_METRES / SIM.FIELD_H)));
     a.fsm = "home";
   }
 
@@ -3831,6 +3848,18 @@ export class SimEngine {
     // 上一次尝试放到「20 米 / 2 人」时后台档进球从 2.71 掉到 2.29，于是退回 1 人。
     // 但那次只收紧了防守、没有同时松开 _shoot 的全队射门冷却，进球必然掉——
     // 防守变强 + 射门仍被冷却压死 = 机会少且不敢射。本轮三处一起改。
+    // ⛔ 上面这套只看**球离门多远**，完全不看**禁区里站了几个人**。实测
+    //    （`scripts/_box-marking-probe.mjs`，6 场）：禁区内平均 2.9~3.0 名进攻者，
+    //    而 5 米内一个防守者都没有的占 **19.8%** —— 五个人里有一个完全没人管，
+    //    传中飞行段与有人持球段几乎一样糟。普通传中点（x=15, y=88）离门 23.4m，
+    //    默认 pressing=3 → `markingLimit = 0`：**整个传中过程一个盯人都没有。**
+    //
+    // ⛔ 试过补一条「禁区里有几个进攻者就至少派同样多的人（上限 3）」的地板，
+    //    实测确实有效（>5m 完全无人 19.8% → 16.8%），**但 `crowdedPairs` 从 12 打到 25**
+    //    （上限 14），已回退。那个闸门本身不可信（同一改动家族给过 3/12/15，跨度
+    //    是余量的 6 倍，见 `scripts/_crowded-pairs-gate-probe.mjs`），但 25 已经超出
+    //    观测过的重掷区间，不能当噪声放过。
+    //    **要先把那个闸门改成「每场次数 + 12 场样本」才有资格判定这条改动。**
     const markingLimit = defensiveTransition
       ? Math.min(1, profile.markingCount)
       : ballGoalDistanceMetres < 11
@@ -4202,8 +4231,16 @@ export class SimEngine {
     let bestD = Infinity;
     for (const o of this.agents) {
       if (o.team !== attTeam || o.role === "GK") continue;
+      // 已离场的人还留着原来的 y（`:1692` 只改 x），旧实现没排除他，于是红牌之后
+      // 「最危险接球点」可能选中一个站在场外的人，盯人者去跟他 —— 而这个人同时
+      // 会吃掉 `screen` 职责与压迫者的 `shadowId`，还被 `occupiedTargets` 从盯人池里
+      // 摘掉，等于三重浪费。`_defensiveThreats` 本来就滤了 `sentOff`，这里漏了。
+      if (o.sentOff || o.injuredOff) continue;
       if (this.ball.owner === o.id) continue; // 跳过持球人
-      const d = Math.abs(o.y - ownGoalY);
+      // 旧实现只看 `|o.y - ownGoalY|`：**没有 x 项**，所以站在底线边上的边锋
+      // 会排在点球点上的中锋前面；而且两名进攻者在 y 上交叉时身份就翻转，
+      // 与横向距离无关 —— 每 0.48~1.36s 一次的重算于是不停换人。按米算真实距离。
+      const d = pitchDistanceToGoalMetres(o.x, o.y, ownGoalY);
       if (d < bestD) { bestD = d; best = o; }
     }
     return best;
@@ -4862,6 +4899,8 @@ export class SimEngine {
       gk.noReclaimUntil = this.t + 0.3;
       owner.noReclaimUntil = this.t + 0.7;
       owner.intent = null;
+      // 门将封堵同样会把球弹开,过去也不发接触脉冲(matchview 没有 `gk_block` 的画法)。
+      b._deflectPulse = { x: b.x, y: b.y, byId: gk.id };
       this._emit("gk_block", gk, {
         from: owner.id,
         challenge: true,
@@ -5107,6 +5146,11 @@ export class SimEngine {
           b.kickY = b.y;
         }
         this._clearBallTarget();
+        // 封堵会改变球的飞行方向，但过去只发 `block` 事件、不设接触脉冲，而
+        // matchview 根本没有 `case "block"` —— 画面上就是球在无人接触处自己拐弯。
+        // 与门将指尖擦球（`:5062`）同一套做法：只活一帧的脉冲，纯表现层信号，
+        // 不改任何物理量。
+        b._deflectPulse = { x: b.x, y: b.y, byId: o.id };
         this._emit("block", o, { from: b.lastKicker });
         return;
       }
@@ -6164,6 +6208,26 @@ export class SimEngine {
    * 每种死球都经 _restart 分类重启：重置站位 + 死球窗口，让球彻底离开门口，
    * 从根上掐断"射偏→门口篮板→再射"的射门画廊。
    */
+  /**
+   * 门框命中：只发事件，**不做活球反弹**。
+   *
+   * ⛔ 活球反弹试过了，实测把护栏顶穿：门框 0.92 次/场（真实约 0.4）、
+   *    进球 2.92 → **3.50**（护栏上限 3.3）、射门 13.75 → 15.33、角球 4.67 → 5.42。
+   *    三项一起涨方向一致——反弹让球留在场内，替掉了原本的死球重启。
+   *    而 `_resolveBounds` 的头注释写得很清楚：死球重启是**刻意**用来
+   *    「让球彻底离开门口，从根上掐断『射偏→门口篮板→再射』的射门画廊」的。
+   *    活球反弹等于把那个画廊请回来。
+   *
+   * 所以现在的语义是：擦柱/中梁的球**不算进球**，照常走下面的角球/门球重启
+   * （射门方最后触球 → 角球给进攻方，与真实的「打柱出底线」一致），
+   * 画面上多出一次「击中门框」的提示。真实里打柱后回到场内的情况没有覆盖，
+   * 那要连带重做死球重启的设计，不在这一批里。
+   */
+  _emitWoodwork(part, crossX) {
+    const shooter = this.agents.find((a) => a.id === this.ball.lastKicker) || null;
+    this._emit("woodwork", shooter, { part, crossX: Number(crossX.toFixed(2)) });
+  }
+
   _resolveBounds() {
     const b = this.ball;
     const kicker = b.lastKicker ? this.agentById(b.lastKicker) : null;
@@ -6185,11 +6249,32 @@ export class SimEngine {
       crossZ = Math.max(0, b._prevZ + b._prevVz * crossDt - 9 * crossDt * crossDt);
     }
     const underBar = crossZ < 2.44;
+    // —— 门框 ——
+    // 立柱在 `GOAL_X0`/`GOAL_X1`，横梁在 z = 2.44。以前这里只有 `underBar` 的二元判断：
+    // 柱内且低于横梁 → 进球，否则出底线。**立柱与横梁不是可碰撞几何**，
+    // 所以画面上永远看不到打门框，`woodwork` 事件类型虽然存在也从没被发出过。
+    // 容差：柱子实际 12cm + 球半径约 11cm ≈ 0.34m。第一版按这个取（x 一格 0.68m → 0.5 格、
+    // z 0.34m），实测门框 0.92 次/场，是真实 0.4 的两倍多——因为「越过门线那一刻的
+    // 插值落点」本身带 0.1s 步长的离散误差，等效容差比几何容差大。取半后再量。
+    const POST_TOL_X = 0.25;
+    const BAR_TOL_Z = 0.17;
+    const hitPost =
+      underBar &&
+      (Math.abs(crossX - SIM.GOAL_X0) < POST_TOL_X ||
+        Math.abs(crossX - SIM.GOAL_X1) < POST_TOL_X);
+    const hitBar =
+      crossX > SIM.GOAL_X0 - POST_TOL_X &&
+      crossX < SIM.GOAL_X1 + POST_TOL_X &&
+      Math.abs(crossZ - 2.44) < BAR_TOL_Z;
     if (b.y <= 0) {
       // 客队球门线：门框内且是主队打进 → 进球
       const goalEligible = b.state === "shot" || (b.state === "loose" && kickTeam === "away");
+      // 擦柱/中梁：不算进球，往下走死球重启（见 `_emitWoodwork`）
+      const wood = goalEligible && (hitPost || hitBar);
+      if (wood) this._emitWoodwork(hitPost ? "post" : "bar", crossX);
       if (
         goalEligible &&
+        !wood &&
         crossX > SIM.GOAL_X0 &&
         crossX < SIM.GOAL_X1 &&
         underBar
@@ -6206,8 +6291,11 @@ export class SimEngine {
     }
     if (b.y >= 100) {
       const goalEligible = b.state === "shot" || (b.state === "loose" && kickTeam === "home");
+      const wood = goalEligible && (hitPost || hitBar);
+      if (wood) this._emitWoodwork(hitPost ? "post" : "bar", crossX);
       if (
         goalEligible &&
+        !wood &&
         crossX > SIM.GOAL_X0 &&
         crossX < SIM.GOAL_X1 &&
         underBar
