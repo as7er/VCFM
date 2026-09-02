@@ -92,7 +92,7 @@ const mean = (v) => (v.length ? Number((v.reduce((a, b) => a + b, 0) / v.length)
 const pct = (n, d) => Number(((n / Math.max(1, d)) * 100).toFixed(1));
 
 /** 档位开关 */
-const V = { slots: false, delivery: false, runs: false };
+const V = { slots: false, delivery: false, runs: false, restDef: false, outlet: false };
 
 /**
  * 角球计划：`_restart` 包装里算好，`_think` / `_bestCross` 包装读它。
@@ -159,7 +159,13 @@ function buildLayout(engine, attTeam, taker, ball) {
   // 弧顶做二次球 + 边路回收（都不参与抢点跑动）
   if (forward[5]) attack.set(forward[5].id, { ...at(near * -1.0, 18.0), zone: "edge" });
   if (forward[6]) attack.set(forward[6].id, { ...at(near * 12.0, 20.0), zone: "recycle" });
-  backs.forEach((a, i) => attack.set(a.id, { ...at((i ? 1 : -1) * 8.0, 60 + i * 2), zone: "held" }));
+  // 留守两名后卫（防反）。`V.restDef` 关掉时**不给他们目标点**，`_restart` 里
+  // `if (!spot) continue;` 会跳过，于是他们留在引擎自己摆的位置。
+  // 关键：`backIds` 无论开关都把这两人从 `forward` 里排除，所以禁区里的抢点
+  // 结构逐位相同——开关只改变「这 2 人有没有被拉回 60m」这一个变量。
+  if (V.restDef) {
+    backs.forEach((a, i) => attack.set(a.id, { ...at((i ? 1 : -1) * 8.0, 60 + i * 2), zone: "held" }));
+  }
 
   return { dir, goalY, side, near, far, at, attack, defend: null, runners, defenders, defTeam };
 }
@@ -176,7 +182,10 @@ function buildDefence(engine, L, ball) {
       .filter((a) => a.role === "ATT")
       .sort((p, q) => (q.attr.pace || 0) - (p.attr.pace || 0) || String(p.id).localeCompare(String(q.id)))[0] ||
     pool[pool.length - 1];
-  defend.set(outlet.id, { ...at(near * 4.0, 55), role: "outlet" });
+  // `V.outlet` 关掉时不给他目标点 → 留在引擎自己摆的位置。
+  // 他**无论开关都从 `rest` 里排除**，所以禁区里的近柱人/区域人/盯人分配
+  // 逐位相同——开关只改变「有没有 1 人被停在 55m 处等反击」这一个变量。
+  if (V.outlet) defend.set(outlet.id, { ...at(near * 4.0, 55), role: "outlet" });
 
   const rest = pool.filter((a) => a.id !== outlet.id);
   let k = 0;
@@ -495,6 +504,13 @@ function snapshot(engine, attTeam, step) {
 const LEVELS = [
   { label: "control 现状", set: {} },
   { label: "slots 只改摆位", set: { slots: true } },
+  // —— 归因三档：`slots` 单独档比 control 多出 +0.66 个进球，而角球进球占比 0%，
+  //    也就是那些球**不是角球进的**。嫌疑是摆位顺带改了角球后的转换：进攻方 2 名
+  //    后卫被拉回 60m（防反），防守方 1 名前锋被停在 55m（出球点）。
+  //    这三档把两个安排各自摘掉，禁区结构保持逐位相同，看 +0.66 跟着谁走。
+  { label: "slots −留守−留前场", set: { slots: true, restDef: false, outlet: false } },
+  { label: "slots −留守", set: { slots: true, restDef: false } },
+  { label: "slots −留前场", set: { slots: true, outlet: false } },
   { label: "delivery 只改落点", set: { delivery: true } },
   { label: "slots + delivery", set: { slots: true, delivery: true } },
   { label: "slots + delivery + runs", set: { slots: true, delivery: true, runs: true } },
@@ -504,6 +520,9 @@ function sweep(level) {
   V.slots = !!level.set.slots;
   V.delivery = !!level.set.delivery;
   V.runs = !!level.set.runs;
+  // 未显式指定时跟随 slots，保证既有档位与已留档的数字逐位可比
+  V.restDef = level.set.restDef ?? V.slots;
+  V.outlet = level.set.outlet ?? V.slots;
   const agg = { corners: 0, cornerShots: 0, cornerGoals: 0, goals: 0, shots: 0, passes: 0, crosses: 0 };
   const z = { attSix: [], attSecond: [], attBox: [], attHeld: [], defSix: [], defBox: [], defUp: [],
     goalSideOfAll: [], nearestDefToBall: [], minPair: [], gkDepth: [] };
@@ -526,7 +545,7 @@ function sweep(level) {
       if (m.gapAtKick != null) runGap.push(m.gapAtKick);
     }
   }
-  V.slots = V.delivery = V.runs = false;
+  V.slots = V.delivery = V.runs = V.restDef = V.outlet = false;
   const per = (n) => Number((n / matches).toFixed(2));
   return {
     scores,
@@ -537,6 +556,8 @@ function sweep(level) {
     每角球射门率: pct(agg.cornerShots, agg.corners),
     角球进球占比: pct(agg.cornerGoals, agg.goals),
     进球: per(agg.goals),
+    // 归因用：+0.66 那些球全落在这一列上（角球进球占比 0% 时它等于进球）
+    非角球进球: per(agg.goals - agg.cornerGoals),
     射门每队场: Number((agg.shots / matches / 2).toFixed(2)),
     传球: per(agg.passes),
     传中占比: Number(((agg.crosses / Math.max(1, agg.passes)) * 100).toFixed(2)),
@@ -600,6 +621,29 @@ for (const level of LEVELS) {
       `射门 ${String(r.射门每队场).padStart(5)}  ` +
       `传中 ${String(r.传中占比).padStart(5)}%` +
       (warn.length ? `  ⚠${warn.join("/")}` : "")
+  );
+}
+
+console.log("\n[1b] 🔬 +0.66 归因（只看非角球进球；禁区结构在这四档里逐位相同）：");
+{
+  const base = rows.find((r) => r.label === "control 现状");
+  const only = (label) => rows.find((r) => r.label === label);
+  const delta = (r) => Number((r.非角球进球 - base.非角球进球).toFixed(2));
+  for (const label of ["slots 只改摆位", "slots −留守−留前场", "slots −留守", "slots −留前场"]) {
+    const r = only(label);
+    if (!r) continue;
+    const d = delta(r);
+    console.log(
+      `  ${label.padEnd(24)} 非角球进球 ${String(r.非角球进球).padStart(5)}  ` +
+        `Δ vs control ${(d >= 0 ? "+" : "") + d.toFixed(2)}  ` +
+        `留守 ${String(r.留守).padStart(4)}  留前场 ${String(r.留前场).padStart(4)}  ` +
+        `进球 ${String(r.进球).padStart(4)}`
+    );
+  }
+  console.log(
+    `  读法：若「−留守−留前场」的 Δ 回到 0 附近，+0.66 就归这两个安排；` +
+      `再看「−留守」与「−留前场」哪一档把 Δ 压下去，就是它单独的责任。` +
+      `\n        若四档 Δ 都在 +0.6 上下不动，说明成因不在这两处，得回到禁区结构本身。`
   );
 }
 
