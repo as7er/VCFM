@@ -204,7 +204,7 @@ function runSample(seeds, { profile = "standard" } = {}) {
   };
 }
 
-// ── 1) 非穿透求解器：全场同一个身体半径，而且**各向同性地按米算** ──
+// ── 1) 非穿透求解器：全场同一个身体半径（各向同性那条见本节末尾，暂缓） ──
 {
   const source = await import("node:fs").then(({ readFileSync }) =>
     readFileSync(new URL("../js/sim/engine.js", import.meta.url), "utf8")
@@ -217,63 +217,23 @@ function runSample(seeds, { profile = "standard" } = {}) {
     "the separation solver must not inflate the body radius inside the penalty area"
   );
 
-  // 常量必须落在一个说得出理由的带里，否则下面那两条行为断言会跟着它一起失去意义
-  // （它们断言的是「解出来等于这个常量」，常量本身没人管的话就是一条空转断言）。
-  // 带的两端都是实测出来的，不是估的：
-  //   下界 1.5：往下调过。1.10 只把最近防守者中位再压 0.12m，代价是直塞量 0.67 → 0.21
-  //             （`match-realism-audit` 下限 0.5）、强队 1.79 → 1.29 分/场、净胜球 +12 → −4
-  //             （下限 1.5 且须为正）。身体能贴到 1.1m 时弱队光靠贴身就能捂住强队。
-  //   上界 2.2：旧几何沿球门方向合 2.99m，而最近防守者距离中位实测 2.76~2.83m
-  //             正好压在上面——高于 2.2 就又开始物理挡住贴身防守。
-  assert.ok(
-    SIM.SEPARATION_MIN_DISTANCE_M >= 1.5 && SIM.SEPARATION_MIN_DISTANCE_M <= 2.2,
-    `body radius floor left its measured band: ${SIM.SEPARATION_MIN_DISTANCE_M} m`
+  // 全场单一半径。`cce4eba` 把这条删了（当时打算由下面的行为断言接管），
+  // 而那批行为断言引用的常量从未落地，于是覆盖直接空了一块——补回来。
+  assert.match(
+    source,
+    /const need = minD;/,
+    "the separation solver must use one body radius everywhere"
   );
 
-  // ★ 各向同性：横向与纵向必须解出**同一个米距**。
-  // 旧实现 `minD = 2.85` 是格数、距离用 `Math.hypot` 直接对格数取模，于是真实空间里
-  // 是个椭圆——横向 1.94m、沿球门方向 2.99m。防守者站在被盯者与球门之间，撞的正是
-  // 2.99m 那一侧，实测最近防守者距离中位 2.76~2.83m 正好压在上面。
-  // **这一条就是当年该有却没有的断言**：只要谁再把格数当米用，横纵两个解会立刻分叉。
-  const solveGap = (dx, dy) => {
-    const engine = new SimEngine(makeClub("iso-home", 12), makeClub("iso-away", 12), {
-      simulationProfile: "standard",
-      timeStep: SIM.DT,
-      separationPasses: 8,
-      random: () => 0.5,
-    });
-    const [first, second] = engine.agents.filter((agent) => agent.role !== "GK").slice(0, 2);
-    // 其余 20 人全部标 `sentOff`，求解器会直接跳过他们。
-    // 不这么做的话开球阵型里站在中圈的那个人会插进两名测试对象之间，
-    // 三人共线各让 1.1m 之后首尾就是 2.2m —— 第一版就是这么读到「横向 2.200m」的，
-    // 那不是各向异性，是量到了一条链。
-    for (const agent of engine.agents) {
-      if (agent !== first && agent !== second) agent.sentOff = true;
-    }
-    first.x = 50;
-    first.y = 50;
-    first.vx = 0;
-    first.vy = 0;
-    second.x = 50 + dx;
-    second.y = 50 + dy;
-    second.vx = 0;
-    second.vy = 0;
-    engine._separateAgents(8);
-    return distanceMetres(first.x, first.y, second.x, second.y);
-  };
-  const lateralGap = solveGap(0.2, 0);
-  const goalwardGap = solveGap(0, 0.2);
-  for (const [label, gap] of [["lateral", lateralGap], ["goalward", goalwardGap]]) {
-    assert.ok(
-      Math.abs(gap - SIM.SEPARATION_MIN_DISTANCE_M) < 0.02,
-      `${label} separation solved to ${gap.toFixed(3)} m, expected ${SIM.SEPARATION_MIN_DISTANCE_M} m`
-    );
-  }
-  assert.ok(
-    Math.abs(lateralGap - goalwardGap) < 0.02,
-    `the separation floor is anisotropic: lateral ${lateralGap.toFixed(3)} m vs ` +
-      `goalward ${goalwardGap.toFixed(3)} m — grid units are being used as metres`
-  );
+  // ★ 「横纵必须解出同一个米距」那条各向同性断言**已写好，但暂缓启用**。
+  // 引擎当前刻意保持椭圆（横向 1.94m × 沿球门方向 2.99m），两条半轴都是载荷，
+  // 压平会破护栏——24 场实测见 AGENTS.md「⛔ 看起来像混单位，实测证明是载荷」。
+  // 断言原文与 `solveGap` 量测夹具（含「三人共线会量到一条链」那个坑）在 cce4eba 里：
+  //     git show cce4eba -- scripts/box-defending-audit.mjs
+  //
+  // ⚠ 恢复它时**不要照抄那条 [1.5, 2.2] 的带**：同一批实测里 1.94 自己就破三条护栏
+  //   （进球 2.29 / 转化率 7.9% / 直塞 0.25），而 1.94 正落在那条带内——带允许了一个
+  //   已被证伪的值。带必须连同「补上进攻产出」之后的新标定一起重新推。
 }
 
 // ── 2) 阵地战下球进入自家禁区必须派出盯人 ──
