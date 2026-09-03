@@ -12,6 +12,11 @@ const checks = [
   "scripts/save-schema-audit.mjs",
   "scripts/replay-ui-audit.mjs",
   "scripts/match-presentation-audit.mjs",
+  // 官员跑位：import 真正的 `MatchView.prototype._updateOfficials`，用替身 `this` 驱动，
+  // 球的轨迹来自真 `SimEngine`（2 场约 17s）。verify 此前完全没覆盖 officials，
+  // 用户三次报「主裁和球同步瞬移 / 比追球球员还快 / 距离被锁死」全靠肉眼发现。
+  // DOM 那一半（R/A 字母、圆点尺寸）由 `npm run test:officials-browser` 覆盖。
+  "scripts/officials-presentation-audit.mjs",
   "scripts/match-motion-integrity-audit.mjs",
   "scripts/off-ball-movement-audit.mjs",
   "scripts/match-broadcast-audit.mjs",
