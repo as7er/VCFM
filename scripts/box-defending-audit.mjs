@@ -12,6 +12,11 @@
  * 同时钉死接应目标分离：`_clampOffside` 会把纵深投影到越位线，把分层刚分开的接
  * 应点重新压到一起，而逐球员分层读的是队友上一 tick 的预留目标，同一 tick 内排在
  * 前面的球员看到的全是过期数据。修复改为在全部目标定稿后做一次队级横向松弛。
+ *
+ * 样本量：第 2 节跑 **12 场**（约 95s），不是 4 场。接应目标重叠是极尾计数，
+ * 4 场的绝对次数几乎是纯重掷噪声——推导与两个实测锚点见
+ * `CROWDED_PAIRS_PER_MATCH_LIMIT` 那段。盯人/贴身那几条是逐 tick 均值
+ * （12.8 万 boxTicks），4 场本来就够，12 场只是顺带把分母做厚。
  */
 import assert from "node:assert/strict";
 
@@ -66,7 +71,33 @@ const METRES_Y = SIM.PITCH_H_METRES / SIM.FIELD_H;
 const distanceMetres = (ax, ay, bx, by) =>
   Math.hypot((ax - bx) * METRES_X, (ay - by) * METRES_Y);
 
+/**
+ * 接应目标重叠的上限，单位是**每场次数**（见下方第 2 节那段推导）。
+ *
+ * 6.0 不是猜的，是三组实测夹出来的（12 场/窗、与本审计同一份 `makeClub`）：
+ *   基线（本审计的种子窗口 165000..165011） 每场 3.33，逐场 6,5,2,1,2,2,3,6,4,3,6,0
+ *   换种子窗口                              166000.. 每场 0.83、167000.. 每场 3.42
+ *   松弛失效（`_separateSupportTargets` 换成空函数，也就是这条断言存在的那个失效）
+ *                                           每场 9.25，逐场 12,10,16,9,5,14,8,8,5,8,8,8
+ *
+ * 关键在于**换种子窗口就是换轨迹，而任何动引擎的改动同样会从第一次死球起换轨迹**——
+ * 所以「窗口间摆动」才是这条固定种子断言该用的噪声模型，而不是窗口内的标准误
+ * （0.59）。三个无辜窗口的上界是 3.42，加 3 个窗口内标准误 ≈ 5.2；松弛失效的下界
+ * 是 9.25 − 3×0.95 ≈ 6.4。6.0 落在 5.2~6.4 之间。
+ *
+ * ⚠ **这是个弱检测器**，分离度只有 2.8 倍：门槛离「坏掉」只有 3.4 个标准误，
+ *   部分失效（比如松弛只在某一阶段失灵）完全可能溜过去。想收紧不能靠压低门槛
+ *   （那就退回旧断言挡住真改进的老问题），只能换检测器。所以这条刻意偏宽——
+ *   接应目标拥挤另有 `match-motion-integrity-audit` 在其种子上把关。
+ *
+ * 改这个数之前先把两支探针跑一遍：
+ *   node scripts/_crowded-pairs-gate-probe.mjs 12    # 窗口间摆动
+ *   node scripts/_crowded-pairs-anchor-probe.mjs 12  # 松弛失效时的量级
+ */
+const CROWDED_PAIRS_PER_MATCH_LIMIT = 6;
+
 function runSample(seeds, { profile = "standard" } = {}) {
+  const matches = seeds.length;
   const stats = {
     boxTicks: 0,
     nearestSum: 0,
@@ -159,6 +190,7 @@ function runSample(seeds, { profile = "standard" } = {}) {
   }
   const ticks = Math.max(1, stats.boxTicks);
   return {
+    matches,
     boxTicks: stats.boxTicks,
     avgNearestDefenderMetres: Number((stats.nearestSum / ticks).toFixed(3)),
     avgNearestCentreBackMetres: Number((stats.nearestDefenderSum / ticks).toFixed(3)),
@@ -166,6 +198,8 @@ function runSample(seeds, { profile = "standard" } = {}) {
     markSharePct: Number(((stats.markTicks / Math.max(1, stats.defenceTicks)) * 100).toFixed(2)),
     supportPairs: stats.supportPairs,
     crowdedPairs: stats.crowdedPairs,
+    // 每场次数才是能跨样本量比较的口径；绝对次数随场数线性漂，换一组种子就失效。
+    crowdedPairsPerMatch: Number((stats.crowdedPairs / matches).toFixed(2)),
     crowdedPairSharePct: Number(((stats.crowdedPairs / Math.max(1, stats.supportPairs)) * 100).toFixed(3)),
   };
 }
@@ -189,8 +223,15 @@ function runSample(seeds, { profile = "standard" } = {}) {
 
 // ── 2) 阵地战下球进入自家禁区必须派出盯人 ──
 {
-  const sample = runSample([165000, 165001, 165002, 165003], { profile: "standard" });
-  assert.ok(sample.boxTicks > 3000, `box possession sample too small: ${sample.boxTicks}`);
+  // 12 场，不是 4 场。`crowdedPairs` 是极尾计数（每场只有个位数，占几百万个 support
+  // 配对的 0.001%），而**任何动引擎的改动都会从第一次死球起让整场重新掷一遍**：
+  // 4 场的绝对次数因此几乎是纯重掷噪声。实测（`_crowded-pairs-gate-probe.mjs`，
+  // 12 场/窗 × 3 窗）单场 0~10、池内标准差约 2.5，对 Poisson 过散约 2.4 倍；
+  // 12 场窗口均值的标准误约 0.7，而 4 场约 1.2。盯人/贴身那几条是逐 tick 均值
+  // （12 万 boxTicks），4 场本来就够，12 场只是顺带把它们的分母做厚。
+  const seeds = Array.from({ length: 12 }, (_, index) => 165000 + index);
+  const sample = runSample(seeds, { profile: "standard" });
+  assert.ok(sample.boxTicks > 9000, `box possession sample too small: ${sample.boxTicks}`);
   assert.ok(
     sample.markSharePct >= 3,
     `defenders must actually mark inside their own box (mark share ${sample.markSharePct}%)`
@@ -210,12 +251,18 @@ function runSample(seeds, { profile = "standard" } = {}) {
 
   // 接应目标分离：队级松弛之后不应再有成对重叠
   assert.ok(sample.supportPairs > 1000, `support pair sample too small: ${sample.supportPairs}`);
-  // 门槛按实测定：4 场共 9 段持续 ≥0.6 秒的重叠。本审计逐 tick 采样，比
-  // `match-motion-integrity-audit` 的 0.075 秒采样 + 边界重置更严格，那边在其
-  // 种子上已是 0 warning（修复前为 6）。这里守住量级，回归时会立刻超标。
+  // 门槛按**每场次数**定，并且三头都有实测锚点，不是从某一组种子的运气值 +2 猜的：
+  //   基线      每场 3.33（本审计的种子窗口）
+  //   换窗口    每场 0.83 / 3.42（`_crowded-pairs-gate-probe.mjs`，即无辜改动的摆动量级）
+  //   坏掉      每场 9.25（`_crowded-pairs-anchor-probe.mjs`，松弛换成空函数）
+  // 旧断言（4 场绝对次数 ≤ 14、当时基线 12）三头都没有：同一改动家族给过 3/12/15/25，
+  // 摆动幅度是余量的 6 倍，于是既挡不住真回归也放不过真改进。
+  // ⚠ 绝对次数仍然打印，但**不要**再拿它当门槛：它随场数线性漂，换样本量就失效。
   assert.ok(
-    sample.crowdedPairs <= 14,
-    `support targets must stay separated in open play (${sample.crowdedPairs} episodes, ${sample.crowdedPairSharePct}%)`
+    sample.crowdedPairsPerMatch <= CROWDED_PAIRS_PER_MATCH_LIMIT,
+    `support targets must stay separated in open play (${sample.crowdedPairsPerMatch}/match over ` +
+      `${sample.matches} matches, limit ${CROWDED_PAIRS_PER_MATCH_LIMIT}; ` +
+      `${sample.crowdedPairs} episodes, ${sample.crowdedPairSharePct}%)`
   );
   console.log(JSON.stringify({ standard: sample }, null, 2));
 }

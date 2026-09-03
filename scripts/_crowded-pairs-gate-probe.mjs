@@ -11,9 +11,14 @@
  *   1. 同一份代码在**不同种子窗口**下的摆动（窗口间噪声）
  *   2. 换成「每场次数」而不是「绝对次数」之后，摆动收窄多少
  *
- * 口径与 `box-defending-audit` / `_crowded-pairs-probe` 逐字一致：
+ * 口径与 `box-defending-audit` / `_crowded-pairs-probe` 的 `makeClub` 逐字一致：
  * 能力 12、标准档、0.1s 步长、separationPasses 8；同队、盯同一持球人的 `support`
  * 目标点距离 < 1.6m 且持续 ≥ 0.6s 记一次；`ball.restartType` 存在时清空计时。
+ *
+ * ⚠ 2026-09-03 修正：本文件此前的 `makeClub` 多写了一个 `crossing` 属性，而审计的
+ *   属性表里没有它——属性表不同 → 球员数据不同 → 整场轨迹不同。头注释当时已经声称
+ *   「逐字一致」，所以那一版跑出来的绝对值（每场 2.92 / 2.58 / 2.17）**不能当审计的
+ *   基线读**，只能读作「这个指标的噪声量级」。属性表现已对齐审计。
  *
  * 用法：node scripts/_crowded-pairs-gate-probe.mjs [每窗场数=8]
  */
@@ -39,7 +44,7 @@ function makeClub(name, ability) {
     for (const key of [
       "pace", "shooting", "passing", "dribbling", "defending", "physical", "finishing",
       "tackling", "marking", "strength", "stamina", "vision", "reflexes", "handling",
-      "positioning", "kicking", "decisions", "crossing",
+      "positioning", "kicking", "decisions",
     ]) attrs[key] = rating;
     return { id, name: id, pos, number: index + 1, fitness: 100, attrs };
   });
@@ -138,9 +143,11 @@ const totals = rows.map((r) => r.绝对次数);
 const rates = rows.map((r) => r.每场);
 const spread = (v) => Number((Math.max(...v) - Math.min(...v)).toFixed(2));
 console.log(`
-现行断言：4 场绝对次数 <= 14，干净基线 12，余量 2。
+门槛现为**每场次数** ≤ ${6}（\`box-defending-audit.mjs\` 的 CROWDED_PAIRS_PER_MATCH_LIMIT，
+12 场窗口 165000..165011），配套上锚见 \`_crowded-pairs-anchor-probe.mjs\`（松弛失效每场 9.25）。
 窗口间摆动  绝对次数 ${Math.min(...totals)}~${Math.max(...totals)}（跨度 ${spread(totals)}）
            每场    ${Math.min(...rates)}~${Math.max(...rates)}（跨度 ${spread(rates)}）
 
-读法：如果「每场」的跨度明显小于「绝对次数 ÷ 场数」的跨度，就该把断言换成
-每场次数 + 更大样本，门槛按实测跨度留出headroom，而不是按某一组种子的运气值 +2。`);
+读法：**换种子窗口就是换轨迹，而任何动引擎的改动同样会换轨迹**，所以「窗口间摆动」
+才是那条固定种子断言该用的噪声模型，不是窗口内的标准误。若某次改动把每场次数推到
+无辜窗口的上界之外、又远低于 9.25，那它既不是噪声也不是松弛失效，值得单独查。`);
