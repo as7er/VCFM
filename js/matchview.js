@@ -39,6 +39,16 @@ function lerp(a, b, t) {
 }
 
 /**
+ * 重启搬运过渡（见 `applySimSnapshot`）。跳变门槛按物理上限定：0.1s 一个 tick 里
+ * 球最快约 4.4 格（30 m/s 纵向）、球员约 0.6 格（6 格/s），所以球 6 格、球员 3 格
+ * 以上的单 tick 位移只可能是引擎搬运。时长 700ms：真实裁判捡球摆好/球员走到位
+ * 的量级，也短于引擎最短的死球窗口之后的首次决策（0.6s + 决策节流）。
+ */
+const RELOCATE_MS = 700;
+const RELOCATE_BALL_JUMP = 6;
+const RELOCATE_PLAYER_JUMP = 3;
+
+/**
  * 关键事件横幅停留时长（ms）。
  * 底栏是「解说文案 ↔ 控球条」互斥的同一个格子，横幅一超时就切回控球条。
  * 旧值 1.1–2.4s，换人/红黄牌/VAR/进球这类必须读到的事件常常一闪而过。
@@ -379,6 +389,40 @@ export class MatchView {
     // 平滑系数：约 70ms 跟上目标，去掉帧边界硬切造成的肉眼抖动
     const smooth = soft ? 0.38 : 1;
 
+    // 重启搬运过渡：引擎 `_restart` 会把球和全部球员在**一个 tick 内**搬到重启点
+    // （门球/越位/角球/任意球），画面照坐标画就是瞬移——实测 2 场 98 次单 tick
+    // 位移 >6 格，90 次带重启类型（`scripts/_gk-kick-and-ball-jump-probe.mjs`）。
+    // 判罚本身不动；这里只在看到「相邻 sim 帧内超出物理可能的位移」时，
+    // 把显示坐标从旧位置缓动到新位置（约 0.7s，ease-out），像球被捡回摆好、
+    // 球员走到位。引擎的死球窗口 ≥0.6s，所以缓动期间目标点是静止的，不会追着跑。
+    // 只在相邻帧（dt ≤ 0.35s）里判：跳段/高光切帧本来就是剪辑，不该缓动。
+    const nowMs = performance.now();
+    const simT = Number(sim.t);
+    const lastSimT = this._relocLastSimT;
+    const adjacent =
+      Number.isFinite(simT) && Number.isFinite(lastSimT) && simT > lastSimT && simT - lastSimT <= 0.35;
+    if (Number.isFinite(simT)) this._relocLastSimT = simT;
+    // 门槛按实际帧间隔放大：跳过几帧时合法位移也成比例变大
+    const dtScale = adjacent ? Math.max(1, (simT - lastSimT) / 0.1) : 1;
+    const relocate = (entity, tx, ty, jumpLimit) => {
+      if (adjacent && Math.hypot(tx - entity.x, ty - entity.y) > jumpLimit * dtScale) {
+        entity._relocFromX = entity.x;
+        entity._relocFromY = entity.y;
+        entity._relocAt = nowMs;
+      }
+      if (!entity._relocAt) return null;
+      const u = (nowMs - entity._relocAt) / RELOCATE_MS;
+      if (u >= 1) {
+        entity._relocAt = 0;
+        return null;
+      }
+      const e = 1 - Math.pow(1 - u, 3);
+      return {
+        x: entity._relocFromX + (tx - entity._relocFromX) * e,
+        y: entity._relocFromY + (ty - entity._relocFromY) * e,
+      };
+    };
+
     const byId = new Map(sim.players.map((s) => [s.id, s]));
     let carrier = null;
     for (const pl of this.players) {
@@ -389,8 +433,14 @@ export class MatchView {
       const ty = clamp(s.y, 0, 100);
       const ox = pl.x;
       const oy = pl.y;
-      pl.x = smooth >= 1 ? tx : pl.x + (tx - pl.x) * smooth;
-      pl.y = smooth >= 1 ? ty : pl.y + (ty - pl.y) * smooth;
+      const reloc = relocate(pl, tx, ty, RELOCATE_PLAYER_JUMP);
+      if (reloc) {
+        pl.x = reloc.x;
+        pl.y = reloc.y;
+      } else {
+        pl.x = smooth >= 1 ? tx : pl.x + (tx - pl.x) * smooth;
+        pl.y = smooth >= 1 ? ty : pl.y + (ty - pl.y) * smooth;
+      }
       pl.tx = pl.x;
       pl.ty = pl.y;
       // 速度用于朝向箭头 / 冲刺残影
@@ -447,13 +497,22 @@ export class MatchView {
       const by = clamp(sim.ball.y, 0, 100);
       const bz = clamp(Number(sim.ball.z) || 0, 0, 12);
       const prevZ = this.ball.z || 0;
-      this.ball.x = smooth >= 1 ? bx : this.ball.x + (bx - this.ball.x) * smooth;
-      this.ball.y = smooth >= 1 ? by : this.ball.y + (by - this.ball.y) * smooth;
-      this.ball.z = smooth >= 1 ? bz : (this.ball.z || 0) + (bz - (this.ball.z || 0)) * smooth;
+      const ballReloc = relocate(this.ball, bx, by, RELOCATE_BALL_JUMP);
+      if (ballReloc) {
+        this.ball.x = ballReloc.x;
+        this.ball.y = ballReloc.y;
+        this.ball.z = 0;
+      } else {
+        this.ball.x = smooth >= 1 ? bx : this.ball.x + (bx - this.ball.x) * smooth;
+        this.ball.y = smooth >= 1 ? by : this.ball.y + (by - this.ball.y) * smooth;
+        this.ball.z = smooth >= 1 ? bz : (this.ball.z || 0) + (bz - (this.ball.z || 0)) * smooth;
+      }
       this.ball.tx = this.ball.x;
       this.ball.ty = this.ball.y;
-      // 落地轻弹：从空中落回地面时闪一下落点
-      if (prevZ > 1.2 && (this.ball.z || 0) < 0.35 && !this.carrier) {
+      // 落地轻弹:从空中落回地面时闪一下落点。
+      // ⚠ 上一段若在做重启搬运缓动(relocate),球是被搬到死球点、不是落地——
+      // 搬运里 z 已清零(0),照 flash 会画出假落点尘,所以跳过。
+      if (prevZ > 1.2 && (this.ball.z || 0) < 0.35 && !this.carrier && !ballReloc) {
         this._ballBounceFlash = performance.now() + 220;
       }
       // 仅在球门线附近才播入网（防跳段/粘帧在中场炸出「迷你球门」）
