@@ -99,6 +99,25 @@ export const SIM = {
   CONTROL_RADIUS_METRES: 2.6,
   // 球员积分仍使用场地百分比/秒；接触与球速判定通过上方尺寸换算为米制。
   MAX_PLAYER_SPEED: 6, // 顶级 pace 的最大移动速度（%/秒）；对齐真实纵穿全场约 14s
+  // 非穿透求解器的身体最小间距，**单位是场地格**，而 `_separateAgents` 里的距离是
+  // `Math.hypot(dx, dy)`——对格数取模。x 一格 0.68m、y 一格 1.05m，所以这条下限在
+  // 真实空间里是个**椭圆**：
+  //     横向（沿边线）      2.85 × 0.68 = **1.94 m**
+  //     纵向（沿球门方向）  2.85 × 1.05 = **2.99 m**
+  //
+  // ⛔ **这不是可以随手抹平的笔误，两条半轴都是载荷。** 2026-09-03 实测（改成
+  //    各向同性的米制、24 场标定，见 AGENTS.md「`_separateAgents` 混单位」那节）：
+  //      各向同性 1.94m  进球 **2.29**（护栏 2.5~3.3）、转化率 **7.9%**（护栏 9~15）、
+  //                      直塞 **0.25**（下限 0.5）——纵向下限从 2.99 掉到 1.94，
+  //                      防守者可以坐进纵向传球线里，进攻产出整条塌掉。
+  //      各向同性 1.10m  进球 3.04、转化率 10.8% 都好看，但**强弱分离塌了**：
+  //                      强队 1.79 → **1.29** 分/场、净胜球 +12 → **−4**、直塞 0.21。
+  //                      身体能贴到 1.1m 时弱队光靠贴身就能捂住强队。
+  //    也就是说**引擎的进攻产出依赖纵向那 2.99m，而贴身防守被同一个数挡着**
+  //    （实测最近防守者距离中位 2.76~2.83m 正好压在 2.99m 上）。
+  //    要动它必须**同时**补上进攻产出（把球打到防线身后那条路，见「主线」一节），
+  //    不能单改。参数化在这里就是为了让那次配对可以直接扫它，而不用再改一遍代码。
+  SEPARATION_MIN_DISTANCE_UNITS: 2.85,
   // 控球时间轴采样间隔（模拟秒）：直播按此还原截至当前画面的控球率
   POSS_SAMPLE_SEC: 15,
   // 点球分阶段时长（模拟秒），与表现层共用同一组时序：
@@ -381,6 +400,14 @@ export class SimEngine {
     this.simulationProfile = opts.simulationProfile || "standard";
     this.timeStep = clamp(Number(opts.timeStep) || SIM.DT, SIM.DT, 0.5);
     this.separationPasses = clamp(Math.round(Number(opts.separationPasses) || 8), 1, 8);
+    // 身体最小间距（**场地格**，见 `SIM.SEPARATION_MIN_DISTANCE_UNITS` 那段说明：
+    // 它在真实空间里是个椭圆，两条半轴都是载荷）。参数化只为让标定探针
+    // （`scripts/_separation-mind-calibration-probe.mjs`）能扫它，默认值不要在别处改。
+    this.separationMinDistanceUnits = clamp(
+      Number(opts.separationMinDistanceUnits) || SIM.SEPARATION_MIN_DISTANCE_UNITS,
+      0.5,
+      5
+    );
     this.integrationStats = {
       outerSteps: 0,
       coarseSteps: 0,
@@ -4523,13 +4550,18 @@ export class SimEngine {
   }
 
   /**
-   * 球员身体近距离非穿透约束（Gauss-Seidel 投影），禁区间距更大。
+   * 球员身体近距离非穿透约束（Gauss-Seidel 投影）。
    * 每人按自身机动权重分担修正量，门将权重极低因此几乎不被推离球门。
    * 根治「小禁区十余个圆点糊成一团」与前锋和门将占据同一坐标。
+   *
+   * ⚠ 距离是 `Math.hypot(dx, dy)` 对**格数**取模，所以这条下限在真实空间里是个
+   *   椭圆（横向 1.94m、纵向 2.99m）。看起来像混单位，**实测证明两条半轴都是载荷，
+   *   压成各向同性会破护栏**——完整证据与两组实测见
+   *   `SIM.SEPARATION_MIN_DISTANCE_UNITS` 的注释。动它之前先读那一段。
    */
   _separateAgents(iterations = 1, dt = null, epoch = null) {
     const n = this.agents.length;
-    const minD = 2.85;
+    const minD = this.separationMinDistanceUnits;
     const maxPasses = Math.max(1, iterations);
     const separationEpoch = Number.isFinite(epoch)
       ? epoch
