@@ -25,16 +25,28 @@ const separationPasses = simulationProfile === "background" ? 4 : 8;
 //   所以下面加了一条**标准档自查**：标准档跑 24 场时也算同一份 delta 并用同一组容差
 //   断言。快照一旦过期，会在标准档这一侧立刻失败并指向正确的原因，
 //   而不是让 background 那一侧替它背锅。
+//
+// 【2026-09-03 有意刷新】上一份快照是门将出球修复之前的。那次改动有三处：
+//   压迫阈值 6.5→4 格（旧值把站在禁区线外的合法逼抢也当成扑到门将脚下，
+//   实测 113 次出球里 112 次判为贴身、短传分支从未执行）、大脚落点区间改成有方向的
+//   [30,55]/[45,70]（旧值硬夹在中三区 [38,62]，100% 落在中路盒里、38% 落在本方半场）、
+//   以及两处 `dir * -X` 的符号修正。依据见 `scripts/_gk-kick-and-ball-jump-probe.mjs`。
+//   刷新的是**传球成功率 82.4 → 78.6**：大脚现在飞到中线一带的争抢区，
+//   不再落进本方中场脚下，所以完成率必然下降；78.6% 仍在护栏 72~88 内，
+//   也贴近真实（英超约 80%）。**这一项是有意刷的，不是为了让红的变绿**——
+//   门将那两处旋钮单独跑都不破护栏，合并起来才把进球顶到 3.33，
+//   收近端到 30 之后进球回到 3.08，剩下的就是这条成功率偏离。
+//   其余八项一并按同一次标准档跑刷新，避免留下半新半旧的基准。
 const STANDARD_PROFILE_REFERENCE_24 = Object.freeze({
-  goals: 3.08,
-  shots: 30.13,
-  passes: 1094.63,
-  passCompletionPct: 82.4,
-  fouls: 26.17,
-  openGoalShots: 0.83,
-  goalkeeperClaims: 17.71,
-  goalkeeperChallenges: 8.46,
-  strongPointsPerMatch: 1.79,
+  goals: 2.67,
+  shots: 28.88,
+  passes: 1108.04,
+  passCompletionPct: 78.6,
+  fouls: 27.29,
+  openGoalShots: 0.75,
+  goalkeeperClaims: 17.46,
+  goalkeeperChallenges: 7.25,
+  strongPointsPerMatch: 1.88,
 });
 
 function seededRandom(seed) {

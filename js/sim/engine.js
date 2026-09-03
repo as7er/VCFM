@@ -2028,7 +2028,14 @@ export class SimEngine {
       // 9 码内才算贴身压迫（旧 11 过宽，门球时前场逼抢也常误触大脚）
       if (dOpp < 9) pressureNear++;
     }
-    const underHeavyPressure = nearestOpp < 6.5 || pressureNear >= 2;
+    // 「贴身压迫」只应该指对手真的扑到门将脚下。旧阈值 6.5 格（纵向 ≈ 6.5 m）
+    // 把**站在禁区线外的逼抢前锋**也算成贴身：实测门球时对方中锋固定站在
+    // (50, 83.5)/(50, 16.5)，离门将 6.0~6.3 格，于是 113 次出球里 112 次判为贴身、
+    // 短传分支从未触发过（`scripts/_gk-kick-and-ball-jump-probe.mjs`）。
+    // 而那个站位本身是合法且真实的（禁区线在 y=84/16，他在线外高位逼抢），
+    // 真实门将在这种情况下照样短传给拉边的中卫。所以门槛收到 4 格 ≈ 4 m，
+    // 只有对手确实扑到跟前才放弃出脚选择，其余交给 `_bestPass` 自己的传球线路评估。
+    const underHeavyPressure = nearestOpp < 4 || pressureNear >= 2;
     const prefersShort = this._hasHabit(a, "distributes_short") || this._roleBehavior(a, "shortDistribution") > 0.15;
     const launchesCounters = this._hasHabit(a, "launches_counters");
     const bypassBuildUp = launchesCounters && !underHeavyPressure && this.random() < 0.62;
@@ -2047,10 +2054,20 @@ export class SimEngine {
     }
 
     // —— 大脚解围：瞄中场安全通道，优先落点靠近本方前插队友 ——
-    // 落点禁区：x∈[30,70]、y∈[38,62]，远离边线/底线，给落地滚动留余量
+    // 落点横向夹在 x∈[30,70]，远离边线给落地滚动留余量；纵向见下面的 yLo/yHi。
     const dir = this.attackDir(a.team); // home 攻 y↓ 为 -1
+    // 落点纵向允许区间：往前落在中线前后（真实的受压解围就落在那一带），
+    // 往后只留 5 格余量给「只能往回摆」的极端情形，不再允许把球开进本方半场深处。
+    // 旧实现把两端硬夹在 [38,62]（中三区），实测 113 脚 100% 落在那个盒子里、
+    // 38% 还落在本方半场（`scripts/_gk-kick-and-ball-jump-probe.mjs`）。
+    // 近端取 30 而不是 22：22 会把受压解围直接送到对方半场深处，与「门将会短传」
+    // 那一处叠起来多出 +0.66 球（两处单独跑都不破顶，合并 3.33 破顶 3.3）。
+    // ⚠ 别再拿这个近端去凑进球：22/30/36 三档实测 3.33/3.08/3.21 **不单调**，
+    // 那是固定种子下的混沌重掷，不是响应曲线，拧它等于拟合种子噪声。
+    const yLo = a.team === "home" ? 30 : 45;
+    const yHi = a.team === "home" ? 55 : 70;
     let targetX = 50;
-    let targetY = clamp(50 + dir * -8, 40, 60);
+    let targetY = clamp(50 + dir * 8, yLo, yHi);
     let receiver = null;
     let bestScore = -Infinity;
     for (const m of this.agents) {
@@ -2058,6 +2075,10 @@ export class SimEngine {
       // 必须明显离开门区，朝进攻方向推进
       const progress = a.team === "home" ? a.y - m.y : m.y - a.y;
       if (progress < 14) continue;
+      // 还必须已经推到中线附近：只要求「比门将靠前 14 格」时，本方半场里
+      // 最居中的那个中场就能当选，于是落点被 clamp 拉回本方半场。
+      const beyondOwnHalf = a.team === "home" ? m.y <= yHi : m.y >= yLo;
+      if (!beyondOwnHalf) continue;
       // 偏好半身位更居中的通道，极端贴边会滚出界
       const central = 1 - Math.min(1, Math.abs(m.x - 50) / 42);
       const roleBonus = m.role === "MID" ? 8 : m.role === "ATT" ? 4 : 1;
@@ -2067,7 +2088,7 @@ export class SimEngine {
         // 落点略向中路收，略前于接应者；硬夹在安全区内
         const inward = m.x < 50 ? 1 : m.x > 50 ? -1 : 0;
         targetX = clamp(m.x + inward * 6, 30, 70);
-        targetY = clamp(m.y + dir * 2, 38, 62);
+        targetY = clamp(m.y + dir * 2, yLo, yHi);
         receiver = m;
       }
     }
@@ -2075,7 +2096,9 @@ export class SimEngine {
       // 无人可瞄：开向中路偏一侧的安全通道（绝不到旧实现的 22/78 贴边）
       const sideBias = (b.x >= 50 ? 1 : -1) * (0.45 + this.random() * 0.4);
       targetX = clamp(50 + sideBias * (8 + this.random() * 10), 32, 68);
-      targetY = clamp(50 + dir * -(5 + this.random() * 8), 40, 60);
+      // 符号修正：旧写法是 `dir * -(5+…)`，与上面瞄接应人那处的 `dir * +2` 相反，
+      // 等于把球开向**本方**半场。dir 对 home 是 -1，所以要往前必须是 `dir * +X`。
+      targetY = clamp(50 + dir * (5 + this.random() * 8), yLo, yHi);
     }
 
     const dx = targetX - b.x;
