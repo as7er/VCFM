@@ -10,16 +10,31 @@ const timeStep = simulationProfile === "background" ? 0.3 : SIM.DT;
 const separationPasses = simulationProfile === "background" ? 4 : 8;
 // Seeds 165000..165023 and 265000..265023 on the standard profile. Update this
 // only after an intentional standard-engine calibration and a fresh 24-match run.
+//
+// ⚠ 2026-09-03：这份快照曾经烂掉过，而且是**静默**烂掉的。发现过程写在下面，
+//   因为同样的事会再发生一次：
+//   · `npm test` 跑的是 `node scripts/verify.mjs`，**不带 `--full`**，
+//     而这两个 24 场标定只在 `--full` 里（verify.mjs:121）。于是「75 项全过」
+//     从来不包含本文件。
+//   · 快照上一次刷新之后，引擎经历了门将站位、门框、开球等多轮有意标定，
+//     没有人回来刷这份数。到 2026-09-03 时**标准档自己已经偏离快照 +4.38 次射门**
+//     （29.21 vs 24.83），也就是说这条名为「background 与标准档不一致」的断言，
+//     实际上量的是「与一份历史快照的偏离」。
+//   · 结果是它在 `a82cb54` 上就已经红了三条（shots +4.42、goalkeeperClaims +5.92、
+//     openGoalShots +0.79），只是没人跑 `--full` 所以没人知道。
+//   所以下面加了一条**标准档自查**：标准档跑 24 场时也算同一份 delta 并用同一组容差
+//   断言。快照一旦过期，会在标准档这一侧立刻失败并指向正确的原因，
+//   而不是让 background 那一侧替它背锅。
 const STANDARD_PROFILE_REFERENCE_24 = Object.freeze({
-  goals: 3.21,
-  shots: 24.83,
-  passes: 1070.08,
-  passCompletionPct: 81.1,
-  fouls: 24.79,
-  openGoalShots: 0.54,
-  goalkeeperClaims: 12.96,
-  goalkeeperChallenges: 6.54,
-  strongPointsPerMatch: 1.96,
+  goals: 3.08,
+  shots: 30.13,
+  passes: 1094.63,
+  passCompletionPct: 82.4,
+  fouls: 26.17,
+  openGoalShots: 0.83,
+  goalkeeperClaims: 17.71,
+  goalkeeperChallenges: 8.46,
+  strongPointsPerMatch: 1.79,
 });
 
 function seededRandom(seed) {
@@ -331,9 +346,12 @@ const report = {
   },
 };
 
-if (simulationProfile === "background" && matches === 24 && !equalOnly) {
+if (matches === 24 && !equalOnly) {
   report.standardProfileReference = STANDARD_PROFILE_REFERENCE_24;
-  report.profileDelta = {
+  // 两个档位都算同一份 delta。background 档保留 `profileDelta` 这个键名
+  // （留档与既有读法都按它写），标准档用 `referenceDelta` ——**标准档这一侧
+  // 就是快照自查**：刷新之后应当逐项接近 0，任何非零都说明引擎自那次刷新起动过。
+  const delta = {
     goals: Number((report.perMatch.goals - STANDARD_PROFILE_REFERENCE_24.goals).toFixed(2)),
     shots: Number((report.perMatch.shots - STANDARD_PROFILE_REFERENCE_24.shots).toFixed(2)),
     passes: Number((report.perMatch.passes - STANDARD_PROFILE_REFERENCE_24.passes).toFixed(2)),
@@ -354,6 +372,8 @@ if (simulationProfile === "background" && matches === 24 && !equalOnly) {
       (report.strongVsWeak.pointsPerMatch - STANDARD_PROFILE_REFERENCE_24.strongPointsPerMatch).toFixed(2)
     ),
   };
+  report.referenceDelta = delta;
+  if (simulationProfile === "background") report.profileDelta = delta;
 }
 
 console.log(JSON.stringify(report, null, 2));
@@ -401,28 +421,40 @@ if (report.profileDelta) {
     report.integration.extraStepSharePct <= 32,
     "background critical ball substeps exceeded their execution budget"
   );
-  assert.ok(Math.abs(delta.goals) <= 0.55, "background goals diverged from the fixed-seed standard profile");
-  assert.ok(Math.abs(delta.shots) <= 3, "background shots diverged from the fixed-seed standard profile");
-  assert.ok(Math.abs(delta.passes) <= 100, "background pass volume diverged from the fixed-seed standard profile");
+}
+// 同一组容差同时管住两件事：background 档与快照的偏离，以及**快照本身有没有过期**。
+// 标准档跑到这里时 `referenceDelta` 应当逐项接近 0；一旦某项超差，说明自上次刷新
+// 以来引擎被有意改过而没人回来刷这份数——那就应该在标准档这一侧失败，
+// 而不是等到某次 `--full` 让 background 那一侧替它背锅（2026-09-03 就是这么发现的）。
+if (report.referenceDelta) {
+  const delta = report.referenceDelta;
+  const who = simulationProfile === "background" ? "background" : "standard";
+  const stale =
+    simulationProfile === "background"
+      ? ""
+      : " — the frozen STANDARD_PROFILE_REFERENCE_24 is stale; refresh it deliberately";
+  assert.ok(Math.abs(delta.goals) <= 0.55, `${who} goals diverged from the fixed-seed standard profile${stale}`);
+  assert.ok(Math.abs(delta.shots) <= 3, `${who} shots diverged from the fixed-seed standard profile${stale}`);
+  assert.ok(Math.abs(delta.passes) <= 100, `${who} pass volume diverged from the fixed-seed standard profile${stale}`);
   assert.ok(
     Math.abs(delta.passCompletionPct) <= 2,
-    "background pass completion diverged from the fixed-seed standard profile"
+    `${who} pass completion diverged from the fixed-seed standard profile${stale}`
   );
-  assert.ok(Math.abs(delta.fouls) <= 6, "background fouls diverged from the fixed-seed standard profile");
+  assert.ok(Math.abs(delta.fouls) <= 6, `${who} fouls diverged from the fixed-seed standard profile${stale}`);
   assert.ok(
     Math.abs(delta.openGoalShots) <= 0.65,
-    "background open-goal chances diverged from the fixed-seed standard profile"
+    `${who} open-goal chances diverged from the fixed-seed standard profile${stale}`
   );
   assert.ok(
     Math.abs(delta.goalkeeperClaims) <= 4,
-    "background goalkeeper claims diverged from the fixed-seed standard profile"
+    `${who} goalkeeper claims diverged from the fixed-seed standard profile${stale}`
   );
   assert.ok(
     Math.abs(delta.goalkeeperChallenges) <= 3,
-    "background goalkeeper challenges diverged from the fixed-seed standard profile"
+    `${who} goalkeeper challenges diverged from the fixed-seed standard profile${stale}`
   );
   assert.ok(
     Math.abs(delta.strongPointsPerMatch) <= 0.5,
-    "background strength separation diverged from the fixed-seed standard profile"
+    `${who} strength separation diverged from the fixed-seed standard profile${stale}`
   );
 }

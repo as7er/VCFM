@@ -3849,24 +3849,41 @@ export class SimEngine {
     // 但那次只收紧了防守、没有同时松开 _shoot 的全队射门冷却，进球必然掉——
     // 防守变强 + 射门仍被冷却压死 = 机会少且不敢射。本轮三处一起改。
     // ⛔ 上面这套只看**球离门多远**，完全不看**禁区里站了几个人**。实测
-    //    （`scripts/_box-marking-probe.mjs`，6 场）：禁区内平均 2.9~3.0 名进攻者，
-    //    而 5 米内一个防守者都没有的占 **19.8%** —— 五个人里有一个完全没人管，
-    //    传中飞行段与有人持球段几乎一样糟。普通传中点（x=15, y=88）离门 23.4m，
-    //    默认 pressing=3 → `markingLimit = 0`：**整个传中过程一个盯人都没有。**
+    //    （`scripts/_box-marking-probe.mjs`，12 场）：禁区内平均 2.9~3.0 名进攻者，
+    //    而 5 米内一个防守者都没有的占 **19.6%（有人持球）/ 20.8%（传中飞行中）**
+    //    —— 五个人里有一个完全没人管，传中飞行段与有人持球段几乎一样糟。
+    //    普通传中点（x=15, y=88）离门 23.4m，默认 pressing=3 → 上面那三元式给 0：
+    //    **整个传中过程一个盯人都没有。**
     //
-    // ⛔ 试过补一条「禁区里有几个进攻者就至少派同样多的人（上限 3）」的地板，
-    //    实测确实有效（>5m 完全无人 19.8% → 16.8%），**但 `crowdedPairs` 从 12 打到 25**
-    //    （上限 14），已回退。那个闸门本身不可信（同一改动家族给过 3/12/15，跨度
-    //    是余量的 6 倍，见 `scripts/_crowded-pairs-gate-probe.mjs`），但 25 已经超出
-    //    观测过的重掷区间，不能当噪声放过。
-    //    **要先把那个闸门改成「每场次数 + 12 场样本」才有资格判定这条改动。**
+    // ✅ 所以补一条地板：禁区里有几个进攻者，就至少派同样多的人盯。
+    //    上限**读球队自己的防守档**（`profile.markingCount`，pressing≥4 给 2、否则 1）
+    //    再 +1：守自家禁区时比平时多压一个人上去，其余仍留在 shape 上保护第二落点
+    //    与反击出口。所以默认俱乐部（pressing 3）上限 2，高压球队上限 3。
+    //    人数用引擎自己的 `_inOwnPenaltyArea`（x∈(18,82)、y>80）数，比画面画的那个框
+    //    深 4.2m 宽 2.7m；门将的所有出击闸门本来也跑在这个框里，两处保持同一个框。
+    //
+    //    ⛔ 第一版写死上限 3。12 场禁区指标确实更好（>5m 完全无人 19.6% → 14.8%），
+    //       但 24 场标定 `shotConversionPct` 掉出 9~15% 护栏——禁区里多站的人把射门
+    //       挡掉了，而 `_emit("shot")` 在出脚那一刻就记（engine.js:3191），封堵算射门
+    //       不算进球，于是转化率被压低。基线本来只有 9.69%（进球 2.83 / 射门 29.21），
+    //       余量 0.69pp，经不起这一下。**射门量本身偏高（14.6/队场 vs 真实 11.9~13.8）
+    //       才是转化率贴着下沿的根因**，不是这条地板的错，但它没有余量可用。
+    let boxAttackers = 0;
+    for (const opponent of this.agents) {
+      if (opponent.team === team || opponent.sentOff || opponent.role === "GK") continue;
+      if (this._inOwnPenaltyArea(team, opponent.x, opponent.y)) boxAttackers++;
+    }
+    const boxMarkingFloor = Math.min(boxAttackers, profile.markingCount + 1);
     const markingLimit = defensiveTransition
       ? Math.min(1, profile.markingCount)
-      : ballGoalDistanceMetres < 11
-        ? 2
-        : pressing >= 5 || ballGoalDistanceMetres < 16.5
-          ? 1
-          : 0;
+      : Math.max(
+          ballGoalDistanceMetres < 11
+            ? 2
+            : pressing >= 5 || ballGoalDistanceMetres < 16.5
+              ? 1
+              : 0,
+          boxMarkingFloor
+        );
     const handoffs = this._assignMarkingJobs(
       team,
       owner,
