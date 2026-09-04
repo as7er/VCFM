@@ -4,7 +4,7 @@
 
 > 仓库：https://github.com/as7er/VCFM.git · `master`（2026-08-31 起 GitHub 已改为大写 `VCFM`，小写地址仍会重定向）  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v243**（门将出球：压迫阈值 6.5→4、大脚落点改成有方向的 [30,55]/[45,70]、两处符号修正，见「🥅 门将出球」）
+> 缓存：**vcfm-v244**（peelB：越位的非接球人不去争飞行球，越位 4.5→2.3，三关全绿，见「✅ 越位老账已清」）
 
 ## 交接(2026-09-04 傍晚,换机/换会话前补记:角球标定快照在 d0eef32 引擎上已过期)
 
@@ -227,10 +227,17 @@ strongPoints 1.79→1.88`
 - **为什么门将改动翻了盘**：`peelB` 当年单独破底的机理是「越位者不碰球、附近没别人，
   直塞白白滚走」。门将改动改变了球权流转，那个副作用消失——今天单 `peelB` 传球成功率没掉
   （79.7~80%）、停滞 0、直塞没崩。
-- **落地后三关（带 peelB 的引擎源码，非探针包装）**：
-  `match-realism-audit 24` 进球 2.79 / 停滞 0 / 成功率 78.7% / 强弱队 54.2%，与冻结基线
-  delta 极小（进球 +0.12）；`box-possession-sampling-audit` boxSeconds 1087（基线 1092）；
-  `box-defending-audit` crowdedPairs/场 2.67（上限 14）。全 `passed`。
+- **落地后五份审计全过（带 peelB 的引擎源码，非探针包装；vcfm-v244）**：
+  - `match-realism-audit 24` **标准档**：进球 2.79 / 停滞 0 / 成功率 78.7% / 强弱队 54.2%，
+    与冻结基线 delta 极小（进球 +0.12、成功率 +0.1）。
+  - `match-realism-audit 24 background` **后台档**（进攻杠杆约束面）：进球 3.13 / 停滞 0 /
+    extraStepSharePct 31.6（上限 32，余量 0.4 极紧但没破，peelB 未恶化它）。
+  - `offside-event-integrity-audit 8`：35/35 事件=调用一致、零重复；判罚率 2.19/队场
+    （仅告警、非失败，就是 peelB 后的新水平，比改前 4.5 大幅改善）。
+  - `corner-structure-audit`：硬护栏全过（间距/主罚者在弧顶/Law 17/落点记录）；
+    12 项还原度缺口是 bug#2 待办、只告警不阻断。
+  - `box-possession-sampling-audit` boxSeconds 1087（基线 1092）；
+    `box-defending-audit` crowdedPairs/场 2.67（上限 14）。全 `passed`。
 - **没压进 1.4~2.1 真实带（落在 2.1~2.5 上沿）是有意为之**：地基先打到「可采用」，
   留的越位余量正好给后面「最后三区放开纵深」去消耗——放开跑位必然拉高越位，此时有预算接。
 - **`peelB` 的设计原则复核**：它让**已越位的非接球人**不去争这个飞行球（预定接球人 receiverId
