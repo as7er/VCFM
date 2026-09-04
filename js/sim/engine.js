@@ -5398,6 +5398,20 @@ export class SimEngine {
     for (const a of this.agents) {
       // 已离场者（红牌/伤退）绝不能接管球：否则球会跟着他走出边线并永远 held
       if (a.sentOff) continue;
+      // 越位的**非接球人**不去争这个飞行球：出脚瞬间已越位的队友碰球才会被判罚，
+      // 真实里他知道自己越位、会主动让开，不会去截路过的传球（`peelB`，2026-09-05
+      // 两窗口 12 场重测：越位 4.5→2.5，进球不破底，反把窗口B破底的 control 救回；
+      // 见 AGENTS.md「越位老账」）。预定接球人 receiverId 不动——他仍会去接、随后在
+      // 下方 5470 行由既有判罚照常吹越位。纯几何、不消费随机数、不改判罚路径。
+      if (
+        b.state === "pass" &&
+        a.team === b.kickTeam &&
+        a.id !== b.receiverId &&
+        b.offsideIds instanceof Set &&
+        b.offsideIds.has(a.id)
+      ) {
+        continue;
+      }
       if (a.id === b.lastKicker && this.t < (a.noReclaimUntil || 0)) continue;
       if (oppBlocked && a.team !== b.kickTeam) continue;
       // 高弧线传中够不着就不能控（外场 2.2 / 门将 3.0）
