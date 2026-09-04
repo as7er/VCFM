@@ -31,6 +31,11 @@ import {
   assignPlayersToFormationSlots,
 } from "./models.js";
 
+// 球尾特效总开关（2026-09-04 用户反馈「球的尾巴违和，去掉」）。
+// false = 关闭全部尾迹：canvas 地面丝带 + SVG 弧线尾迹（_addTrail/.mp-trails）。
+// 代码全部保留，改回 true 即可找回。canvas 侧的字符串守卫见 _drawBall 附近注释。
+const SHOW_BALL_TRAIL = false;
+
 function clamp(n, a, b) {
   return Math.max(a, Math.min(b, n));
 }
@@ -3283,11 +3288,17 @@ export class MatchView {
     }
 
     // 球轨迹丝带（地面投影）；射门用更醒目的橙黄弧
+    // 2026-09-04：用户反馈球的尾巴特效违和，整体关闭（保留代码，改 SHOW_BALL_TRAIL 即可找回）。
+    // 2026-09-05：SVG 弧线尾迹（_addTrail/.mp-trails）也收进同一个开关（见文件顶部常量）。
+    // 注意：下面那行 `if (!this.carrier && trail.length >= 2)` 是 match-broadcast-audit
+    // 的字符串守卫（「持球时尾迹隐藏」），不要改写它——总开关放在它之前做早返回。
     const trail = this._ballTrail || [];
     const isShotTrail =
       this.ballState === "shot" ||
       (this.fsm.isIn('GOAL_SEQUENCE') && trail.some((p) => (p.z || 0) > 0.8));
-    if (!this.carrier && trail.length >= 2) {
+    // 总开关关闭时整块跳过；开启时下面这行照旧（它是 broadcast-audit 的字符串守卫）。
+    if (!SHOW_BALL_TRAIL) { /* 尾迹已整体关闭，见文件顶部 SHOW_BALL_TRAIL */ }
+    else if (!this.carrier && trail.length >= 2) {
       ctx.save();
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
@@ -6315,6 +6326,7 @@ export class MatchView {
    * @param {string} kind goal|shot|save|pass|wood
    */
   _addTrail(x0, y0, x1, y1, kind = "shot", life = 0.7) {
+    if (!SHOW_BALL_TRAIL) return; // 球尾总开关（2026-09-05）：关闭 SVG 弧线尾迹
     if (!this.trailSvg) return;
     // 二次贝塞尔：中点侧偏模拟弧线
     const mx = (x0 + x1) / 2 + (Math.random() - 0.5) * (kind === "pass" ? 4 : 10);
