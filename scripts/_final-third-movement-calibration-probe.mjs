@@ -223,6 +223,9 @@ function runMatch(seed) {
       offsides: 0, passes: 0, crosses: 0, through: 0, shots: 0, goals: 0,
       corners: 0, boxTouches: 0, boxSeconds: 0, finalThirdSeconds: 0,
       offBallSamples: 0, nearStatic: 0, speedSum: 0, targetDistSum: 0,
+      // 诊断（2026-09-05）：把「近静止」切成「已到位（该静止）」vs「离目标≥2m 却不动（真病）」，
+      // 并记录真病样本处于什么 fsm，一锤定音病根在决策层还是移动层。
+      staticArrived: 0, staticStranded: 0, strandedFsm: {},
     };
     for (let s = 0; s < steps; s++) {
       eng.step(SIM.DT);
@@ -263,8 +266,18 @@ function runMatch(seed) {
               const speed = Math.hypot((a.vx || 0) * METRES_X, (a.vy || 0) * METRES_Y);
               t.offBallSamples++;
               t.speedSum += speed;
-              if (speed < 1) t.nearStatic++;
-              t.targetDistSum += Math.hypot((a.tx - a.x) * METRES_X, (a.ty - a.y) * METRES_Y);
+              const targetDist = Math.hypot((a.tx - a.x) * METRES_X, (a.ty - a.y) * METRES_Y);
+              if (speed < 1) {
+                t.nearStatic++;
+                // 离目标 <1.5m = 已到位，该静止；≥1.5m 却不动 = 真病（该跑没跑）
+                if (targetDist < 1.5) t.staticArrived++;
+                else {
+                  t.staticStranded++;
+                  const key = `${a.role}|${a.fsm || "?"}`;
+                  t.strandedFsm[key] = (t.strandedFsm[key] || 0) + 1;
+                }
+              }
+              t.targetDistSum += targetDist;
             }
           }
         }
@@ -310,12 +323,15 @@ function sweep(level) {
     offsides: 0, passes: 0, crosses: 0, through: 0, shots: 0, goals: 0,
     corners: 0, boxTouches: 0, boxSeconds: 0, finalThirdSeconds: 0,
     offBallSamples: 0, nearStatic: 0, speedSum: 0, targetDistSum: 0,
+    staticArrived: 0, staticStranded: 0,
   };
+  const strandedFsm = {};
   const scores = [];
   for (const seed of seeds) {
     const r = runMatch(seed);
     scores.push(r.score);
     for (const k of Object.keys(agg)) agg[k] += r[k];
+    for (const [k, v] of Object.entries(r.strandedFsm || {})) strandedFsm[k] = (strandedFsm[k] || 0) + v;
   }
   V.wingRotate = V.midLate = false;
   V.release = 0;
@@ -337,6 +353,9 @@ function sweep(level) {
     最后三区秒: per(agg.finalThirdSeconds),
     "boxSec占最后三区%": share(agg.boxSeconds, agg.finalThirdSeconds),
     近静止占比: share(agg.nearStatic, agg.offBallSamples),
+    "静止-已到位%": share(agg.staticArrived, agg.offBallSamples),
+    "静止-该跑没跑%": share(agg.staticStranded, agg.offBallSamples),
+    strandedFsm,
     均速: Number((agg.speedSum / Math.max(1, agg.offBallSamples)).toFixed(2)),
     目标距离m: Number((agg.targetDistSum / Math.max(1, agg.offBallSamples)).toFixed(2)),
     applied: { ...applied },
@@ -394,6 +413,21 @@ for (const r of rows) {
       `最后三区 ${String(r.最后三区秒).padStart(7)}s  ` +
       `boxSec占比 ${String(r["boxSec占最后三区%"]).padStart(5)}%  ` +
       `覆写 wing=${r.applied.wingRotate} mid=${r.applied.midLate} clamp=${r.applied.depthRelease}`
+  );
+}
+
+console.log("\n[2b] 🔬 近静止拆分（把「站着」切成：已到位=该静止 vs 该跑没跑=真病）：");
+for (const r of rows) {
+  const top = Object.entries(r.strandedFsm || {})
+    .sort((p, q) => q[1] - p[1])
+    .slice(0, 5)
+    .map(([k, v]) => `${k}:${v}`)
+    .join("  ");
+  console.log(
+    `  ${r.label.padEnd(24)} ` +
+      `已到位 ${String(r["静止-已到位%"]).padStart(5)}%  ` +
+      `该跑没跑 ${String(r["静止-该跑没跑%"]).padStart(5)}%  ` +
+      `| 该跑没跑的 role|fsm 前五：${top}`
   );
 }
 
