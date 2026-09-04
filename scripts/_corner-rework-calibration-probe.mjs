@@ -91,8 +91,8 @@ const median = (v) => {
 const mean = (v) => (v.length ? Number((v.reduce((a, b) => a + b, 0) / v.length).toFixed(2)) : 0);
 const pct = (n, d) => Number(((n / Math.max(1, d)) * 100).toFixed(1));
 
-/** 档位开关 */
-const V = { slots: false, delivery: false, runs: false, restDef: false, outlet: false, gkOnLine: false };
+/** 档位开关。depthScale：把三个抢点区 + 落点区的深度按比例外推（1.0=现状 5m，避开门将出击圈用） */
+const V = { slots: false, delivery: false, runs: false, restDef: false, outlet: false, gkOnLine: false, depthScale: 1.0 };
 
 /**
  * 角球计划：`_restart` 包装里算好，`_think` / `_bestCross` 包装读它。
@@ -137,11 +137,13 @@ function buildLayout(engine, attTeam, taker, ball) {
   const backIds = new Set(backs.map((a) => a.id));
   const forward = byAerial(attackers.filter((a) => !backIds.has(a.id)));
 
-  // 三个真实进球区（The Analyst：前点/中路/后点，全在小禁区内）
+  // 三个真实进球区（The Analyst：前点/中路/后点，全在小禁区内）。
+  // depthScale 把深度整体外推：落点与抢点点同步移动，避免只推一头造成「无人区」。
+  const ds = V.depthScale;
   const zones = [
-    { key: "near", ...at(near * 3.0, 5.0) },
-    { key: "central", ...at(near * -0.5, 5.4) },
-    { key: "far", ...at(far * 4.5, 4.6) },
+    { key: "near", ...at(near * 3.0, 5.0 * ds) },
+    { key: "central", ...at(near * -0.5, 5.4 * ds) },
+    { key: "far", ...at(far * 4.5, 4.6 * ds) },
   ];
   const attack = new Map();
   const runners = [];
@@ -293,9 +295,9 @@ SimEngine.prototype._restart = function _restartProbe(type, team, x, y, ...rest)
     until: this.t + 4.2,
     index: cornerIndex,
     zones: [
-      L.at(L.near * 3.0, 5.0),
-      L.at(L.near * -0.5, 5.4),
-      L.at(L.far * 4.5, 4.6),
+      L.at(L.near * 3.0, 5.0 * V.depthScale),
+      L.at(L.near * -0.5, 5.4 * V.depthScale),
+      L.at(L.far * 4.5, 4.6 * V.depthScale),
     ],
   };
 
@@ -440,13 +442,19 @@ function runMatch(seed) {
       }
     }
     const cornerAt = { home: -999, away: -999 };
+    // 诊断（--diag）：角球窗口内被谁把球吃掉。cornerAt[team] 记的是「攻方」上一次开角球的时刻，
+    // 防守方门将/后卫的处理事件挂在防守方名下，所以按「对方 team 的 cornerAt」判窗口。
+    const other = (tm) => (tm === "home" ? "away" : "home");
+    const inCornerWin = (evT, defTeam) => evT - (cornerAt[other(defTeam)] ?? -999) <= 18;
+    const diag = { gk_claim: 0, gk_block: 0, gk_clear: 0, save: 0, block: 0, intercept: 0, offside: 0 };
     for (const ev of eng.events) {
       if (ev.type === "corner") { t.corners++; if (ev.team === "home" || ev.team === "away") cornerAt[ev.team] = ev.t; }
       else if (ev.type === "shot") { t.shots++; if (ev.t - (cornerAt[ev.team] ?? -999) <= 18) t.cornerShots++; }
       else if (ev.type === "goal") { t.goals++; if (ev.t - (cornerAt[ev.team] ?? -999) <= 18) t.cornerGoals++; }
       else if (ev.type === "pass") { t.passes++; if (ev.cross) t.crosses++; }
+      else if (ev.type in diag && ev.team && inCornerWin(ev.t, ev.team)) diag[ev.type]++;
     }
-    return { score: `${eng.score.home}-${eng.score.away}`, ...t };
+    return { score: `${eng.score.home}-${eng.score.away}`, ...t, diag };
   } finally {
     Math.random = restore;
   }
@@ -521,6 +529,12 @@ const LEVELS = [
   { label: "slots + delivery", set: { slots: true, delivery: true } },
   { label: "slots + delivery −门将上线", set: { slots: true, delivery: true, gkOnLine: false } },
   { label: "slots + delivery + runs", set: { slots: true, delivery: true, runs: true } },
+  // —— 落点深度扫描（2026-09-04 新增）：诊断表证实 slots+delivery 的射门率塌陷是
+  //    「门将解围」翻 3 倍造成的（球被精确吊进门将 1.5m 出击圈）。落点与抢点点一起
+  //    外推（depthScale），只测「离门将多远」这一个变量，找回射门率而不吊进无人区。
+  { label: "s+d 深度×1.4 (~7m)", set: { slots: true, delivery: true, depthScale: 1.4 } },
+  { label: "s+d 深度×1.8 (~9m)", set: { slots: true, delivery: true, depthScale: 1.8 } },
+  { label: "s+d 深度×2.2 (~11m)", set: { slots: true, delivery: true, depthScale: 2.2 } },
 ];
 
 function sweep(level) {
@@ -531,6 +545,7 @@ function sweep(level) {
   V.restDef = level.set.restDef ?? V.slots;
   V.outlet = level.set.outlet ?? V.slots;
   V.gkOnLine = level.set.gkOnLine ?? V.slots;
+  V.depthScale = level.set.depthScale ?? 1.0;
   const agg = { corners: 0, cornerShots: 0, cornerGoals: 0, goals: 0, shots: 0, passes: 0, crosses: 0 };
   const z = { attSix: [], attSecond: [], attBox: [], attHeld: [], defSix: [], defBox: [], defUp: [],
     goalSideOfAll: [], nearestDefToBall: [], minPair: [], gkDepth: [] };
@@ -540,10 +555,12 @@ function sweep(level) {
   const runPeak = [];
   const runGap = [];
   const scores = [];
+  const diagAgg = { gk_claim: 0, gk_block: 0, gk_clear: 0, save: 0, block: 0, intercept: 0, offside: 0 };
   for (const seed of seeds) {
     const r = runMatch(seed);
     scores.push(r.score);
     for (const k of Object.keys(agg)) agg[k] += r[k];
+    for (const k of Object.keys(diagAgg)) diagAgg[k] += (r.diag?.[k] || 0);
     for (const s of r.structures) for (const k of Object.keys(z)) z[k].push(s[k]);
     deliveries.push(...r.deliveries);
     for (const m of r.runMoves) {
@@ -554,9 +571,11 @@ function sweep(level) {
     }
   }
   V.slots = V.delivery = V.runs = V.restDef = V.outlet = V.gkOnLine = false;
+  V.depthScale = 1.0;
   const per = (n) => Number((n / matches).toFixed(2));
   return {
     scores,
+    diag: diagAgg,
     角球: per(agg.corners),
     角球射门: per(agg.cornerShots),
     角球进球: per(agg.cornerGoals),
@@ -629,6 +648,23 @@ for (const level of LEVELS) {
       `射门 ${String(r.射门每队场).padStart(5)}  ` +
       `传中 ${String(r.传中占比).padStart(5)}%` +
       (warn.length ? `  ⚠${warn.join("/")}` : "")
+  );
+}
+
+console.log("\n[1c] 🔍 角球窗口内球被谁吃掉（诊断：解释射门率为何塌陷；每场均值）：");
+for (const r of rows) {
+  const d = r.diag || {};
+  const per = (n) => (n / matches).toFixed(2);
+  console.log(
+    `  ${r.label.padEnd(24)} ` +
+      `门将没收 ${String(per(d.gk_claim || 0)).padStart(5)}  ` +
+      `门将封堵 ${String(per(d.gk_block || 0)).padStart(5)}  ` +
+      `门将解围 ${String(per(d.gk_clear || 0)).padStart(5)}  ` +
+      `门将扑救 ${String(per(d.save || 0)).padStart(5)}  ` +
+      `后卫封堵 ${String(per(d.block || 0)).padStart(5)}  ` +
+      `拦截 ${String(per(d.intercept || 0)).padStart(5)}  ` +
+      `越位 ${String(per(d.offside || 0)).padStart(5)}  ` +
+      `| 角球射门 ${String(r.角球射门).padStart(4)}/场`
   );
 }
 
