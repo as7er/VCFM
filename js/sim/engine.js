@@ -404,6 +404,14 @@ export function motionContextOf(eng) {
   };
 }
 
+/** Keep contact evidence readable by both live snapshots and recorded frames. */
+export function ballDeflectionOf(eng) {
+  const contact = eng.ball?._deflectPulse;
+  return contact && eng.t >= contact.t - 1e-6 && eng.t - contact.t <= 0.35
+    ? contact
+    : null;
+}
+
 // ————————————————————————————————————————————————————————————
 // SimEngine
 // ————————————————————————————————————————————————————————————
@@ -1191,8 +1199,8 @@ export class SimEngine {
     b.state = "loose";
     // 第一脚失控:球沿「想接的方向」加噪声飞出,和来球线路无关,而这里过去
     // **什么都不发**。按调查这是频率最高的一处折射(15~40%,快球最高 85%),
-    // 也就是「无缘无故拐弯」的主要来源。补上只活一帧的接触脉冲。
-    b._deflectPulse = { x: b.x, y: b.y, byId: a.id };
+    // 也就是「无缘无故拐弯」的主要来源。记录带时间戳的接触点。
+    b._deflectPulse = { x: b.x, y: b.y, byId: a.id, t: this.t + (this._emitTimeOffset || 0) };
     this._clearBallTarget();
     a.controlFoot = plan.foot;
     a.controlPhase = "miscontrol";
@@ -5001,7 +5009,7 @@ export class SimEngine {
       owner.noReclaimUntil = this.t + 0.7;
       owner.intent = null;
       // 门将封堵同样会把球弹开,过去也不发接触脉冲(matchview 没有 `gk_block` 的画法)。
-      b._deflectPulse = { x: b.x, y: b.y, byId: gk.id };
+      b._deflectPulse = { x: b.x, y: b.y, byId: gk.id, t: this.t + (this._emitTimeOffset || 0) };
       this._emit("gk_block", gk, {
         from: owner.id,
         challenge: true,
@@ -5194,12 +5202,12 @@ export class SimEngine {
         // 未扑住：球继续飞，仅轻微蹭偏（指尖擦到）。
         // 这里会改变球的飞行方向，但过去不发任何信号，表现层无从知晓，
         // 画面上就成了「球在无人接触的情况下自己拐弯」。
-        // 加一个只存活一帧的脉冲（与 _netHitPulse 同一套做法），
+        // 记录带时间戳的接触点，供直播与压缩录像独立读取，
         // 让表现层能在擦球点画出接触标记。不改物理、不改判定概率。
         if (this.random() < 0.18) {
           b.vx += diveDir * (1.5 + this.random() * 2);
           b.vy *= 0.96;
-          b._deflectPulse = { x: b.x, y: b.y, byId: gk.id };
+          b._deflectPulse = { x: b.x, y: b.y, byId: gk.id, t: this.t + (this._emitTimeOffset || 0) };
         }
         break; // 已判定本脚，不再换门将
       }
@@ -5249,9 +5257,9 @@ export class SimEngine {
         this._clearBallTarget();
         // 封堵会改变球的飞行方向，但过去只发 `block` 事件、不设接触脉冲，而
         // matchview 根本没有 `case "block"` —— 画面上就是球在无人接触处自己拐弯。
-        // 与门将指尖擦球（`:5062`）同一套做法：只活一帧的脉冲，纯表现层信号，
+        // 与门将指尖擦球同一套做法：带时间戳的接触点，纯表现层信号，
         // 不改任何物理量。
-        b._deflectPulse = { x: b.x, y: b.y, byId: o.id };
+        b._deflectPulse = { x: b.x, y: b.y, byId: o.id, t: this.t + (this._emitTimeOffset || 0) };
         this._emit("block", o, { from: b.lastKicker });
         return;
       }
@@ -7386,6 +7394,7 @@ export class SimEngine {
         restartType: this.ball.restartType || null,
         controlUntil: this.ball.controlUntil || 0,
         shotAt: Number.isFinite(this.ball.shotAt) ? this.ball.shotAt : null,
+        deflect: ballDeflectionOf(this),
       },
       motionContext: motionContextOf(this),
       edgeRules: {

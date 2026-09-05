@@ -4,7 +4,7 @@
  * 所有显式请求空间引擎的场次：空间模拟跑完全时段 → directResult 读取真实事件 →
  * 翻译成现有 {minute,type,text,playerId,...} 事件，继续走报告/评分/积分。
  */
-import { SimEngine, SIM, motionContextOf } from "./engine.js";
+import { SimEngine, SIM, motionContextOf, ballDeflectionOf } from "./engine.js";
 import { simMinuteOf } from "../match-presentation.js";
 import {
   getLineupPlayers,
@@ -332,10 +332,8 @@ export function compactSimFrame(eng) {
   // 入网脉冲只发一帧，立即清掉，避免后续帧/跳段在错误位置重放网效
   const netHit = !!b._netHitPulse;
   if (netHit) b._netHitPulse = false;
-  // 擦球脉冲（门将指尖蹭偏、未扑住）同样只发一帧：球的方向确实变了，
-  // 表现层要在这一点画接触标记，否则看起来是「无接触折射」。
-  const deflect = b._deflectPulse || null;
-  if (deflect) b._deflectPulse = null;
+  // Reading a recorded frame must not consume evidence needed by live views.
+  const deflect = ballDeflectionOf(eng);
   // 定位球阶段直接随帧传给表现层，不能等事件文案临时摆拍。
   const setPiece =
     b.state === "penalty"

@@ -25,10 +25,9 @@
  *   替掉它不会让本审计放过任何运动学缺陷。
  *
  * 口径：种子 372000..、能力 15、标准档、0.1s 步长，与 `_referee-motion-probe`
- * 和 `corner-structure-audit` 一致。官员更新频率对齐 sim 帧——`_updateOfficials`
- * 只在 `matchview.js:545` 与 `:3599` 被调用，两处都是 sim 帧节奏，不在 60fps 的
- * `update()` 里，所以每 0.1s 调一次。`soft = true` 走的是高光/回放那条路径
- * （`playSimTimeline` 里的 `_updateOfficials(true)`），正是用户看到瞬移的那条。
+ * 和 `corner-structure-audit` 一致。每个模拟帧再按 6 个渲染插值子帧调用一次，
+ * 覆盖 60fps 调用频率；`_updateOfficials` 的移动量必须按 sim 时间缩放。
+ * 本脚本使用 soft 追踪档，match-continuity-audit 另覆盖实际 applySimSnapshot/插值入口。
  *
  * 真实参照：英超主裁每场跑 10~12 km、均速约 2 m/s、冲刺峰值 6~7 m/s，
  * 离球 15~20 m；边裁沿边线与倒数第二名防守者齐平。
@@ -51,6 +50,8 @@ const quantile = (values, p) => {
 };
 const mean = (values) =>
   values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
+const maximum = (values) => values.reduce((max, value) => Math.max(max, value), -Infinity);
+const minimum = (values) => values.reduce((min, value) => Math.min(min, value), Infinity);
 
 function seededRandom(seed) {
   let value = seed >>> 0;
@@ -154,6 +155,7 @@ function runMatch(seed) {
       const ball = engine.ball;
 
       // —— 同步替身读到的那几样 ——
+      const previousBall = { x: view.ball.x, y: view.ball.y };
       view.ball.x = ball.x;
       view.ball.y = ball.y;
       view.ballState = viewBallState(ball.state);
@@ -164,23 +166,30 @@ function runMatch(seed) {
         if (agent.sentOff) sentOff.add(agent.id);
       }
 
-      const before = {
-        ref: { ...view.officials.referee },
-        a: { ...view.officials.assistantA },
-        b: { ...view.officials.assistantB },
-      };
-      // ★ 这一行是本审计的全部意义：调的是仓库里那份实现，不是抄件。
-      MatchView.prototype._updateOfficials.call(view, true);
-      const after = view.officials;
-
-      refSteps.push(metres(after.referee.x - before.ref.x, after.referee.y - before.ref.y));
-      refGaps.push(metres(ball.x - after.referee.x, ball.y - after.referee.y));
-      assistantA.steps.push(metres(after.assistantA.x - before.a.x, after.assistantA.y - before.a.y));
-      assistantA.xs.push(after.assistantA.x);
-      assistantA.ys.push(after.assistantA.y);
-      assistantB.steps.push(metres(after.assistantB.x - before.b.x, after.assistantB.y - before.b.y));
-      assistantB.xs.push(after.assistantB.x);
-      assistantB.ys.push(after.assistantB.y);
+      // ★ 调用真实实现六次，模拟每个 0.1s 帧内的 60fps 插值更新。
+      // 若把每次调用都当成完整 sim tick，主裁会在一帧内跑 6 倍距离。
+      for (let sub = 1; sub <= 6; sub++) {
+        const alpha = sub / 6;
+        view.ball.x = previousBall.x + (ball.x - previousBall.x) * alpha;
+        view.ball.y = previousBall.y + (ball.y - previousBall.y) * alpha;
+        const before = {
+          ref: { ...view.officials.referee },
+          a: { ...view.officials.assistantA },
+          b: { ...view.officials.assistantB },
+        };
+        MatchView.prototype._updateOfficials.call(view, true, DT / 6);
+        const after = view.officials;
+        refSteps.push(metres(after.referee.x - before.ref.x, after.referee.y - before.ref.y));
+        refGaps.push(metres(view.ball.x - after.referee.x, view.ball.y - after.referee.y));
+        assistantA.steps.push(metres(after.assistantA.x - before.a.x, after.assistantA.y - before.a.y));
+        assistantA.xs.push(after.assistantA.x);
+        assistantA.ys.push(after.assistantA.y);
+        assistantB.steps.push(metres(after.assistantB.x - before.b.x, after.assistantB.y - before.b.y));
+        assistantB.xs.push(after.assistantB.x);
+        assistantB.ys.push(after.assistantB.y);
+      }
+      view.ball.x = ball.x;
+      view.ball.y = ball.y;
 
       // —— 追球球员：离球最近的非门将，逐帧位移换算成米 ——
       // 只在**同一个人连续两帧都是最近者、且两帧都不在死球摆位**时记一次：
@@ -220,27 +229,27 @@ const all = {
 };
 for (let index = 0; index < MATCHES; index++) {
   const run = runMatch(372000 + index);
-  all.refSteps.push(...run.refSteps);
-  all.refGaps.push(...run.refGaps);
-  all.chaserSpeeds.push(...run.chaserSpeeds);
-  all.aSteps.push(...run.assistantA.steps);
-  all.aXs.push(...run.assistantA.xs);
-  all.aYs.push(...run.assistantA.ys);
-  all.bSteps.push(...run.assistantB.steps);
-  all.bXs.push(...run.assistantB.xs);
-  all.bYs.push(...run.assistantB.ys);
+  all.refSteps = all.refSteps.concat(run.refSteps);
+  all.refGaps = all.refGaps.concat(run.refGaps);
+  all.chaserSpeeds = all.chaserSpeeds.concat(run.chaserSpeeds);
+  all.aSteps = all.aSteps.concat(run.assistantA.steps);
+  all.aXs = all.aXs.concat(run.assistantA.xs);
+  all.aYs = all.aYs.concat(run.assistantA.ys);
+  all.bSteps = all.bSteps.concat(run.assistantB.steps);
+  all.bXs = all.bXs.concat(run.assistantB.xs);
+  all.bYs = all.bYs.concat(run.assistantB.ys);
 }
 
-// 每次更新是一个 sim 帧 = 0.1s，所以「每帧位移米」×10 就是 m/s。
-const perStepToMps = 1 / DT;
-const refPeakStep = Math.max(...all.refSteps);
+// Officials use render substeps; the chaser is sampled at the engine tick.
+const perStepToMps = 6 / DT;
+const refPeakStep = maximum(all.refSteps);
 const refPeakMps = refPeakStep * perStepToMps;
 const refMeanMps = mean(all.refSteps) * perStepToMps;
 const refMoved = all.refSteps.filter((step) => step > 1e-6).length;
-const chaserP90Mps = quantile(all.chaserSpeeds, 0.9) * perStepToMps;
-const chaserPeakMps = Math.max(...all.chaserSpeeds) * perStepToMps;
-const gapMin = Math.min(...all.refGaps);
-const gapMax = Math.max(...all.refGaps);
+const chaserP90Mps = quantile(all.chaserSpeeds, 0.9) / DT;
+const chaserPeakMps = maximum(all.chaserSpeeds) / DT;
+const gapMin = minimum(all.refGaps);
+const gapMax = maximum(all.refGaps);
 const gapMedian = quantile(all.refGaps, 0.5);
 
 const report = {
@@ -260,13 +269,13 @@ const report = {
     峰值mps: Number(chaserPeakMps.toFixed(2)),
   },
   边裁A: {
-    x范围: [Number(Math.min(...all.aXs).toFixed(2)), Number(Math.max(...all.aXs).toFixed(2))],
-    y范围: [Number(Math.min(...all.aYs).toFixed(2)), Number(Math.max(...all.aYs).toFixed(2))],
+    x范围: [Number(minimum(all.aXs).toFixed(2)), Number(maximum(all.aXs).toFixed(2))],
+    y范围: [Number(minimum(all.aYs).toFixed(2)), Number(maximum(all.aYs).toFixed(2))],
     有位移帧: all.aSteps.filter((step) => step > 1e-6).length,
   },
   边裁B: {
-    x范围: [Number(Math.min(...all.bXs).toFixed(2)), Number(Math.max(...all.bXs).toFixed(2))],
-    y范围: [Number(Math.min(...all.bYs).toFixed(2)), Number(Math.max(...all.bYs).toFixed(2))],
+    x范围: [Number(minimum(all.bXs).toFixed(2)), Number(maximum(all.bXs).toFixed(2))],
+    y范围: [Number(minimum(all.bYs).toFixed(2)), Number(maximum(all.bYs).toFixed(2))],
     有位移帧: all.bSteps.filter((step) => step > 1e-6).length,
   },
 };
@@ -310,12 +319,12 @@ assert.ok(
 );
 
 // ── 5) 边裁各守一条边线、各守一半场地，并且真的在跑 ──
-const aX = [Math.min(...all.aXs), Math.max(...all.aXs)];
-const bX = [Math.min(...all.bXs), Math.max(...all.bXs)];
+const aX = [minimum(all.aXs), maximum(all.aXs)];
+const bX = [minimum(all.bXs), maximum(all.bXs)];
 assert.ok(aX[0] >= 1 && aX[1] <= 5, `边裁 A 必须留在 x≈3 那条边线：${aX}`);
 assert.ok(bX[0] >= 95 && bX[1] <= 99, `边裁 B 必须留在 x≈97 那条边线：${bX}`);
-assert.ok(Math.max(...all.aYs) <= 50, `边裁 A 只负责 y<50 那半场：最大 ${Math.max(...all.aYs)}`);
-assert.ok(Math.min(...all.bYs) >= 50, `边裁 B 只负责 y>50 那半场：最小 ${Math.min(...all.bYs)}`);
+assert.ok(maximum(all.aYs) <= 50, `边裁 A 只负责 y<50 那半场：最大 ${maximum(all.aYs)}`);
+assert.ok(minimum(all.bYs) >= 50, `边裁 B 只负责 y>50 那半场：最小 ${minimum(all.bYs)}`);
 assert.ok(
   all.aSteps.filter((step) => step > 1e-6).length > all.aSteps.length * 0.3,
   "边裁 A 必须跟着越位线跑动"
@@ -325,12 +334,12 @@ assert.ok(
   "边裁 B 必须跟着越位线跑动"
 );
 assert.ok(
-  Math.max(...all.aSteps) * perStepToMps < 4,
-  `边裁 A 峰值 ${(Math.max(...all.aSteps) * perStepToMps).toFixed(2)} m/s 过大`
+  maximum(all.aSteps) * perStepToMps < 4,
+  `边裁 A 峰值 ${(maximum(all.aSteps) * perStepToMps).toFixed(2)} m/s 过大`
 );
 assert.ok(
-  Math.max(...all.bSteps) * perStepToMps < 4,
-  `边裁 B 峰值 ${(Math.max(...all.bSteps) * perStepToMps).toFixed(2)} m/s 过大`
+  maximum(all.bSteps) * perStepToMps < 4,
+  `边裁 B 峰值 ${(maximum(all.bSteps) * perStepToMps).toFixed(2)} m/s 过大`
 );
 
 console.log(

@@ -46,8 +46,8 @@ function lerp(a, b, t) {
 /**
  * 重启搬运过渡（见 `applySimSnapshot`）。跳变门槛按物理上限定：0.1s 一个 tick 里
  * 球最快约 4.4 格（30 m/s 纵向）、球员约 0.6 格（6 格/s），所以球 6 格、球员 3 格
- * 以上的单 tick 位移只可能是引擎搬运。时长 700ms：真实裁判捡球摆好/球员走到位
- * 的量级，也短于引擎最短的死球窗口之后的首次决策（0.6s + 决策节流）。
+ * 以上的单 tick 位移只在重启语义下按搬运处理。700ms 是压缩后的摆位过渡，
+ * 不代表真实跑动或活球轨迹；重启判罚与目标点仍以引擎为准。
  */
 const RELOCATE_MS = 700;
 const RELOCATE_BALL_JUMP = 6;
@@ -222,6 +222,10 @@ export class MatchView {
     // 镜头：目标与当前（百分比偏移 → CSS translate）
     this.cam = { x: 0, y: 0, tx: 0, ty: 0, scale: 1, tScale: 1 };
     this._everPlayed = false; // A2 收尾：死球镜头策略在开赛/开赛前分叉（见 _updateCameraTarget）
+    this._officialsSimT = null;
+    this._playCentre = null;
+    this._relocLastSimT = null;
+    this._lastDeflectionKey = null;
     this.camBoostUntil = 0;
     this.trails = []; // active trail animations
     this.heatLayer = null;
@@ -399,32 +403,36 @@ export class MatchView {
     // （门球/越位/角球/任意球），画面照坐标画就是瞬移——实测 2 场 98 次单 tick
     // 位移 >6 格，90 次带重启类型（`scripts/_gk-kick-and-ball-jump-probe.mjs`）。
     // 判罚本身不动；这里只在看到「相邻 sim 帧内超出物理可能的位移」时，
-    // 把显示坐标从旧位置缓动到新位置（约 0.7s，ease-out），像球被捡回摆好、
-    // 球员走到位。引擎的死球窗口 ≥0.6s，所以缓动期间目标点是静止的，不会追着跑。
+    // 把显示坐标从旧位置缓动到新位置（0.7s 比赛时间，ease-out），
+    // 倍速与暂停都随比赛时钟，避免开球后仍拖着上一段的摆位动画。
     // 只在相邻帧（dt ≤ 0.35s）里判：跳段/高光切帧本来就是剪辑，不该缓动。
     const nowMs = performance.now();
     const simT = Number(sim.t);
     const lastSimT = this._relocLastSimT;
+    const sceneCut = !Number.isFinite(lastSimT) || simT < lastSimT - 1e-6 || simT - lastSimT > 0.55;
+    const restartFrame = !!(sim.ball?.restartType || sim.motionContext?.discontinuity);
     const adjacent =
       Number.isFinite(simT) && Number.isFinite(lastSimT) && simT > lastSimT && simT - lastSimT <= 0.35;
     if (Number.isFinite(simT)) this._relocLastSimT = simT;
     // 门槛按实际帧间隔放大：跳过几帧时合法位移也成比例变大
     const dtScale = adjacent ? Math.max(1, (simT - lastSimT) / 0.1) : 1;
     const relocate = (entity, tx, ty, jumpLimit) => {
+      if (sceneCut) entity._relocAt = 0;
       // 只在「没有缓动在进行」时武装。武装检查在缓动读取之前，若不加这道闸，
       // 只要目标与显示位置的距离仍超阈值，就会每次调用都重新武装（_relocFrom
       // 重设为当前显示位、u 重置为 0），缓动一步都走不了——实测球员被冻在
       // 原地几十秒、离引擎位置 38 m（display-divergence 刷屏的根因）。
       if (
-        adjacent && !entity._relocAt &&
+        adjacent && restartFrame && !entity._relocAt &&
         Math.hypot(tx - entity.x, ty - entity.y) > jumpLimit * dtScale
       ) {
         entity._relocFromX = entity.x;
         entity._relocFromY = entity.y;
         entity._relocAt = nowMs;
+        entity._relocSimT = simT;
       }
       if (!entity._relocAt) return null;
-      const u = (nowMs - entity._relocAt) / RELOCATE_MS;
+      const u = Math.max(0, (simT - entity._relocSimT) * 1000 / RELOCATE_MS);
       if (u >= 1) {
         entity._relocAt = 0;
         return null;
@@ -538,13 +546,14 @@ export class MatchView {
       }
       // 门将指尖擦到但没扑住：球的方向确实变了，标一下接触点，
       // 否则画面上就是「球无接触自己拐弯」。复用现有的克制 burst，不加新特效。
+      if (sceneCut) this._lastDeflectionKey = null;
       if (sim.ball.deflect) {
         const d = sim.ball.deflect;
-        this._burst?.(
-          Number.isFinite(d.x) ? d.x : bx,
-          Number.isFinite(d.y) ? d.y : by,
-          "save"
-        );
+        const key = `${d.t}:${d.byId}:${d.x}:${d.y}`;
+        if (key !== this._lastDeflectionKey && (!Number.isFinite(d.t) || simT >= d.t - 1e-6)) {
+          this._lastDeflectionKey = key;
+          this._burst?.(Number.isFinite(d.x) ? d.x : bx, Number.isFinite(d.y) ? d.y : by, "save");
+        }
       }
     }
 
@@ -563,25 +572,12 @@ export class MatchView {
       const own = this.players.find((p) => p.id === ownerId);
       if (own) {
         const d = Math.hypot(own.x - this.ball.x, own.y - this.ball.y);
-        if (isCornerState) {
-          // 角球：主罚人钉在角旗球旁（修「角旗只有球、人全挤禁区」）
-          own.x = this.ball.x;
-          own.y = this.ball.y + (this.ball.y < 50 ? 1.5 : -1.5);
-          own.tx = own.x;
-          own.ty = own.y;
-          own.heading = Math.atan2(50 - own.y, 50 - own.x);
-          own.el.classList.add("has-ball", "highlight");
-          carrier = own;
-          this._applyPlayer(own);
-        } else if (d < 5.5) {
+        if (d < 5.5) {
           own.el.classList.add("has-ball");
+          if (isCornerState) own.el.classList.add("highlight");
           carrier = own;
-          // 显示层球贴脚下，避免「人亮球远」
-          this.ball.x = own.x + Math.cos(own.heading || 0) * 1.2;
-          this.ball.y = own.y + Math.sin(own.heading || 0) * 1.2;
-          this.ball.tx = this.ball.x;
-          this.ball.ty = this.ball.y;
-          this.ball.z = 0;
+          // The engine already supplies the foot offset and first-touch path.
+          // Highlight ownership without changing that recorded trajectory.
         }
       }
     }
@@ -614,7 +610,13 @@ export class MatchView {
     this._simBallTrailPhase = trailPhase;
     this._pushBallTrail();
     this._applyBall();
-    this._updateOfficials(soft);
+    const previousOfficialsSimT = this._officialsSimT;
+    if (Number.isFinite(simT)) this._officialsSimT = simT;
+    const officialsSimDt =
+      Number.isFinite(simT) && Number.isFinite(previousOfficialsSimT)
+        ? Math.max(0, simT - previousOfficialsSimT)
+        : null;
+    this._updateOfficials(soft, officialsSimDt, sceneCut);
     this._recordMotionDiagnostic(sim);
     // 直播用 soft follow（见 update）；非时间轴时默认 follow
     if (!this._simPlay && this.simDrive) this.camMode = this.camMode === "box" ? "box" : "follow";
@@ -625,9 +627,9 @@ export class MatchView {
   applySimSnapshotLerped(fa, fb, alpha) {
     if (!fa?.players?.length) return false;
     if (!fb?.players?.length || alpha <= 0) {
-      return this.applySimSnapshot(fa, { soft: true });
+      return this.applySimSnapshot(fa, { soft: false });
     }
-    if (alpha >= 1) return this.applySimSnapshot(fb, { soft: true });
+    if (alpha >= 1) return this.applySimSnapshot(fb, { soft: false });
     const t = clamp(alpha, 0, 1);
     const byB = new Map(fb.players.map((p) => [p.id, p]));
     // 重启搬迁（引擎 _restart 单 tick 把球+全员搬到定位球槽位）落在相邻录制帧上
@@ -687,11 +689,13 @@ export class MatchView {
         (fb.ball?.y ?? 0) - (fa.ball?.y ?? 0)
       ) > RELOCATE_BALL_JUMP
     ) {
-      // 球同款按住：位置留在出发点等 relocate() 缓动「捡回摆好」，
-      // 归属/状态仍按后帧语义（interpolateSimBall 已定），只压平坐标。
+      // While geometry still belongs to the preceding frame, ownership must
+      // also stay there. Switching to the new taker early creates a remote owner.
       ball.x = fa.ball?.x ?? ball.x;
       ball.y = fa.ball?.y ?? ball.y;
       ball.z = fa.ball?.z ?? ball.z;
+      ball.owner = fa.ball?.owner ?? null;
+      ball.state = fa.ball?.state || null;
     }
     ball.restartType = t < 0.5
       ? fa.ball?.restartType || null
@@ -1519,6 +1523,10 @@ export class MatchView {
 
     this.cam = { x: 0, y: 0, tx: 0, ty: 0, scale: 1, tScale: 1 };
     this._everPlayed = false; // A2 收尾：死球镜头策略在开赛/开赛前分叉（见 _updateCameraTarget）
+    this._officialsSimT = null;
+    this._playCentre = null;
+    this._relocLastSimT = null;
+    this._lastDeflectionKey = null;
     this.setCameraPreset(this.cameraPreset, { persist: false });
     this._applyCamera();
     this._updatePossessionChrome();
@@ -2939,7 +2947,7 @@ export class MatchView {
    * 死球摆位瞬移到角旗，看起来就是「主裁和球同步瞬移」。**先低通球位再算目标**，
    * 输入连续，输出就不可能瞬移。
    */
-  _updateOfficials(soft = false) {
+  _updateOfficials(soft = false, simDt = null, sceneCut = false) {
     const o = this.officials;
     if (!o) return;
     const bx = this.ball?.x ?? 50;
@@ -2949,19 +2957,35 @@ export class MatchView {
     // 系数按 `_referee-motion-probe.mjs` 的档位曲线取 C 档（详见 MAX_OFFICIAL_STEP_M）：
     // 低通越强，路径越短、均速越低，代价是离球更远（实测距球中位 11.07 → 12.99m，
     // 而真实主裁离球 15~20m，所以这个方向本身也更真实）。
+    if (sceneCut) this._playCentre = null;
     const play = (this._playCentre ??= { x: bx, y: by });
+    // The movement constants are calibrated per 0.1s simulation tick, but
+    // interpolation calls this method once per rendered frame. Scale both the
+    // low-pass response and walking distance by simulation time so a 60fps
+    // render loop cannot make the referee sprint tens of metres per second.
+    const tickScale = Number.isFinite(simDt)
+      ? clamp(simDt / 0.1, 0, 3)
+      : 1;
     const track = this._isBallInFlight() ? 0.012 : soft ? 0.035 : 0.058;
-    play.x += (bx - play.x) * track;
-    play.y += (by - play.y) * track;
+    const trackNow = 1 - Math.pow(1 - track, tickScale);
+    play.x += (bx - play.x) * trackNow;
+    play.y += (by - play.y) * trackNow;
 
     // 恒速追击：本帧朝目标走 stepM 米，走不到就停在半路。
     // 刻意**不用** `residual * k` —— 那会让速度跟着残差走，残差又跟着球走。
     const moveTo = (m, tx, ty, stepM) => {
+      // A skipped interval cuts the entire scene; officials join the new scene
+      // at the same instant instead of running across the previous one.
+      if (sceneCut) {
+        m.x = clamp(tx, 1, 99);
+        m.y = clamp(ty, 1, 99);
+        return;
+      }
       const dx = clamp(tx, 1, 99) - m.x;
       const dy = clamp(ty, 1, 99) - m.y;
       const dM = Math.hypot(dx * OFFICIAL_MX, dy * OFFICIAL_MY);
       if (dM < 1e-4) return;
-      const s = Math.min(1, stepM / dM);
+      const s = Math.min(1, (stepM * tickScale) / dM);
       m.x += dx * s;
       m.y += dy * s;
     };
@@ -3711,7 +3735,7 @@ export class MatchView {
         this._applyPlayer(pl);
       }
       this._applyBall();
-      this._updateOfficials(true);
+      this._updateOfficials(true, dt / 1000, fr === frames[0] || dt > 550);
       this._updatePossessionChrome();
       this._drawCanvas();
       await sleepFn(Math.max(16, (dt || 50) / speed));
@@ -7019,16 +7043,31 @@ export class MatchView {
   captureSceneSnapshot() {
     if (!this._built) return null;
     return {
-      ball: { x: this.ball.x, y: this.ball.y },
+      ball: { x: this.ball.x, y: this.ball.y, z: this.ball.z || 0 },
+      ballState: this.ballState,
+      ballTrail: (this._ballTrail || []).map((point) => ({ ...point })),
+      ballTrailPhase: this._simBallTrailPhase,
       possession: this.possession,
       carrierId: this.carrier?.id || null,
       lastCarrierId: this.lastCarrierId || null,
+      officials: this.officials
+        ? Object.fromEntries(Object.entries(this.officials).map(([role, official]) => [
+            role, { x: official.x, y: official.y },
+          ]))
+        : null,
+      playCentre: this._playCentre ? { ...this._playCentre } : null,
+      officialsSimT: this._officialsSimT,
+      relocLastSimT: this._relocLastSimT,
+      lastDeflectionKey: this._lastDeflectionKey,
       players: this.players.map((p) => ({
         id: p.id,
         x: p.x,
         y: p.y,
         tx: p.tx,
         ty: p.ty,
+        heading: p.heading,
+        vx: p.vx,
+        vy: p.vy,
       })),
     };
   }
@@ -7047,24 +7086,44 @@ export class MatchView {
       pl.y = s.y;
       pl.tx = s.tx ?? s.x;
       pl.ty = s.ty ?? s.y;
+      pl.heading = s.heading ?? pl.heading;
+      pl.vx = s.vx || 0;
+      pl.vy = s.vy || 0;
+      pl._relocAt = 0;
+      pl.el.classList.toggle("has-ball", pl.id === snap.carrierId);
       this._applyPlayer(pl);
     }
     if (snap.ball) {
       this.ball.x = snap.ball.x;
       this.ball.y = snap.ball.y;
+      this.ball.z = snap.ball.z || 0;
       this.ball.tx = snap.ball.x;
       this.ball.ty = snap.ball.y;
     }
     this.flight = null;
     this.ballFlightUntil = 0;
-    this.ballState = "free";
+    this.ballState = snap.ballState || (snap.carrierId ? "held" : "free");
+    this.ball._relocAt = 0;
+    this._ballTrail = (snap.ballTrail || []).map((point) => ({ ...point }));
+    this._simBallTrailPhase = snap.ballTrailPhase || null;
+    this._ballBounceFlash = 0;
     if (snap.possession) this.possession = snap.possession;
     this.lastCarrierId = snap.lastCarrierId || null;
-    this._clearCarrier();
-    if (snap.carrierId) {
-      const car = this.players.find((p) => p.id === snap.carrierId);
-      if (car) this._setCarrier(car, { stick: true });
+    // Restoring a frame must neither reposition the ball nor record a new touch.
+    this.carrier = this.players.find((p) => p.id === snap.carrierId) || null;
+    this._playCentre = snap.playCentre ? { ...snap.playCentre } : null;
+    this._officialsSimT = snap.officialsSimT ?? null;
+    this._relocLastSimT = snap.relocLastSimT ?? null;
+    this._lastDeflectionKey = snap.lastDeflectionKey ?? null;
+    for (const [role, official] of Object.entries(this.officials || {})) {
+      const position = snap.officials?.[role];
+      if (position) {
+        official.x = position.x;
+        official.y = position.y;
+      }
     }
+    this._applyOfficials();
+    this._updatePossessionChrome();
     this._applyBall();
     return true;
   }
