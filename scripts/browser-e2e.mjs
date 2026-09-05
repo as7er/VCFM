@@ -637,9 +637,11 @@ try {
     await dialog[urgentInbox ? "dismiss" : "accept"]();
   });
   await page.goto(baseUrl, { waitUntil: "networkidle" });
+  // SW 重载哨兵按前缀匹配（index.html 的键名带缓存版本号，写死会随升版过期——
+  // v235 时代留下的硬编码让本脚本在全新 headless 档上必然超时）。
   await page.waitForFunction(() => (
     !("serviceWorker" in navigator)
-    || sessionStorage.getItem("vcfm-sw-reloaded-v235") === "1"
+    || Object.keys(sessionStorage).some((k) => k.startsWith("vcfm-sw-reloaded-"))
   ));
   await page.waitForLoadState("networkidle");
   await page.waitForFunction(() => !!window.vcfmMainApi);
@@ -737,13 +739,16 @@ try {
     false,
     `match dock must not cover the commentary toggle (dock ${toggleOverlap.dockBottom}, body ${toggleOverlap.bodyBottom})`
   );
-  assert.equal(await isCollapsed(), true, "commentary must start collapsed");
+  // 1b26120 有意把解说栏初始态从折叠翻成展开（class/aria/图标一起翻转），
+  // 本断言没跟着改，且 SW 哨兵超时把脚本挡在更早处，从未暴露。按产品现状对齐：
+  // 初始展开 → 点一下折叠 → 再点展开。
+  assert.equal(await isCollapsed(), false, "commentary must start expanded (1b26120 flipped the default)");
   await commentaryToggle.click();
-  assert.equal(await isCollapsed(), false, "commentary must expand on toggle");
-  assert.equal(await commentaryToggle.getAttribute("aria-expanded"), "true", "expanded commentary must announce itself");
-  await commentaryToggle.click();
-  assert.equal(await isCollapsed(), true, "commentary must collapse again");
+  assert.equal(await isCollapsed(), true, "commentary must collapse on toggle");
   assert.equal(await commentaryToggle.getAttribute("aria-expanded"), "false", "collapsed commentary must announce itself");
+  await commentaryToggle.click();
+  assert.equal(await isCollapsed(), false, "commentary must expand again");
+  assert.equal(await commentaryToggle.getAttribute("aria-expanded"), "true", "expanded commentary must announce itself");
 
   // 替补席是五列网格，空的一侧必须留住自己的列；display:none 会让后面的元素
   // 前移一列，把分隔线挤进替补席的位置。
