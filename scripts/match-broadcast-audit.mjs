@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   CAMERA_PRESET_IDS,
+  CAMERA_WIDTH_FRAC,
+  GRASS_MARGIN,
   cameraFraming,
   crowdAtmosphere,
   normalizeCameraPreset,
@@ -24,9 +26,19 @@ for (const preset of ["full", "tactical"]) {
 }
 const tvWide = cameraFraming({ preset: "tv", ball: { x: 50, y: 50 }, mode: "follow" });
 const tvBox = cameraFraming({ preset: "tv", ball: { x: 82, y: 8 }, mode: "box", boosted: true });
-assert.ok(tvWide.scale > 1 && tvWide.scale < 1.04, "TV camera should keep restrained midfield framing");
+// 2026-09-05（表现层 A2）：TV 档改为广播式跟镜——scale 1.28~1.5，位移/钳制按真实
+// CSS 几何参数化（origin 中心 + 相机内缩 5.5%），推导见
+// scripts/_camera-framing-geometry-probe.mjs。旧断言（scale<1.04、|pan|≤2.4/2.8）
+// 是按旧 scale≈1.03 手调的，随设计换代一并更新。
+assert.ok(tvWide.scale > 1.2 && tvWide.scale < 1.4, "TV camera must zoom to broadcast framing instead of the global view");
+assert.ok(tvWide.x === 0 && tvWide.y === 0, "ball at midfield must sit dead-centre");
 assert.ok(tvBox.scale > tvWide.scale, "TV camera should push in for box action");
-assert.ok(Math.abs(tvBox.x) <= 2.4 && Math.abs(tvBox.y) <= 2.8, "TV pan must remain bounded");
+// 平移界限 = 窗口 ⊆ 草皮 [-2,102] 的几何解：|t| ≤ 52s − 50/0.89（横）、52s − 50（纵）。
+const spanH = (50 + GRASS_MARGIN) * tvBox.scale - 50 / CAMERA_WIDTH_FRAC;
+const spanV = (50 + GRASS_MARGIN) * tvBox.scale - 50;
+assert.ok(Math.abs(tvBox.x) <= spanH + 1e-9 && Math.abs(tvBox.y) <= spanV + 1e-9, "TV pan must stay inside the grass-edge span");
+const tvLeft = cameraFraming({ preset: "tv", ball: { x: 0, y: 50 }, mode: "follow" });
+assert.ok(tvLeft.x > 0, "a ball on the left touchline must pan the camera, not be read as centre (falsy-zero regression)");
 
 assert.equal(visualCuePolicy({ preset: "tactical" }).drawStructure, true);
 assert.equal(visualCuePolicy({ preset: "full" }).drawStructure, false);
@@ -75,4 +87,4 @@ for (const preset of CAMERA_PRESET_IDS) {
   assert.ok(indexSource.includes(`data-match-camera="${preset}"`), `missing ${preset} camera control`);
 }
 
-console.log("Match broadcast audit passed: fixed full/tactical cameras, restrained TV framing, live tactical lines and context-driven crowd audio");
+console.log("Match broadcast audit passed: fixed full/tactical cameras, broadcast TV follow framing, live tactical lines and context-driven crowd audio");
