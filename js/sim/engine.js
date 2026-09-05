@@ -381,6 +381,29 @@ function slotToPitch(slot, isHome) {
   return { x, y };
 }
 
+/**
+ * 死球/庆祝/点球等待期 = 画面不连续窗口（重启搬迁、庆祝聚拢都发生在窗内）。
+ * snapshot() 与 adapt 的 compactSimFrame 必须共用同一语义：表现层靠它豁免
+ * 重启单 tick 搬位的瞬移告警、缓动期间的显示偏离告警（match-motion-integrity
+ * 的 isMotionBoundary / _analyzeDisplay），缺了它直播帧流会把每次角球/门球
+ * 布阵当成 20+ 人集体瞬移上报。
+ */
+export function motionContextOf(eng) {
+  const deadBall = !!(eng.deadBallUntil && eng.t <= eng.deadBallUntil + 1e-6);
+  const celebrating = !!(eng.celebrateUntil && eng.t <= eng.celebrateUntil + 1e-6);
+  return {
+    discontinuity: !!(deadBall || celebrating || eng.pendingPenalty),
+    reason: eng.pendingPenalty
+      ? "penalty"
+      : celebrating
+        ? "celebration"
+        : deadBall
+          ? "dead-ball"
+          : null,
+    restartType: eng.ball?.restartType || null,
+  };
+}
+
 // ————————————————————————————————————————————————————————————
 // SimEngine
 // ————————————————————————————————————————————————————————————
@@ -7364,21 +7387,7 @@ export class SimEngine {
         controlUntil: this.ball.controlUntil || 0,
         shotAt: Number.isFinite(this.ball.shotAt) ? this.ball.shotAt : null,
       },
-      motionContext: {
-        discontinuity: !!(
-          (this.deadBallUntil && this.t <= this.deadBallUntil + 1e-6) ||
-          (this.celebrateUntil && this.t <= this.celebrateUntil + 1e-6) ||
-          this.pendingPenalty
-        ),
-        reason: this.pendingPenalty
-          ? "penalty"
-          : this.celebrateUntil && this.t <= this.celebrateUntil + 1e-6
-            ? "celebration"
-            : this.deadBallUntil && this.t <= this.deadBallUntil + 1e-6
-              ? "dead-ball"
-              : null,
-        restartType: this.ball.restartType || null,
-      },
+      motionContext: motionContextOf(this),
       edgeRules: {
         advantage: this._advantage
           ? {

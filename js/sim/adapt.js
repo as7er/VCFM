@@ -4,7 +4,7 @@
  * 所有显式请求空间引擎的场次：空间模拟跑完全时段 → directResult 读取真实事件 →
  * 翻译成现有 {minute,type,text,playerId,...} 事件，继续走报告/评分/积分。
  */
-import { SimEngine, SIM } from "./engine.js";
+import { SimEngine, SIM, motionContextOf } from "./engine.js";
 import { simMinuteOf } from "../match-presentation.js";
 import {
   getLineupPlayers,
@@ -354,6 +354,11 @@ export function compactSimFrame(eng) {
       : null;
   return {
     t: eng.t,
+    // 与 snapshot() 同源的不连续窗口标记：直播帧流（高光插值播放）靠它区分
+    // 「重启单 tick 搬位」与真实瞬移——监视器豁免 + 表现层缓动都认这个字段。
+    // 以前只有 snapshot() 带，compactSimFrame 丢掉后一次角球布阵能刷 20+ 条
+    // player-teleport 事故（.tmp-video/live 2635.64s 实测）。
+    motionContext: motionContextOf(eng),
     ball: {
       x: b.x,
       y: b.y,
@@ -361,6 +366,7 @@ export function compactSimFrame(eng) {
       z: Number.isFinite(b.z) ? b.z : 0,
       owner: b.owner,
       state: b.state || null,
+      restartType: b.restartType || null,
       netHit,
       deflect,
       setPiece:
