@@ -91,6 +91,50 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const METRES_X = SIM.PITCH_W_METRES / SIM.FIELD_W;
 const METRES_Y = SIM.PITCH_H_METRES / SIM.FIELD_H;
 
+// —— 目标纵深分布指标（2026-09-05：bug#1 的验收主指标，近静止% 降为次要）——
+// 近静止% 已被证明对跑位杠杆几乎不响应（releasePass+wingRotate 只动 2pp），而且
+// 「到位即停」本身是正常足球——病的是「位」：目标点全在球后、没有纵深。验收要读的是
+// 「有没有人把目标点放进球前/防线身后的空间」。三个公式抽成纯函数，采样与启动自检
+// 共用同一份实现，杜绝两处漂移。
+// 符号约定与引擎一致：attackDir(home) = -1（攻向 y=0）、away = +1（攻向 y=100）。
+// ⚠ 草案曾把列 1/2 写成 (b.y - a.ty)*dir / (lineY - a.ty)*dir——那是反的（home 球
+//   y=30、好目标 y=25 会被判 -5.25m）。正确形式是「目标减参照」再乘 dir。
+/** 目标领先球多少米（正=朝对方门推进；home 前插目标 y 比球小，负×负=正） */
+function targetAheadM(ty, ballY, dir) {
+  return (ty - ballY) * dir * METRES_Y;
+}
+/** 目标是否越过越位线（在越位线的对方球门一侧） */
+function targetBeyondLine(ty, lineY, dir) {
+  return (ty - lineY) * dir > 0;
+}
+/** 进攻者实际位置到越位线的签名距离（正=己方侧/线前，负=已越线） */
+function distToLineM(y, lineY, dir) {
+  return (lineY - y) * dir * METRES_Y;
+}
+
+// —— 符号自检：启动即验，错了一个直接退出，不许带病采样 ——
+{
+  const assertNear = (got, want, what) => {
+    if (Math.abs(got - want) > 1e-6) {
+      console.error(`❌ 符号自检失败：${what} 期望 ${want} 实测 ${got}`);
+      process.exit(1);
+    }
+  };
+  // home（dir=-1）球 y=30：前插目标 y=25 → +5.25m；回传目标 y=35 → -5.25m
+  assertNear(targetAheadM(25, 30, -1), 5 * METRES_Y, "home 前插目标领先球");
+  assertNear(targetAheadM(35, 30, -1), -5 * METRES_Y, "home 回传目标领先球");
+  // away（dir=+1）球 y=70：前插目标 y=75 → +5.25m
+  assertNear(targetAheadM(75, 70, 1), 5 * METRES_Y, "away 前插目标领先球");
+  // 越线：home 线 y=15，目标 y=10 在对方门侧 → 越过；y=20 → 未越过；away 对称
+  if (!targetBeyondLine(10, 15, -1)) { console.error("❌ 符号自检失败：home 越线应为真"); process.exit(1); }
+  if (targetBeyondLine(20, 15, -1)) { console.error("❌ 符号自检失败：home 未越线应为假"); process.exit(1); }
+  if (!targetBeyondLine(85, 80, 1)) { console.error("❌ 符号自检失败：away 越线应为真"); process.exit(1); }
+  // 距线：home 线 y=15，人 y=20（己方侧）→ +5.25m；y=10（已越线）→ -5.25m
+  assertNear(distToLineM(20, 15, -1), 5 * METRES_Y, "home 己方侧距线");
+  assertNear(distToLineM(10, 15, -1), -5 * METRES_Y, "home 已越线距线");
+  console.log("[自检] 目标纵深三列符号 ✅（home/away 双向、越线/未越线、前插/回传）");
+}
+
 // —— 真实参照值与现有护栏（AGENTS.md 真实参照总表 / match-realism-audit.mjs:362-370 /
 //    box-possession-sampling-audit.mjs:397）——
 const REAL = { offsideBand: [1.4, 2.1], offsideTarget: 1.7, shots: [11.9, 13.8], boxTouches: 26.1, through: 3.38 };
@@ -226,6 +270,9 @@ function runMatch(seed) {
       // 诊断（2026-09-05）：把「近静止」切成「已到位（该静止）」vs「离目标≥2m 却不动（真病）」，
       // 并记录真病样本处于什么 fsm，一锤定音病根在决策层还是移动层。
       staticArrived: 0, staticStranded: 0, strandedFsm: {},
+      // 目标纵深分布（验收主指标）：领先≥5m 占比、领先中位、越过越位线占比、距线中位。
+      // 数组用完即弃（sweep 聚合后），只在这一场内累积。
+      ahead5: 0, beyondCnt: 0, lineSamples: 0, aheadArr: [], distLineArr: [],
     };
     for (let s = 0; s < steps; s++) {
       eng.step(SIM.DT);
@@ -260,6 +307,10 @@ function runMatch(seed) {
         if (attTeam === "home" || attTeam === "away") {
           const ownGoalY = attTeam === "home" ? SIM.HOME_GOAL_Y : SIM.AWAY_GOAL_Y;
           if (Math.abs(b.y - ownGoalY) / 100 > 0.64) {
+            // dir/越位线每 tick 算一次（防守方不足 2 人时 _offsideLineY 返回 null，跳过线指标）
+            const dir = attTeam === "home" ? -1 : 1;
+            const lineY = eng._offsideLineY(attTeam);
+            const hasLine = Number.isFinite(lineY);
             for (const a of eng.agents) {
               if (a.team !== attTeam || a.sentOff || a.role === "GK") continue;
               if (owner && a.id === owner.id) continue; // 持球人的慢是带球，不算跑位
@@ -278,6 +329,15 @@ function runMatch(seed) {
                 }
               }
               t.targetDistSum += targetDist;
+              // —— 目标纵深分布（验收主指标）——
+              const aheadM = targetAheadM(a.ty, b.y, dir);
+              t.aheadArr.push(aheadM);
+              if (aheadM >= 5) t.ahead5++;
+              if (hasLine) {
+                t.lineSamples++;
+                if (targetBeyondLine(a.ty, lineY, dir)) t.beyondCnt++;
+                t.distLineArr.push(distToLineM(a.y, lineY, dir));
+              }
             }
           }
         }
@@ -313,6 +373,12 @@ const LEVELS = [
   { label: "releasePass + wingRotate", set: { release: 8, releaseMode: "pass", wingRotate: true } },
 ];
 
+function median(arr) {
+  if (!arr.length) return null;
+  const s = [...arr].sort((p, q) => p - q);
+  return Number(s[Math.floor(s.length / 2)].toFixed(2));
+}
+
 function sweep(level) {
   V.wingRotate = !!level.set.wingRotate;
   V.midLate = !!level.set.midLate;
@@ -324,14 +390,20 @@ function sweep(level) {
     corners: 0, boxTouches: 0, boxSeconds: 0, finalThirdSeconds: 0,
     offBallSamples: 0, nearStatic: 0, speedSum: 0, targetDistSum: 0,
     staticArrived: 0, staticStranded: 0,
+    ahead5: 0, beyondCnt: 0, lineSamples: 0,
   };
   const strandedFsm = {};
+  const aheadArr = [];
+  const distLineArr = [];
   const scores = [];
   for (const seed of seeds) {
     const r = runMatch(seed);
     scores.push(r.score);
     for (const k of Object.keys(agg)) agg[k] += r[k];
     for (const [k, v] of Object.entries(r.strandedFsm || {})) strandedFsm[k] = (strandedFsm[k] || 0) + v;
+    // 数组不能 push(...r.x) 展开——几十万元素会爆调用栈
+    for (const v of r.aheadArr) aheadArr.push(v);
+    for (const v of r.distLineArr) distLineArr.push(v);
   }
   V.wingRotate = V.midLate = false;
   V.release = 0;
@@ -355,6 +427,10 @@ function sweep(level) {
     近静止占比: share(agg.nearStatic, agg.offBallSamples),
     "静止-已到位%": share(agg.staticArrived, agg.offBallSamples),
     "静止-该跑没跑%": share(agg.staticStranded, agg.offBallSamples),
+    "目标领先球≥5m%": share(agg.ahead5, agg.offBallSamples),
+    "目标领先球中位m": median(aheadArr),
+    "目标越过线%": share(agg.beyondCnt, agg.lineSamples),
+    "距防线中位m": median(distLineArr),
     strandedFsm,
     均速: Number((agg.speedSum / Math.max(1, agg.offBallSamples)).toFixed(2)),
     目标距离m: Number((agg.targetDistSum / Math.max(1, agg.offBallSamples)).toFixed(2)),
@@ -431,6 +507,17 @@ for (const r of rows) {
   );
 }
 
+console.log("\n[2c] 🎯 目标纵深分布（bug#1 验收主指标：眼见的「不跑」= 目标分布没纵深）：");
+for (const r of rows) {
+  console.log(
+    `  ${r.label.padEnd(24)} ` +
+      `领先≥5m ${String(r["目标领先球≥5m%"]).padStart(5)}%  ` +
+      `领先中位 ${String(r["目标领先球中位m"]).padStart(6)}m  ` +
+      `越过线 ${String(r["目标越过线%"]).padStart(5)}%  ` +
+      `距防线中位 ${String(r["距防线中位m"]).padStart(6)}m`
+  );
+}
+
 console.log("\n[3] 真实参照与护栏：");
 console.log({
   "越位 目标/带（每队每场）": `${REAL.offsideTarget}（${REAL.offsideBand.join("~")}）`,
@@ -446,7 +533,10 @@ console.log({
 console.log("\n[4] 读法：");
 console.log(
   [
-    "· 想看到的方向：boxSeconds / 禁区触球下降、直塞上升、近静止占比下降，而进球留在 2.5~3.3。",
+    "· 验收主指标 = [2c] 的目标纵深分布（领先≥5m 占比 / 领先中位 / 越过线占比 / 距防线中位）；",
+    "  近静止% 只作次要参考——它对跑位杠杆几乎不响应（releasePass+wingRotate 只动 2pp），",
+    "  且「到位即停」本身正常，病在「位」没有纵深。",
+    "· 想看到的方向：boxSeconds / 禁区触球下降、直塞上升、[2c] 纵深三列上移，而进球留在 2.5~3.3。",
     "· 只要某档把进球顶出 3.3 或压到 2.5 以下，就重演了留档五/留档二那两种失败，别硬上。",
     "· `depthRelease` 预期会推高越位（现状已是 4.56、真实 1.7）。它不是独立可采用项——",
     "  要与 v241 标定好的 `peelB`+`hardA` 成对，那一对备着 4.54 → 2.04 的下调预算。",
