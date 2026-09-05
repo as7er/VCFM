@@ -1516,9 +1516,12 @@ html[data-theme="light"] #screen-match {
   overscroll-behavior: contain;
   margin-inline: auto;
 }
-/* FMM 竖栈：计分 → 球场 → 事件 → 底栏 */
+/* FMM 竖栈：计分 → 球场 → 事件 → 底栏
+   2026-09-05（表现层 A1）：480px 是手机竖栈的宽度，桌面上球场只占屏宽 33%、
+   两侧全是黑边。放宽到 640px——窄屏 (<640px) 仍取 100% 不受影响，
+   手机布局零变化。 */
 .match-layout.fm-match.fmm-match {
-  width: min(480px, 100%);
+  width: min(640px, 100%);
 }
 
 /* Broadcast / FMM compact scoreboard */
@@ -2391,6 +2394,11 @@ html[data-theme="light"] .mp-boards {
   position: relative;
   width: 100%;
   aspect-ratio: 68 / 105;
+  /* 2026-09-05（表现层 A1 收尾）：这条 max-height 在唯一比赛屏上从未生效——
+     index.html 的 match-layout 恒带 fmm-match，而 `.fmm-match .mp-field`（下文）
+     以更高特异性设 max-height:none。实测比赛屏球场高由 flex 给（1440×1000 下
+     ≈957px），56vh/560px 从未钳住过它；A1 曾把它调到 76vh/760px 属死代码，回退。
+     真正起作用的 A1 杠杆是下面 .match-layout 的列宽 480→640。 */
   max-height: min(56vh, 560px);
   margin: 0 auto;
   overflow: hidden;

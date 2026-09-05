@@ -221,6 +221,7 @@ export class MatchView {
     this.onPlayerClick = null;
     // 镜头：目标与当前（百分比偏移 → CSS translate）
     this.cam = { x: 0, y: 0, tx: 0, ty: 0, scale: 1, tScale: 1 };
+    this._everPlayed = false; // A2 收尾：死球镜头策略在开赛/开赛前分叉（见 _updateCameraTarget）
     this.camBoostUntil = 0;
     this.trails = []; // active trail animations
     this.heatLayer = null;
@@ -1476,6 +1477,7 @@ export class MatchView {
     this._spawnOfficials(actors);
 
     this.cam = { x: 0, y: 0, tx: 0, ty: 0, scale: 1, tScale: 1 };
+    this._everPlayed = false; // A2 收尾：死球镜头策略在开赛/开赛前分叉（见 _updateCameraTarget）
     this.setCameraPreset(this.cameraPreset, { persist: false });
     this._applyCamera();
     this._updatePossessionChrome();
@@ -3332,7 +3334,9 @@ export class MatchView {
       const x = px(pl.x);
       const y = py(pl.y);
       // 与模拟层 2.85~3.35 的中心间距匹配；旧半径 9px 会让直径大于碰撞距离。
-      const r = clamp(minDim * 0.026, 7, 10);
+      // 2026-09-05（A1）：上限 10→12——列放宽到 640px 后 minDim 变大，12px 半径
+      // 与纵向分离距离的比例和旧 10px/480px 列一致（≈0.65），大屏上球员更可读。
+      const r = clamp(minDim * 0.026, 7, 12);
       const spd = Math.hypot(pl.vx || 0, pl.vy || 0);
       const dim =
         focusOn && !this.focusIds.has(pl.id) && !pl.el.classList.contains("has-ball");
@@ -5448,9 +5452,14 @@ export class MatchView {
    */
   _updateCameraTarget() {
     if (!this.fsm.canAIAct()) {
-      this.cam.tScale = 1;
-      this.cam.tx = 0;
-      this.cam.ty = 0;
+      // 2026-09-05（A2 收尾）：开赛后死球/重启不再回全球场——旧档 scale≈1.03 时
+      // 回中不可察觉，A2 的广播档 1.28 下每次重启都会 zoom 泵 1.28→1.0→1.28。
+      // 球已摆好，镜头原地歇（保持上一目标）。开赛前仍回全球场看阵型。
+      if (!this._everPlayed) {
+        this.cam.tScale = 1;
+        this.cam.tx = 0;
+        this.cam.ty = 0;
+      }
       return;
     }
     // 收尾阶段强制回 wide
@@ -5964,6 +5973,7 @@ export class MatchView {
     // 防止切后台后 dt 爆炸
     const d = Math.min(dt, 0.05);
     const livePlay = this.fsm.canAIAct();
+    if (livePlay) this._everPlayed = true; // 开赛过的标记：死球镜头策略的分叉条件
     const staged = this.fsm.isIn('GOAL_SEQUENCE') && !this.frozen; // 进球/回放：只跟目标
     // scriptLock：关键事件预演，只朝脚本目标跑，不跑自由 AI
     // pre / idle / pause：钉阵型；UI frozen：冻结当前帧

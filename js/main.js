@@ -57,8 +57,8 @@ import {
   habitLabel,
   startHabitTraining,
 } from "./player-habits.js";
-import { nationFlagHtml } from "./flags.js?v=244";
-import { clubCrestHtml } from "./club-crest.js?v=244";
+import { nationFlagHtml } from "./flags.js?v=245";
+import { clubCrestHtml } from "./club-crest.js?v=245";
 import { applyWorldClubBranding, localizedClubName } from "./branding.js";
 import { recordFinanceEntry } from "./finance-ledger.js";
 import { renderFinance as renderFinanceView } from "./ui/finance.js";
@@ -323,7 +323,7 @@ import {
   selectPlannedSaleCandidate,
   squadPlayerPlan,
   squadPositionPlan,
-} from "./squad-planning.js?v=244";
+} from "./squad-planning.js?v=245";
 import {
   TRAINING_MODES,
   ensureTrainingBoost,
@@ -390,7 +390,7 @@ import {
   staffAvatarHtml,
   avatarHtml,
   hydrateAvatarKitRecolor,
-} from "./avatar.js?v=244";
+} from "./avatar.js?v=245";
 import { attributeArchetypeLabel } from "./player-attributes.js";
 import {
   MANAGER_ONBOARDING_TAB_STEPS,
@@ -490,7 +490,7 @@ let matchViewModulePromise = null;
 
 function loadMatchViewModule() {
   if (!matchViewModulePromise) {
-    matchViewModulePromise = import("./matchview.js?v=244").then((module) => {
+    matchViewModulePromise = import("./matchview.js?v=245").then((module) => {
       matchViewApi = module;
       return module;
     });
@@ -9280,16 +9280,19 @@ function handleSimLiveEvent(ev, snap) {
     }
     matchView.onEvent(ev, snap, fixture);
     const holdMap = {
-      save: 1100,
-      chance: 850,
-      woodwork: 950,
-      corner: 2200,
+      // 2026-09-05（表现层 A3）：事件定格整体收紧——实测快速高光 61% 墙钟时间画面
+      // 无人移动，定格是主要成分之一。文案可读性由 KEY_EVENT_MS（底栏）保证，
+      // 与画面定格解耦，压这里不伤读稿。
+      save: 800,
+      chance: 600,
+      woodwork: 700,
+      corner: 1300,
       card: 800,
       red: 1100,
       injury: 900,
       coach: 400,
       context: 350,
-      offside: 900,
+      offside: 600,
       // 点球：镜头停到主罚为止，让站位和助跑真的被看见。
       penalty: PENALTY_SETUP_SEC * 1000,
     };
