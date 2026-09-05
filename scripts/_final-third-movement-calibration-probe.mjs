@@ -151,7 +151,11 @@ const ORIG = {
 };
 
 /** 当前档位开关 */
-const V = { wingRotate: false, midLate: false, release: 0, releaseMode: "always" };
+const V = {
+  wingRotate: false, midLate: false, release: 0, releaseMode: "always", runBehind: 0,
+  // wingRotate 三个深度（后点/前点/中路，单位=距门线）；null=用引擎已落地的 7/13/16
+  wingDepths: null,
+};
 
 /**
  * 分支归属：与 `_offball-target-branch-probe.mjs` 的分类器逐字相同，
@@ -168,12 +172,12 @@ function branchKeyOf(eng, a, ownerOk, prog, fsm, kind) {
 }
 
 /** 覆写计数（每个档位重置），用来确认档位真的作用到了预期的样本量上 */
-let applied = { wingRotate: 0, midLate: 0, depthRelease: 0 };
+let applied = { wingRotate: 0, midLate: 0, depthRelease: 0, runBehind: 0 };
 
 SimEngine.prototype._thinkAttackOffBall = function _thinkProbe(a, owner) {
   const ownerOk = !!(owner && owner.team === a.team && owner !== a);
   ORIG.think.call(this, a, owner);
-  if (!V.wingRotate && !V.midLate) return;
+  if (!V.wingRotate && !V.midLate && !V.runBehind) return;
   const dir = this.attackDir(a.team);
   const goalY = this.targetGoalY(a.team);
   const ownGoalY = a.team === "home" ? SIM.HOME_GOAL_Y : SIM.AWAY_GOAL_Y;
@@ -186,18 +190,19 @@ SimEngine.prototype._thinkAttackOffBall = function _thinkProbe(a, owner) {
   if (V.wingRotate && key === "wing-home") {
     // 边侧取**阵型侧**而不是 `_wingSide` 的当前 x：后者会在球员越过中线时翻面，
     // 造成目标点来回跳，量出来的位移会是伪影。
+    const dep = V.wingDepths || { back: 7, near: 13, mid: 16 };
     const side = a.baseX < 50 ? -1 : 1;
     const ballOffset = this.ball.x - 50;
     const wide = Math.abs(ballOffset) > 8;
     if (wide && Math.sign(ballOffset) === -side) {
       a.tx = clamp(50 + side * 7, 8, 92);   // 球在对侧 → 抢后点
-      a.ty = fromGoal(7);
+      a.ty = fromGoal(dep.back);
     } else if (wide) {
       a.tx = clamp(50 + side * 13, 6, 94);  // 球在本侧 → 前点/底线接应
-      a.ty = fromGoal(13);
+      a.ty = fromGoal(dep.near);
     } else {
       a.tx = clamp(50 + side * 26, 5, 95);  // 球在中路 → 拉开宽度
-      a.ty = fromGoal(16);
+      a.ty = fromGoal(dep.mid);
     }
     applied.wingRotate++;
     return;
@@ -214,6 +219,24 @@ SimEngine.prototype._thinkAttackOffBall = function _thinkProbe(a, owner) {
     const ballFromGoal = Math.abs(this.ball.y - goalY);
     a.ty = fromGoal(Math.max(17 + rank * 6, ballFromGoal + 6 + rank * 5));
     applied.midLate++; // 只改纵深，tx 保持引擎原值
+    return;
+  }
+
+  // —— 跑位时间差（bug#1 轨道2 原语）：只给「当前在线后」的跑动者放纵深 ——
+  // Law 11 判的是**出脚瞬间**的位置：起跑在线后、球到时前插到位，是合法的反越位。
+  // 已越线者刻意不放——不许常驻防线身后（release8 常开=越位 58 的反例）。
+  // 出脚瞬间的越位判定照旧由 `_pass` 的快照 + `okOffside ±2` 容差负责：
+  // 起跑失误（_clampOffside 的 mistimeChance）造成的越位才是真实 1.7 的来源机制。
+  if (V.runBehind && (a.role === "ATT" || this._isPrimaryMidRunner(a))) {
+    const lineY = this._offsideLineY(a.team);
+    if (Number.isFinite(lineY)) {
+      // ownSide：实际位置在越位线己方侧（容差 0.5 单位 ≈ 0.5m，贴线起跑算合法）
+      const ownSide = (lineY - a.y) * dir > -0.5;
+      if (ownSide) {
+        a.ty = clamp(lineY + dir * V.runBehind, 3, 97); // 目标=线后 R 单位；tx 保持引擎原值
+        applied.runBehind++;
+      }
+    }
   }
 };
 
@@ -371,6 +394,14 @@ const LEVELS = [
   { label: "release8 常开（复现）", set: { release: 8 } },
   { label: "releasePass 只在传球飞行中", set: { release: 8, releaseMode: "pass" } },
   { label: "releasePass + wingRotate", set: { release: 8, releaseMode: "pass", wingRotate: true } },
+  // 轨道 2（跑位时间差）：落地 wingRotate 后的引擎上再标定纵深档
+  { label: "runBehind4 线后4单位", set: { runBehind: 4 } },
+  { label: "runBehind8 线后8单位", set: { runBehind: 8 } },
+  // wingRotate 深度重标定：落地版 7/13/16 把边锋常驻进了禁区（点球 0.58 破上限、
+  // 未标记近距机会 62.3 破 58、crowdedPairs 2.67→4.17），试禁区边缘外的深度
+  { label: "wingD 11/15/16", set: { wingRotate: true, wingDepths: [11, 15, 16] } },
+  { label: "wingD 9/14/16", set: { wingRotate: true, wingDepths: [9, 14, 16] } },
+  { label: "wingD 12/16/17", set: { wingRotate: true, wingDepths: [12, 16, 17] } },
 ];
 
 function median(arr) {
@@ -384,7 +415,9 @@ function sweep(level) {
   V.midLate = !!level.set.midLate;
   V.release = Number(level.set.release) || 0;
   V.releaseMode = level.set.releaseMode || "always";
-  applied = { wingRotate: 0, midLate: 0, depthRelease: 0 };
+  V.runBehind = Number(level.set.runBehind) || 0;
+  V.wingDepths = Array.isArray(level.set.wingDepths) ? level.set.wingDepths : null;
+  applied = { wingRotate: 0, midLate: 0, depthRelease: 0, runBehind: 0 };
   const agg = {
     offsides: 0, passes: 0, crosses: 0, through: 0, shots: 0, goals: 0,
     corners: 0, boxTouches: 0, boxSeconds: 0, finalThirdSeconds: 0,
@@ -408,6 +441,8 @@ function sweep(level) {
   V.wingRotate = V.midLate = false;
   V.release = 0;
   V.releaseMode = "always";
+  V.runBehind = 0;
+  V.wingDepths = null;
   const per = (n) => Number((n / matches).toFixed(2));
   const perTeam = (n) => Number((n / matches / 2).toFixed(2));
   const share = (n, d) => Number(((n / Math.max(1, d)) * 100).toFixed(1));
@@ -455,10 +490,15 @@ console.log({ 未打包装: bare, control: control.scores.join(" "), 判定: fai
 if (!faithful) process.exit(1);
 
 console.log("\n[1] 🔑 标定曲线（★ = 越位落进 1.4~2.1，⚠ = 撞护栏）：");
+// 第二个 CLI 参数：逗号分隔的档位名子串过滤（如 "control,wingD"），空=全跑
+const only = (process.argv[3] || "").split(",").filter(Boolean);
 const rows = [];
 for (const level of LEVELS) {
+  if (only.length && !only.some((s) => level.label.includes(s))) continue;
   const r = level === LEVELS[0] ? control : sweep(level);
   rows.push({ label: level.label, ...r });
+  // 逐场比分：落地忠实性校验靠它（引擎内嵌版 control 必须 ≡ 探针包装档的逐场比分）
+  console.log(`  [比分] ${level.label}: ${r.scores.join(" ")}`);
   const inBand = r.越位 >= REAL.offsideBand[0] && r.越位 <= REAL.offsideBand[1];
   const warn = [];
   if (r.进球 < GATE.goals[0] || r.进球 > GATE.goals[1]) warn.push("进球");
@@ -488,7 +528,7 @@ for (const r of rows) {
       `目标距离 ${String(r.目标距离m).padStart(5)} m  ` +
       `最后三区 ${String(r.最后三区秒).padStart(7)}s  ` +
       `boxSec占比 ${String(r["boxSec占最后三区%"]).padStart(5)}%  ` +
-      `覆写 wing=${r.applied.wingRotate} mid=${r.applied.midLate} clamp=${r.applied.depthRelease}`
+      `覆写 wing=${r.applied.wingRotate} mid=${r.applied.midLate} clamp=${r.applied.depthRelease} run=${r.applied.runBehind}`
   );
 }
 
