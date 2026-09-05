@@ -12240,6 +12240,9 @@ if (typeof window !== "undefined") {
     showMatchReport,
     showMotionDiagnostic,
     closeMotionDiagnostic,
+    // 调试/审计口：浏览器探针(_watch-live 等)需要拿当前视图的运动片段与状态。
+    // 只读，不参与任何游戏逻辑。
+    get matchView() { return matchView; },
   };
 }
 

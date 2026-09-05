@@ -411,7 +411,14 @@ export class MatchView {
     // 门槛按实际帧间隔放大：跳过几帧时合法位移也成比例变大
     const dtScale = adjacent ? Math.max(1, (simT - lastSimT) / 0.1) : 1;
     const relocate = (entity, tx, ty, jumpLimit) => {
-      if (adjacent && Math.hypot(tx - entity.x, ty - entity.y) > jumpLimit * dtScale) {
+      // 只在「没有缓动在进行」时武装。武装检查在缓动读取之前，若不加这道闸，
+      // 只要目标与显示位置的距离仍超阈值，就会每次调用都重新武装（_relocFrom
+      // 重设为当前显示位、u 重置为 0），缓动一步都走不了——实测球员被冻在
+      // 原地几十秒、离引擎位置 38 m（display-divergence 刷屏的根因）。
+      if (
+        adjacent && !entity._relocAt &&
+        Math.hypot(tx - entity.x, ty - entity.y) > jumpLimit * dtScale
+      ) {
         entity._relocFromX = entity.x;
         entity._relocFromY = entity.y;
         entity._relocAt = nowMs;
@@ -623,8 +630,28 @@ export class MatchView {
     if (alpha >= 1) return this.applySimSnapshot(fb, { soft: true });
     const t = clamp(alpha, 0, 1);
     const byB = new Map(fb.players.map((p) => [p.id, p]));
+    // 重启搬迁（引擎 _restart 单 tick 把球+全员搬到定位球槽位）落在相邻录制帧上
+    // 就是 17-28 m 的位移。线性插值会把显示坐标在一个帧跨度内扫过整个缺口——
+    // 实测一次角球布阵刷出 20+ 条 218-351 m/s 的 player-teleport（2635.64s），
+    // 而且 applySimSnapshot 的 relocate() 只认「单次调用大位移」，插值小步喂进
+    // 去永远武装不了。这里把重启帧对里超出物理可能的实体按住在出发点，下一帧对
+    // 目标跳变时 relocate() 自然接管缓动 0.7s——观感即「球员走到位、球被捡回摆好」。
+    // 门必须是语义标记（fb 带重启/不连续窗口）而非纯位移：合成测试与快操作的
+    // 大位移帧没有标记，照常插值（browser-e2e 直线传球断言是这条边界的规格）。
+    // 跳段剪辑（dt 大）本来就是硬切，也不在此列。
+    const pairDt = (fb.t ?? 0) - (fa.t ?? 0);
+    const pairAdjacent = pairDt > 0 && pairDt <= 0.35;
+    const restartPair = !!(fb.motionContext?.discontinuity || fb.ball?.restartType);
+    const heldIds = new Set();
+    if (pairAdjacent && restartPair) {
+      for (const a of fa.players) {
+        const b = byB.get(a.id);
+        if (b && Math.hypot(b.x - a.x, b.y - a.y) > RELOCATE_PLAYER_JUMP) heldIds.add(a.id);
+      }
+    }
     const players = fa.players.map((a) => {
       const b = byB.get(a.id) || a;
+      const held = heldIds.has(a.id);
       let h = a.heading ?? 0;
       let hb = b.heading ?? h;
       let dh = hb - h;
@@ -635,11 +662,11 @@ export class MatchView {
         team: a.team,
         role: a.role,
         num: a.num,
-        x: a.x + (b.x - a.x) * t,
-        y: a.y + (b.y - a.y) * t,
-        vx: (a.vx || 0) + ((b.vx || 0) - (a.vx || 0)) * t,
-        vy: (a.vy || 0) + ((b.vy || 0) - (a.vy || 0)) * t,
-        heading: h + dh * t,
+        x: held ? a.x : a.x + (b.x - a.x) * t,
+        y: held ? a.y : a.y + (b.y - a.y) * t,
+        vx: held ? 0 : (a.vx || 0) + ((b.vx || 0) - (a.vx || 0)) * t,
+        vy: held ? 0 : (a.vy || 0) + ((b.vy || 0) - (a.vy || 0)) * t,
+        heading: held ? h : h + dh * t,
         fsm: t < 0.5 ? a.fsm || null : b.fsm || null,
         shapePhase: t < 0.5 ? a.shapePhase || null : b.shapePhase || null,
         movementTarget: t < 0.5 ? a.movementTarget || null : b.movementTarget || null,
@@ -652,6 +679,20 @@ export class MatchView {
       };
     });
     const ball = interpolateSimBall(fa.ball, fb.ball, t);
+    if (
+      pairAdjacent &&
+      restartPair &&
+      Math.hypot(
+        (fb.ball?.x ?? 0) - (fa.ball?.x ?? 0),
+        (fb.ball?.y ?? 0) - (fa.ball?.y ?? 0)
+      ) > RELOCATE_BALL_JUMP
+    ) {
+      // 球同款按住：位置留在出发点等 relocate() 缓动「捡回摆好」，
+      // 归属/状态仍按后帧语义（interpolateSimBall 已定），只压平坐标。
+      ball.x = fa.ball?.x ?? ball.x;
+      ball.y = fa.ball?.y ?? ball.y;
+      ball.z = fa.ball?.z ?? ball.z;
+    }
     ball.restartType = t < 0.5
       ? fa.ball?.restartType || null
       : fb.ball?.restartType || null;
