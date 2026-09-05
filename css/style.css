@@ -1524,6 +1524,91 @@ html[data-theme="light"] #screen-match {
   width: min(640px, 100%);
 }
 
+/* ── PC 宽屏（≥1060px）：竖球场 | 事件流 两栏 ──
+   42a5b3d 把比赛屏砍成手机竖栈宽度后，桌面上一整条 480px 竖柱挂在屏幕中央，
+   两侧全是空白。宽屏下改栅格：计分条/底栏通栏，球场居左（宽度跟视口高度走，
+   保住 68:105 竖比例），事件流/数据居右占满行高。手机布局不动。 */
+@media (min-width: 1060px) {
+  .match-layout.fm-match.fmm-match {
+    width: min(1360px, 100%);
+    /* 高度必须是确定值：1fr 行与列内 height:100% 的百分比链都从它解析。
+       只写 max-height 时 grid 视可用空间为不定，1fr 退化为内容高，
+       球场组件按固有尺寸撑出容器（实测 dock 溢出球场区 265px）。 */
+    height: calc(100vh - 0.6rem);
+    height: calc(100dvh - 0.6rem);
+    display: grid;
+    /* 球场列宽 ≈ 可用行高 × 0.648（68/105），球场正好满列不变形 */
+    grid-template-columns:
+      minmax(340px, calc((100vh - 250px) * 0.648))
+      minmax(300px, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    column-gap: 0.55rem;
+  }
+  .match-layout.fm-match.fmm-match > .fm-scoreboard {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+  /* 赛前简报 / 场边战术条 / 赛后战报：互斥出现的通栏层，同占第 2 行 */
+  .match-layout.fm-match.fmm-match > .match-pre-brief,
+  .match-layout.fm-match.fmm-match > .match-live-tac,
+  .match-layout.fm-match.fmm-match > .match-report {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .match-layout.fm-match.fmm-match > .fmm-match-body {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .match-layout.fm-match.fmm-match > .fmm-commentary {
+    grid-column: 2;
+    grid-row: 3;
+    max-height: none;
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+  .match-layout.fm-match.fmm-match > .fmm-commentary .match-log {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .match-layout.fm-match.fmm-match > .fmm-match-bar {
+    grid-column: 1 / -1;
+    grid-row: 4;
+  }
+  /* 赛前简报在屏时也保持同一套 1fr 行：球场列被拉伸成确定高度，
+     .mp-wrap 的 height:100% 百分比链才成立。简报自身限高内滚，
+     否则高简报会把球场行挤没（手机档仍走外层容器滚动，不受影响）。 */
+  .match-layout.fm-match.fmm-match .match-pre-brief {
+    max-height: min(56vh, 520px);
+    overflow-y: auto;
+  }
+  .match-layout.fm-match.fmm-match .fm-pitch-col {
+    max-height: 100%;
+  }
+  .match-layout.fm-match.fmm-match .mp-field {
+    max-height: 100%;
+  }
+  /* 赛前：手机档的「宽度定高（2:3）」在宽屏列上会撑出 700px+ 的竖场，
+     挤掉底栏。改为高度跟行走、宽度按 2:3 反推，居中放置。
+     dock 是 wrap 里的 position:relative 文档流块（非覆盖层），
+     field 必须可收缩给它让位，否则 dock 溢出 wrap 底边。 */
+  .match-layout.fm-match.fmm-match.pre-kickoff .fm-pitch-col {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .match-layout.fm-match.fmm-match.pre-kickoff .mp-wrap {
+    height: 100%;
+  }
+  .match-layout.fm-match.fmm-match.pre-kickoff .mp-field {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    width: auto;
+    max-width: 100%;
+    margin-inline: auto;
+  }
+}
+
 /* Broadcast / FMM compact scoreboard */
 .fm-scoreboard {
   display: flex;
