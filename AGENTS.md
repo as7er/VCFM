@@ -4,7 +4,48 @@
 
 > 仓库：https://github.com/as7er/VCFM.git · `master`（2026-08-31 起 GitHub 已改为大写 `VCFM`，小写地址仍会重定向）  
 > 预览：`python -m http.server 8765 --bind 127.0.0.1`  
-> 缓存：**vcfm-v244**（peelB：越位的非接球人不去争飞行球，越位 4.5→2.3，三关全绿，见「✅ 越位老账已清」）
+> 缓存：**vcfm-v245**（peelB 引擎未动；表现层 A 包：640px 列 / 广播跟镜 / 定格收紧，见「🅰️ 表现层 A 包」）
+
+## 🅰️ 表现层 A 包落地（2026-09-05 上午，ZCode 起草 + 接手会话收尾；画幅/镜头/定格，引擎零改动）
+
+> **一句话**：A1/A2/A3 已落地。**A2 首版公式是错的**——推导假设「scale 关于左上原点」，
+> 真实 CSS 是 `transform-origin: 50% 50%` 且 `.mp-camera` 左右内缩 5.5%、垂直满高，
+> **横纵两轴窗口不同型**；实机表现为球被恒推离屏心 ~11%、贴左/上边线时出画、
+> 贴右/下边线时露 ~18% 场外。已按真实几何重推，`scripts/_camera-framing-geometry-probe.mjs`
+> 逐格证伪/验证（484 格：球出画 123→0，露场外 364→0，居中偏移 −12.5%→0）。
+> **动镜头公式前必须先跑这个探针。**
+
+- **A2 镜头**（`js/match-broadcast.js`）：follow 档 scale 1.015~1.055（≈永远全球场）→
+  1.28 / 1.3(deep) / 1.34(boosted) / 1.45 / 1.5(box)；居中球 t=−50·s·o，窗口钳回草皮
+  [−2,102] → |t| ≤ 52s−50/0.89（横）、52s−50（纵）——**横纵不同型，不能共用界限**
+  （首版第二个错误）。常量 `CAMERA_WIDTH_FRAC`/`GRASS_MARGIN` 已 export，审计 import 不抄。
+  附带修掉存量 falsy-zero：`Number(ball?.x) || 50` 把合法的 0 当缺省——球贴上/左
+  边线时镜头误判居中；cameraFraming 与 crowdAtmosphere 两处都改 isFinite 判缺省。
+- **A2 收尾**（`js/matchview.js`）：死球/重启镜头不再泵回全球场。旧档 scale≈1.03 时
+  `_updateCameraTarget` 的 !canAIAct→回中不可察觉；广播档 1.28 下每次重启都是一次
+  1.28→1.0→1.28 的 zoom 泵。现在开赛后死球保持上一目标（球已摆好，镜头原地歇），
+  开赛前仍回全球场看阵型。分叉标记 `_everPlayed` 在 `update()` 的 livePlay 处置位
+  （**不能只放在 `_updateCameraTarget` 里——simDrive 分支不经过它**）。
+- **A1 画幅**（`css/style.css` + `js/matchview.js`）：FMM 列宽 480→640px（窄屏 <640 仍
+  100%，手机零变化），画布球员半径上限 10→12px（与列宽同比）。**max-height 56vh→76vh
+  一节是死代码已回退**：`.fmm-match .mp-field { max-height:none }`（match-layout 恒带
+  fmm-match）以更高特异性覆盖基类，比赛屏球场高一直由 flex 给（1440×1000 实测 957px）
+  ——首版「56vh 是半屏元凶」的模型不成立，真正杠杆只有列宽。
+- **A3 定格**（`js/main.js` handleSimLiveEvent holdMap）：save 1100→800、chance 850→600、
+  woodwork 950→700、corner 2200→1300、offside 900→600。依据：快速高光 61% 墙钟画面
+  无人移动；文案可读性由 KEY_EVENT_MS（底栏）保证，与画面定格解耦。**行为级复测待做**
+  （近静止% 口径），数值可再调。
+- **审计换代**（`scripts/match-broadcast-audit.mjs`）：旧断言 scale<1.04、|pan|≤2.4/2.8
+  是按旧 scale≈1.03 手调的，换成几何不变量（居中球 tx=ty=0；pan ≤ 草皮钳制跨度；
+  falsy-zero 回归断言）。browser-e2e 的三条相机断言与新设计兼容，未动。
+- **目验**（`scripts/_presentation-a1a2a3-visual-verify.mjs`，playwright 1440×1000）：
+  列宽 640 ✓、球场高 957 ✓、**scale 断言用 p90（≥1.27）不用 min**——开赛摆位与启动
+  缓动（1→1.28）是合法低帧；box 档是短暂事件且 kZoom 缓动爬不满就回落，峰值断言
+  只要求 ≥1.32（推近有迹象）。球心逐帧出画 0.81%→**0.00%**（死球收尾后）。
+- **缓存 v244→v245** 五处联动齐（sw.js / index.html×6 / main.js import×5 / 本文件头）。
+- 教训：**表现层的「简单公式」也要按真实 CSS 几何建模验证**——transform-origin 与
+  元素内缩能把直觉等式整个推翻，而 11% 偏心在静态截图上肉眼读不出来；探针要断言
+  「球在画内」「窗口 ⊆ 草皮」这类几何不变量，不是魔法常数。
 
 ## 交接（2026-09-05 深夜，ZCode 接管 bug#1 双轨标定：深度杠杆家族三重证伪，wingRotate 落地被审计拒绝并回退）
 
